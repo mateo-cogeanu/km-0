@@ -1,0 +1,170 @@
+extends Node
+
+signal settings_changed
+
+const CONFIG_PATH := "user://settings.cfg"
+const SECTION := "settings"
+const FPS_OPTIONS: Array[int] = [30, 45, 60, 90, 120, 144]
+const RENDER_SCALE_OPTIONS: Array[float] = [0.5, 0.67, 0.75, 1.0]
+const SHADOW_OPTIONS: Array[String] = ["Off", "Medium", "High", "Ultra"]
+const LIGHTING_OPTIONS: Array[String] = ["Performance", "Balanced", "Cinematic"]
+
+var fps_cap: int = 90
+var vsync_enabled: bool = true
+var fullscreen_enabled: bool = false
+var master_volume: float = 1.0
+var mouse_sensitivity_scale: float = 1.0
+var show_fps: bool = false
+var render_scale: float = 1.0
+var shadow_quality: int = 3
+var lighting_quality: int = 2
+var headlight_shadows: bool = true
+var ui_scale: float = 1.35
+
+
+func _ready() -> void:
+	load_settings()
+	apply_settings()
+
+
+func load_settings() -> void:
+	var config := ConfigFile.new()
+	if config.load(CONFIG_PATH) != OK:
+		return
+
+	fps_cap = int(config.get_value(SECTION, "fps_cap", fps_cap))
+	if not FPS_OPTIONS.has(fps_cap):
+		fps_cap = 90
+	vsync_enabled = bool(config.get_value(SECTION, "vsync_enabled", vsync_enabled))
+	fullscreen_enabled = bool(config.get_value(SECTION, "fullscreen_enabled", fullscreen_enabled))
+	master_volume = clampf(float(config.get_value(SECTION, "master_volume", master_volume)), 0.0, 1.0)
+	mouse_sensitivity_scale = clampf(float(config.get_value(SECTION, "mouse_sensitivity_scale", mouse_sensitivity_scale)), 0.35, 2.0)
+	show_fps = bool(config.get_value(SECTION, "show_fps", show_fps))
+	render_scale = _nearest_render_scale(float(config.get_value(SECTION, "render_scale", render_scale)))
+	shadow_quality = clampi(int(config.get_value(SECTION, "shadow_quality", shadow_quality)), 0, SHADOW_OPTIONS.size() - 1)
+	lighting_quality = clampi(int(config.get_value(SECTION, "lighting_quality", lighting_quality)), 0, LIGHTING_OPTIONS.size() - 1)
+	headlight_shadows = bool(config.get_value(SECTION, "headlight_shadows", headlight_shadows))
+	ui_scale = clampf(float(config.get_value(SECTION, "ui_scale", ui_scale)), 1.0, 1.8)
+
+
+func save_settings() -> void:
+	var config := ConfigFile.new()
+	config.set_value(SECTION, "fps_cap", fps_cap)
+	config.set_value(SECTION, "vsync_enabled", vsync_enabled)
+	config.set_value(SECTION, "fullscreen_enabled", fullscreen_enabled)
+	config.set_value(SECTION, "master_volume", master_volume)
+	config.set_value(SECTION, "mouse_sensitivity_scale", mouse_sensitivity_scale)
+	config.set_value(SECTION, "show_fps", show_fps)
+	config.set_value(SECTION, "render_scale", render_scale)
+	config.set_value(SECTION, "shadow_quality", shadow_quality)
+	config.set_value(SECTION, "lighting_quality", lighting_quality)
+	config.set_value(SECTION, "headlight_shadows", headlight_shadows)
+	config.set_value(SECTION, "ui_scale", ui_scale)
+	config.save(CONFIG_PATH)
+
+
+func apply_settings() -> void:
+	Engine.max_fps = fps_cap
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync_enabled else DisplayServer.VSYNC_DISABLED)
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen_enabled else DisplayServer.WINDOW_MODE_WINDOWED)
+	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(master_volume, 0.001)))
+	AudioServer.set_bus_mute(0, master_volume <= 0.001)
+	_apply_viewport_settings()
+	settings_changed.emit()
+
+
+func _apply_viewport_settings() -> void:
+	if not is_inside_tree():
+		return
+
+	var viewport := get_tree().root
+	# Avoid sharpening noise from low-resolution lighting and shadows.
+	viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	viewport.scaling_3d_scale = render_scale
+	viewport.set("msaa_3d", Viewport.MSAA_4X if shadow_quality >= 2 else Viewport.MSAA_2X)
+	viewport.set("screen_space_aa", Viewport.SCREEN_SPACE_AA_FXAA)
+
+
+func set_fps_cap(value: int) -> void:
+	fps_cap = value
+	apply_settings()
+	save_settings()
+
+
+func set_vsync_enabled(value: bool) -> void:
+	vsync_enabled = value
+	apply_settings()
+	save_settings()
+
+
+func set_fullscreen_enabled(value: bool) -> void:
+	fullscreen_enabled = value
+	apply_settings()
+	save_settings()
+
+
+func set_master_volume(value: float) -> void:
+	master_volume = clampf(value, 0.0, 1.0)
+	apply_settings()
+	save_settings()
+
+
+func set_mouse_sensitivity_scale(value: float) -> void:
+	mouse_sensitivity_scale = clampf(value, 0.35, 2.0)
+	save_settings()
+
+
+func set_show_fps(value: bool) -> void:
+	show_fps = value
+	save_settings()
+	settings_changed.emit()
+
+
+func set_render_scale(value: float) -> void:
+	render_scale = _nearest_render_scale(value)
+	apply_settings()
+	save_settings()
+
+
+func set_shadow_quality(value: int) -> void:
+	shadow_quality = clampi(value, 0, SHADOW_OPTIONS.size() - 1)
+	apply_settings()
+	save_settings()
+
+
+func set_lighting_quality(value: int) -> void:
+	lighting_quality = clampi(value, 0, LIGHTING_OPTIONS.size() - 1)
+	apply_settings()
+	save_settings()
+
+
+func set_headlight_shadows(value: bool) -> void:
+	headlight_shadows = value
+	apply_settings()
+	save_settings()
+
+
+func set_ui_scale(value: float) -> void:
+	ui_scale = clampf(value, 1.0, 1.8)
+	save_settings()
+	settings_changed.emit()
+
+
+func get_fps_label(value: int) -> String:
+	return "%d FPS" % value
+
+
+func get_render_scale_label(value: float) -> String:
+	return "%d%%" % roundi(value * 100.0)
+
+
+func _nearest_render_scale(value: float) -> float:
+	var best_value := RENDER_SCALE_OPTIONS[0]
+	var best_distance := absf(value - best_value)
+	for option in RENDER_SCALE_OPTIONS:
+		var distance := absf(value - option)
+		if distance < best_distance:
+			best_distance = distance
+			best_value = option
+
+	return best_value

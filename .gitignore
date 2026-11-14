@@ -1,0 +1,8 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Local files and release builds
+.DS_Store
+*.blend[0-9]
+/dist/

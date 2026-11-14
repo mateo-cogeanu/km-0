@@ -1,0 +1,1059 @@
+extends CharacterBody3D
+
+const CabinWind := preload("res://scripts/cabin_wind.gd")
+
+@export var player_name: String = "Player"
+
+@export var move_speed: float = 6.0
+@export var sprint_speed: float = 10.0
+@export var crouch_speed: float = 3.0
+@export var jump_velocity: float = 5.5
+@export var ground_acceleration: float = 35.0
+@export var ground_friction: float = 45.0
+@export var air_acceleration: float = 2.0
+@export var mouse_sensitivity: float = 0.0025
+@export var max_look_angle: float = 85.0
+@export var grab_distance: float = 3.0
+@export var grab_follow_strength: float = 32.0
+@export var grab_smoothing: float = 18.0
+@export var grab_max_speed: float = 12.0
+@export var held_gravity_scale: float = 0.25
+@export var vehicle_interact_distance: float = 5.0
+@export var standing_height: float = 2.05
+@export var crouching_height: float = 1.2
+@export var standing_head_height: float = 0.9
+@export var crouching_head_height: float = 0.3
+@export var crouch_transition_speed: float = 12.0
+@export var refuel_distance: float = 1.25
+@export var refuel_rate: float = 8.0
+@export var spray_distance: float = 5.0
+@export var spray_strength: float = 1.8
+
+var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
+var look_rotation_x: float = 0.0
+var held_object: RigidBody3D
+var held_local_grab_point: Vector3
+var held_original_gravity_scale: float = 1.0
+var held_original_linear_damp: float = 0.0
+var held_original_angular_damp: float = 0.0
+var held_original_contact_monitor: bool = false
+var held_original_max_contacts_reported: int = 0
+var active_vehicle: Node3D
+var hovered_grab_object: Node3D
+var highlight_material: StandardMaterial3D
+var refuel_car: Node3D
+var refuel_canister: RigidBody3D
+var refuel_start_fuel: float = 0.0
+var refuel_target_fuel: float = 0.0
+var spray_colors: Array[Color] = [
+	Color(0.9, 0.08, 0.05, 1.0),
+	Color(0.08, 0.23, 0.95, 1.0),
+	Color(0.04, 0.72, 0.18, 1.0),
+	Color(0.95, 0.88, 0.08, 1.0),
+	Color(0.08, 0.08, 0.08, 1.0),
+	Color(0.95, 0.95, 0.95, 1.0),
+]
+var spray_color_index: int = 0
+var fps_label: Label
+var last_safe_position: Vector3
+var remote_position: Vector3
+var remote_rotation_y: float
+var _network_send_elapsed := 0.0
+var _held_network_send_elapsed := 0.0
+
+@onready var head: Node3D = $Head
+@onready var camera: Camera3D = $Head/Camera3D
+@onready var hold_point: Marker3D = $Head/Camera3D/HoldPoint
+@onready var collision_shape: CollisionShape3D = $CollisionShape3D
+@onready var driving_hud: Control = $HUD/DrivingHUD
+@onready var refuel_panel: Control = $HUD/RefuelPanel
+@onready var refuel_fill: ColorRect = $HUD/RefuelPanel/CarBarBackground/CarBarFill
+@onready var canister_fill: ColorRect = $HUD/RefuelPanel/CanisterBarBackground/CanisterBarFill
+@onready var refuel_label: Label = $HUD/RefuelPanel/RefuelLabel
+
+
+func _ready() -> void:
+	add_to_group("road_stream_player")
+	$NameTag.text = player_name
+	var locally_controlled := is_multiplayer_authority()
+	if locally_controlled:
+		camera.make_current()
+	$HUD.visible = locally_controlled
+	$Model.visible = not locally_controlled or not NetworkManager.is_online()
+	$NameTag.visible = not locally_controlled
+	if not locally_controlled:
+		remote_position = global_position
+		remote_rotation_y = rotation.y
+		return
+	var wind := CabinWind.new()
+	wind.name = "CabinWind"
+	add_child(wind)
+	last_safe_position = global_position
+	_setup_highlight_material()
+	_setup_fps_label()
+	if GameSettings and not GameSettings.settings_changed.is_connected(_apply_ui_scale):
+		GameSettings.settings_changed.connect(_apply_ui_scale)
+	get_viewport().size_changed.connect(_apply_ui_scale)
+	_apply_ui_scale()
+	_update_fuel_hud()
+	_update_refuel_hud()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_multiplayer_authority():
+		return
+	if is_instance_valid(active_vehicle):
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
+			_exit_vehicle()
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		var scaled_sensitivity := mouse_sensitivity * GameSettings.mouse_sensitivity_scale
+		rotate_y(-event.relative.x * scaled_sensitivity)
+		look_rotation_x = clamp(
+			look_rotation_x - event.relative.y * scaled_sensitivity,
+			deg_to_rad(-max_look_angle),
+			deg_to_rad(max_look_angle)
+		)
+		head.rotation.x = look_rotation_x
+
+	if event.is_action_pressed("ui_cancel"):
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+	if event is InputEventMouseButton and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
+		_handle_interaction()
+
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
+		if _try_wire_pointed_battery():
+			return
+		_cycle_spray_color()
+
+	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_L or event.keycode == KEY_H):
+		if _try_toggle_vehicle_headlights():
+			get_viewport().set_input_as_handled()
+
+
+func _physics_process(delta: float) -> void:
+	if not is_multiplayer_authority():
+		global_position = global_position.lerp(remote_position, minf(delta * 14.0, 1.0))
+		rotation.y = lerp_angle(rotation.y, remote_rotation_y, minf(delta * 14.0, 1.0))
+		return
+	if active_vehicle:
+		_set_hovered_grab_object(null)
+		global_position = active_vehicle.global_position
+		_update_fuel_hud()
+		_stop_refuel()
+		_send_network_transform(delta)
+		return
+
+	var input_direction := _get_input_direction()
+	var world_direction := (global_transform.basis * input_direction).normalized()
+	var is_crouching := Input.is_key_pressed(KEY_C)
+	var is_sprinting := Input.is_key_pressed(KEY_SHIFT) and not is_crouching
+	var target_speed := crouch_speed if is_crouching else (sprint_speed if is_sprinting else move_speed)
+
+	_update_crouch(is_crouching, delta)
+
+	if is_on_floor():
+		_apply_ground_movement(world_direction, target_speed, delta)
+	else:
+		_apply_air_movement(world_direction, target_speed, delta)
+
+	if not is_on_floor():
+		velocity.y -= gravity * delta
+	elif Input.is_key_pressed(KEY_SPACE) and not is_crouching:
+		velocity.y = jump_velocity
+
+	move_and_slide()
+	if is_on_floor() and global_position.y > -2.0:
+		last_safe_position = global_position
+	elif global_position.y < -12.0:
+		global_position = last_safe_position + Vector3.UP
+		velocity = Vector3.ZERO
+	_update_held_object(delta)
+	_update_spray_paint(delta)
+	_update_refuel(delta)
+	_update_grab_hover()
+	_update_fuel_hud()
+	_update_refuel_hud()
+	_update_fps_label()
+	_send_network_transform(delta)
+
+
+func _send_network_transform(delta: float) -> void:
+	if NetworkManager.is_online():
+		_network_send_elapsed += delta
+		if _network_send_elapsed >= 0.05:
+			_network_send_elapsed = 0.0
+			sync_transform.rpc(global_position, rotation.y)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered", 1)
+func sync_transform(new_position: Vector3, new_rotation_y: float) -> void:
+	remote_position = new_position
+	remote_rotation_y = new_rotation_y
+
+
+func _get_input_direction() -> Vector3:
+	var direction := Vector3.ZERO
+
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		direction.z -= 1.0
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		direction.z += 1.0
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		direction.x -= 1.0
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		direction.x += 1.0
+
+	return direction.normalized()
+
+
+func _apply_ground_movement(direction: Vector3, target_speed: float, delta: float) -> void:
+	if direction.length_squared() < 0.001:
+		velocity.x = move_toward(velocity.x, 0.0, ground_friction * delta)
+		velocity.z = move_toward(velocity.z, 0.0, ground_friction * delta)
+		return
+
+	var target_velocity := direction * target_speed
+	velocity.x = move_toward(velocity.x, target_velocity.x, ground_acceleration * delta)
+	velocity.z = move_toward(velocity.z, target_velocity.z, ground_acceleration * delta)
+
+
+func _apply_air_movement(direction: Vector3, target_speed: float, delta: float) -> void:
+	if direction.length_squared() < 0.001:
+		return
+
+	var horizontal_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var speed_in_input_direction := horizontal_velocity.dot(direction)
+	var speed_to_add := target_speed - speed_in_input_direction
+
+	if speed_to_add <= 0.0:
+		return
+
+	var acceleration_speed = min(air_acceleration * target_speed * delta, speed_to_add)
+	horizontal_velocity += direction * acceleration_speed
+	velocity.x = horizontal_velocity.x
+	velocity.z = horizontal_velocity.z
+
+
+func _update_crouch(is_crouching: bool, delta: float) -> void:
+	var target_height := crouching_height if is_crouching else standing_height
+	var target_head_height := crouching_head_height if is_crouching else standing_head_height
+	var shape := collision_shape.shape as CapsuleShape3D
+
+	shape.height = move_toward(shape.height, target_height, crouch_transition_speed * delta)
+	collision_shape.position.y = (shape.height - standing_height) * 0.5
+	head.position.y = move_toward(head.position.y, target_head_height, crouch_transition_speed * delta)
+
+
+func _toggle_grab() -> void:
+	if held_object:
+		_drop_held_object()
+		return
+
+	var result := _raycast_grab_target()
+
+	if result.is_empty() or not result.collider is RigidBody3D:
+		return
+
+	var target := result.collider as RigidBody3D
+	if not _can_grab_body(target):
+		return
+
+	_begin_grab_object(target, result.position)
+
+
+func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
+	if held_object != null:
+		return
+	if not _can_grab_body(object):
+		return
+
+	held_object = object
+	held_local_grab_point = held_object.to_local(grab_position)
+	held_original_gravity_scale = held_object.gravity_scale
+	held_original_linear_damp = held_object.linear_damp
+	held_original_angular_damp = held_object.angular_damp
+	held_original_contact_monitor = held_object.contact_monitor
+	held_original_max_contacts_reported = held_object.max_contacts_reported
+	held_object.gravity_scale = held_gravity_scale
+	held_object.linear_damp = 4.0
+	held_object.angular_damp = 6.0
+	held_object.contact_monitor = true
+	held_object.max_contacts_reported = max(held_object.max_contacts_reported, 8)
+	if _is_spray_can(held_object):
+		_apply_spray_can_color(held_object, spray_colors[spray_color_index])
+	if NetworkManager.is_online():
+		sync_held_object_state.rpc(held_object.get_path(), true)
+
+
+func _drop_held_object() -> void:
+	_stop_refuel()
+	if NetworkManager.is_online() and held_object != null:
+		sync_held_object_transform.rpc(held_object.get_path(), held_object.global_transform, held_object.linear_velocity, held_object.angular_velocity)
+		sync_held_object_state.rpc(held_object.get_path(), false)
+	_restore_held_object_physics()
+	held_object = null
+	_held_network_send_elapsed = 0.0
+
+
+func _restore_held_object_physics() -> void:
+	if held_object == null:
+		return
+
+	held_object.gravity_scale = held_original_gravity_scale
+	held_object.linear_damp = held_original_linear_damp
+	held_object.angular_damp = held_original_angular_damp
+	held_object.contact_monitor = held_original_contact_monitor
+	held_object.max_contacts_reported = held_original_max_contacts_reported
+
+
+func _update_held_object(delta: float) -> void:
+	if held_object == null:
+		return
+
+	var grabbed_point := held_object.to_global(held_local_grab_point)
+	var to_target := hold_point.global_position - grabbed_point
+	var wanted_velocity := to_target * grab_follow_strength
+
+	if wanted_velocity.length() > grab_max_speed:
+		wanted_velocity = wanted_velocity.normalized() * grab_max_speed
+
+	var blend: float = min(grab_smoothing * delta, 1.0)
+	held_object.linear_velocity = held_object.linear_velocity.lerp(wanted_velocity, blend)
+	held_object.angular_velocity = held_object.angular_velocity.move_toward(Vector3.ZERO, grab_smoothing * delta)
+	if NetworkManager.is_online():
+		_held_network_send_elapsed += delta
+		if _held_network_send_elapsed >= 0.04:
+			_held_network_send_elapsed = 0.0
+			sync_held_object_transform.rpc(
+				held_object.get_path(),
+				held_object.global_transform,
+				held_object.linear_velocity,
+				held_object.angular_velocity
+			)
+
+
+@rpc("authority", "call_remote", "reliable")
+func sync_held_object_state(object_path: NodePath, is_held: bool) -> void:
+	var object := get_node_or_null(object_path) as RigidBody3D
+	if object == null:
+		return
+
+	if is_held:
+		object.freeze = true
+		object.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+		object.linear_velocity = Vector3.ZERO
+		object.angular_velocity = Vector3.ZERO
+	else:
+		object.freeze = false
+
+
+@rpc("authority", "call_remote", "unreliable_ordered", 2)
+func sync_held_object_transform(
+	object_path: NodePath,
+	new_transform: Transform3D,
+	new_linear_velocity: Vector3,
+	new_angular_velocity: Vector3
+) -> void:
+	var object := get_node_or_null(object_path) as RigidBody3D
+	if object == null:
+		return
+
+	object.global_transform = new_transform
+	object.linear_velocity = new_linear_velocity
+	object.angular_velocity = new_angular_velocity
+
+
+func _cycle_spray_color() -> void:
+	if not _is_spray_can(held_object):
+		return
+
+	spray_color_index = (spray_color_index + 1) % spray_colors.size()
+	_apply_spray_can_color(held_object, spray_colors[spray_color_index])
+
+
+func _update_spray_paint(delta: float) -> void:
+	if not _is_spray_can(held_object):
+		return
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		return
+
+	var color := spray_colors[spray_color_index]
+	var amount := spray_strength * delta
+	if _spray_paint_area(color, amount):
+		return
+
+	_spray_paint_body(color, amount)
+
+
+func _spray_paint_area(color: Color, amount: float) -> bool:
+	var result := _raycast_area_target(spray_distance)
+	if result.is_empty() or not result.collider is Area3D:
+		return false
+
+	var area := result.collider as Area3D
+	if not area.is_in_group("car_interactable"):
+		return false
+
+	var part_name := _paint_part_from_area(area)
+	if part_name == "":
+		return false
+
+	var car := area.get_parent() as Node3D
+	if car == null or not car.has_method("paint_named_part"):
+		return false
+
+	return bool(car.call("paint_named_part", part_name, color, amount))
+
+
+func _spray_paint_body(color: Color, amount: float) -> bool:
+	var result := _raycast_body_target(spray_distance)
+	if result.is_empty() or not result.collider is Node3D:
+		return false
+
+	var car := result.collider as Node3D
+	if not car.is_in_group("drivable") or not car.has_method("paint_named_part"):
+		return false
+
+	return bool(car.call("paint_named_part", "Chassis", color, amount))
+
+
+func _paint_part_from_area(area: Area3D) -> String:
+	match area.name:
+		"DoorFL":
+			return "FL_Door"
+		"DoorFR":
+			return "FR_Door"
+		"DoorRL":
+			return "RL_Door"
+		"DoorRR":
+			return "RR_Door"
+		_:
+			return ""
+
+
+func _is_spray_can(object: Node) -> bool:
+	return object != null and object.is_in_group("spray_can")
+
+
+func _apply_spray_can_color(object: Node, color: Color) -> void:
+	if object == null:
+		return
+	if object.has_method("set_spray_color"):
+		object.call("set_spray_color", color)
+		return
+
+	var color_part := object.find_child("change_color", true, false)
+	if color_part:
+		var material := StandardMaterial3D.new()
+		material.albedo_color = color
+		_set_mesh_override_recursive(color_part, material)
+
+
+func _setup_highlight_material() -> void:
+	highlight_material = StandardMaterial3D.new()
+	highlight_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	highlight_material.albedo_color = Color(1, 1, 1, 0.35)
+	highlight_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	highlight_material.no_depth_test = true
+
+
+func _setup_fps_label() -> void:
+	fps_label = Label.new()
+	fps_label.name = "FpsLabel"
+	fps_label.visible = false
+	fps_label.position = Vector2(22, 18)
+	fps_label.pivot_offset = -fps_label.position
+	fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fps_label.add_theme_font_size_override("font_size", 18)
+	fps_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
+	$HUD.add_child(fps_label)
+
+
+func _apply_ui_scale() -> void:
+	var hud_scale := Vector2.ONE * GameSettings.ui_scale
+	$HUD/Crosshair.scale = hud_scale
+	driving_hud.scale = Vector2.ONE * minf(GameSettings.ui_scale, get_viewport().get_visible_rect().size.x / 242.0)
+	refuel_panel.scale = hud_scale
+	fps_label.scale = hud_scale
+
+
+func _update_fps_label() -> void:
+	if fps_label == null:
+		return
+
+	fps_label.visible = GameSettings.show_fps
+	if fps_label.visible:
+		fps_label.text = "%d FPS" % Engine.get_frames_per_second()
+
+
+func _set_mesh_override_recursive(node: Node, material: Material) -> void:
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).material_override = material
+
+	for child in node.get_children():
+		_set_mesh_override_recursive(child, material)
+
+
+func _update_grab_hover() -> void:
+	if held_object or is_instance_valid(active_vehicle):
+		_set_hovered_grab_object(null)
+		return
+
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		camera.global_position,
+		camera.global_position + -camera.global_transform.basis.z * grab_distance
+	)
+	query.exclude = [self]
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	var result := space_state.intersect_ray(query)
+
+	if result.is_empty() or not result.collider is RigidBody3D:
+		_set_hovered_grab_object(null)
+		return
+
+	var target := result.collider as RigidBody3D
+	if not _can_grab_body(target):
+		_set_hovered_grab_object(null)
+		return
+
+	_set_hovered_grab_object(target)
+
+
+func _set_hovered_grab_object(object: Node3D) -> void:
+	if hovered_grab_object == object:
+		return
+
+	if hovered_grab_object:
+		_set_mesh_overlay_recursive(hovered_grab_object, null)
+
+	hovered_grab_object = object
+
+	if hovered_grab_object:
+		_set_mesh_overlay_recursive(hovered_grab_object, highlight_material)
+
+
+func _can_grab_body(body: RigidBody3D) -> bool:
+	if body == null:
+		return false
+	if body.is_in_group("drivable"):
+		return false
+	if body.has_meta("welded_vehicle"):
+		return false
+
+	return true
+
+
+func _set_mesh_overlay_recursive(node: Node, material: Material) -> void:
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).material_overlay = material
+
+	for child in node.get_children():
+		_set_mesh_overlay_recursive(child, material)
+
+
+func _handle_interaction() -> void:
+	if active_vehicle:
+		_exit_vehicle()
+		return
+
+	if held_object and _try_install_vehicle_part():
+		return
+
+	if held_object and _try_start_refuel():
+		return
+
+	if held_object and _try_weld_held_object():
+		return
+
+	if held_object:
+		_drop_held_object()
+		return
+
+	if _try_enter_vehicle():
+		return
+
+	if _try_remove_vehicle_part():
+		return
+
+	if _try_unweld_pointed_object():
+		return
+
+	_toggle_grab()
+
+
+func _try_enter_vehicle() -> bool:
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		camera.global_position,
+		camera.global_position + -camera.global_transform.basis.z * vehicle_interact_distance
+	)
+	query.exclude = [self]
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	var result := space_state.intersect_ray(query)
+
+	if result.is_empty():
+		return false
+
+	var target := result.collider as Node3D
+	if target == null or not target.is_in_group("vehicle_seat"):
+		return false
+
+	var car := target.get_parent() as Node3D
+	if car == null or not car.is_in_group("drivable"):
+		return false
+	if NetworkManager.is_online() and not car.is_multiplayer_authority():
+		return false
+
+	if _is_interaction_occluded(result.position, car):
+		return false
+	if car.has_method("can_enter_from_position") and not bool(car.call("can_enter_from_position", global_position)):
+		return false
+
+	_enter_vehicle(car)
+	return true
+
+
+func _enter_vehicle(car: Node3D, restoring: bool = false) -> void:
+	active_vehicle = car
+	_set_hovered_grab_object(null)
+	$HUD/Crosshair.hide()
+	camera.current = false
+	collision_shape.disabled = true
+	hide()
+	active_vehicle.call("enter", self, restoring)
+
+
+func _exit_vehicle() -> void:
+	var vehicle := active_vehicle
+	var exit_position: Vector3 = active_vehicle.call("exit") as Vector3
+	active_vehicle = null
+	$HUD/Crosshair.show()
+	velocity = Vector3.ZERO
+
+	_reset_standing_shape()
+	global_position = _find_safe_exit_position(vehicle, exit_position)
+	collision_shape.disabled = false
+	show()
+	camera.current = true
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_update_fuel_hud()
+
+
+func _reset_standing_shape() -> void:
+	var shape := collision_shape.shape as CapsuleShape3D
+	shape.height = standing_height
+	collision_shape.position.y = 0.0
+	head.position.y = standing_head_height
+
+
+func _find_safe_exit_position(vehicle: Node3D, requested_position: Vector3) -> Vector3:
+	if vehicle == null:
+		return requested_position
+
+	var away := requested_position - vehicle.global_position
+	away.y = 0.0
+	if away.length_squared() < 0.001:
+		away = -vehicle.global_transform.basis.x
+		away.y = 0.0
+	away = away.normalized()
+
+	var base_height := requested_position.y
+	var distances: Array[float] = [3.5, 4.5, 5.5, 6.5, 8.0]
+	for distance in distances:
+		var candidate: Vector3 = vehicle.global_position + away * distance
+		candidate.y = base_height
+		if _is_exit_position_clear(candidate):
+			return candidate
+
+	var fallback := vehicle.global_position + away * 8.0
+	fallback.y = base_height + 0.35
+	return fallback
+
+
+func _is_exit_position_clear(position: Vector3) -> bool:
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = collision_shape.shape
+	query.transform = Transform3D(Basis.IDENTITY, position + collision_shape.position)
+	query.collision_mask = collision_mask
+	query.exclude = [self]
+	query.margin = 0.08
+
+	return get_world_3d().direct_space_state.intersect_shape(query, 8).is_empty()
+
+
+func _try_weld_held_object() -> bool:
+	_stop_refuel()
+	var car := _find_touching_vehicle(held_object)
+	if car == null or not car.has_method("weld_object"):
+		return false
+
+	var object := held_object
+	_restore_held_object_physics()
+	held_object = null
+	_set_hovered_grab_object(null)
+	return bool(car.call("weld_object", object))
+
+
+func _try_install_vehicle_part() -> bool:
+	if held_object == null or not held_object.has_meta("vehicle_part_type"):
+		return false
+
+	var destination: Node3D = null
+	var part_type := String(held_object.get_meta("vehicle_part_type"))
+	if part_type.begins_with("wheel_"):
+		var closest := INF
+		for vehicle in get_tree().get_nodes_in_group("drivable"):
+			var distance: float = vehicle.get_wheel_snap_distance(held_object)
+			if distance < closest:
+				closest = distance
+				destination = vehicle
+	else:
+		if held_object.has_meta("source_vehicle"):
+			var source: Variant = held_object.get_meta("source_vehicle")
+			if is_instance_valid(source) and source.can_install_part(held_object):
+				destination = source
+		if destination == null:
+			for vehicle in get_tree().get_nodes_in_group("drivable"):
+				if vehicle.can_install_part(held_object):
+					destination = vehicle
+					break
+	if destination == null:
+		return false
+
+	var object := held_object
+	_restore_held_object_physics()
+	held_object = null
+	_set_hovered_grab_object(null)
+	return destination.install_part(object)
+
+
+func _try_wire_pointed_battery() -> bool:
+	if held_object != null:
+		return false
+
+	var result := _raycast_grab_target()
+	if result.is_empty() or not result.collider is RigidBody3D:
+		return false
+
+	var battery := result.collider as RigidBody3D
+	if String(battery.get_meta("vehicle_part_type", "")) != "aux_battery":
+		return false
+
+	var car := battery.get_meta("welded_vehicle", null) as Node3D
+	if car == null or not car.has_method("can_wire_battery") or not car.has_method("wire_battery"):
+		return false
+	if not bool(car.call("can_wire_battery", battery)):
+		return false
+
+	return bool(car.call("wire_battery", battery))
+
+
+func _try_remove_vehicle_part() -> bool:
+	var result := _raycast_area_target(vehicle_interact_distance)
+	if result.is_empty() or not result.collider is Area3D:
+		return false
+
+	var area := result.collider as Area3D
+	if not area.is_in_group("vehicle_removable_part"):
+		return false
+
+	var car := area.get_parent() as Node3D
+	if car == null or not car.has_method("remove_installed_part"):
+		return false
+
+	var loose_part := car.call("remove_installed_part", area) as RigidBody3D
+	if loose_part == null:
+		return false
+
+	_begin_grab_object(loose_part, result.position)
+	return true
+
+
+func _try_start_refuel() -> bool:
+	if held_object == null or not held_object.is_in_group("fuel_canister"):
+		return false
+
+	var car := _find_refuel_car()
+	if car == null:
+		return false
+
+	refuel_car = car
+	refuel_canister = held_object
+	refuel_start_fuel = _get_car_fuel_amount(refuel_car)
+	refuel_target_fuel = _get_car_max_fuel(refuel_car)
+	_update_refuel_hud()
+	return true
+
+
+func _find_refuel_car() -> Node3D:
+	for car in get_tree().get_nodes_in_group("drivable"):
+		if not car is Node3D:
+			continue
+		if not car.has_method("can_receive_fuel") or not bool(car.call("can_receive_fuel")):
+			continue
+		if not car.has_method("get_gas_hole_position"):
+			continue
+
+		var hole_position := car.call("get_gas_hole_position") as Vector3
+		if held_object.global_position.distance_to(hole_position) <= refuel_distance:
+			return car as Node3D
+
+	return null
+
+
+func _try_toggle_vehicle_headlights() -> bool:
+	if active_vehicle and active_vehicle.has_method("toggle_headlights"):
+		active_vehicle.call("toggle_headlights")
+		return true
+
+	var car := _find_pointed_or_nearby_vehicle()
+	if car == null or not car.has_method("toggle_headlights"):
+		return false
+
+	car.call("toggle_headlights")
+	return true
+
+
+func _find_pointed_or_nearby_vehicle() -> Node3D:
+	var space_state := get_world_3d().direct_space_state
+	var ray_from := camera.global_position
+	var ray_to := ray_from + -camera.global_transform.basis.z * vehicle_interact_distance
+	var query := PhysicsRayQueryParameters3D.create(ray_from, ray_to)
+	query.exclude = [self]
+	query.collide_with_areas = true
+	query.collide_with_bodies = true
+	var result := space_state.intersect_ray(query)
+
+	if not result.is_empty():
+		var node := result.collider as Node
+		while node:
+			if node is Node3D and (node as Node3D).is_in_group("drivable"):
+				return node as Node3D
+			node = node.get_parent()
+
+	var nearest: Node3D = null
+	var nearest_distance := INF
+	for node in get_tree().get_nodes_in_group("drivable"):
+		var car := node as Node3D
+		if car == null:
+			continue
+
+		var distance := global_position.distance_to(car.global_position)
+		if distance <= vehicle_interact_distance and distance < nearest_distance:
+			nearest = car
+			nearest_distance = distance
+
+	return nearest
+
+
+func _update_refuel(delta: float) -> void:
+	if refuel_car == null:
+		return
+
+	if held_object != refuel_canister or refuel_canister == null:
+		_stop_refuel()
+		return
+
+	if not refuel_car.has_method("can_receive_fuel") or not bool(refuel_car.call("can_receive_fuel")):
+		_stop_refuel()
+		return
+
+	var hole_position := refuel_car.call("get_gas_hole_position") as Vector3
+	if refuel_canister.global_position.distance_to(hole_position) > refuel_distance:
+		_stop_refuel()
+		return
+
+	if not refuel_canister.has_method("drain_fuel"):
+		_stop_refuel()
+		return
+
+	var requested := refuel_rate * delta
+	var available := float(refuel_canister.call("drain_fuel", requested))
+	if available <= 0.0:
+		_stop_refuel()
+		return
+
+	var accepted := float(refuel_car.call("receive_fuel", available))
+	var leftover := available - accepted
+	if leftover > 0.0:
+		refuel_canister.fuel_amount += leftover
+
+	if accepted <= 0.0 or _get_car_fuel_fraction(refuel_car) >= 0.999:
+		_stop_refuel()
+
+
+func _stop_refuel() -> void:
+	refuel_car = null
+	refuel_canister = null
+	refuel_start_fuel = 0.0
+	refuel_target_fuel = 0.0
+	_update_refuel_hud()
+
+
+func _find_touching_vehicle(object: RigidBody3D) -> Node3D:
+	if object == null:
+		return null
+
+	for body in object.get_colliding_bodies():
+		var node := body as Node3D
+		if node == null:
+			continue
+		if node.is_in_group("drivable"):
+			return node
+		if node.has_meta("welded_vehicle"):
+			var welded_vehicle := node.get_meta("welded_vehicle") as Node3D
+			if welded_vehicle:
+				return welded_vehicle
+
+	return null
+
+
+func _try_unweld_pointed_object() -> bool:
+	var result := _raycast_grab_target()
+	if result.is_empty() or not result.collider is RigidBody3D:
+		return false
+
+	var object := result.collider as RigidBody3D
+	if not object.has_meta("welded_vehicle"):
+		return false
+
+	var car := object.get_meta("welded_vehicle") as Node3D
+	if car == null or not car.has_method("unweld_object"):
+		return false
+
+	return bool(car.call("unweld_object", object))
+
+
+func _raycast_grab_target() -> Dictionary:
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		camera.global_position,
+		camera.global_position + -camera.global_transform.basis.z * grab_distance
+	)
+	query.exclude = [self]
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	return space_state.intersect_ray(query)
+
+
+func _raycast_area_target(distance: float) -> Dictionary:
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		camera.global_position,
+		camera.global_position + -camera.global_transform.basis.z * distance
+	)
+	query.exclude = _raycast_exclusions()
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	var result := space_state.intersect_ray(query)
+	if result.is_empty():
+		return result
+
+	var area := result.collider as Area3D
+	var allowed_root := _find_interaction_root(area)
+	if _is_interaction_occluded(result.position, allowed_root):
+		return {}
+	return result
+
+
+func _raycast_body_target(distance: float) -> Dictionary:
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		camera.global_position,
+		camera.global_position + -camera.global_transform.basis.z * distance
+	)
+	query.exclude = _raycast_exclusions()
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	return space_state.intersect_ray(query)
+
+
+func _raycast_exclusions() -> Array:
+	var exclusions: Array = [self]
+	if held_object:
+		exclusions.append(held_object)
+	return exclusions
+
+
+func _find_interaction_root(node: Node) -> Node3D:
+	var current := node
+	while current:
+		if current is Node3D and (current as Node3D).is_in_group("drivable"):
+			return current as Node3D
+		current = current.get_parent()
+	return node.get_parent() as Node3D if node else null
+
+
+func _is_interaction_occluded(target_position: Vector3, allowed_root: Node3D = null) -> bool:
+	var ray_from := camera.global_position
+	var direction := target_position - ray_from
+	if direction.length_squared() < 0.0001:
+		return false
+
+	var query := PhysicsRayQueryParameters3D.create(
+		ray_from,
+		target_position + direction.normalized() * 0.04
+	)
+	query.exclude = _raycast_exclusions()
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return false
+
+	var collider := hit.collider as Node
+	if allowed_root and collider and (collider == allowed_root or allowed_root.is_ancestor_of(collider)):
+		return false
+	return true
+
+
+func _update_fuel_hud() -> void:
+	driving_hud.show_vehicle(active_vehicle)
+
+
+func _update_refuel_hud() -> void:
+	if refuel_panel == null:
+		return
+
+	var is_refueling := refuel_car != null and refuel_canister != null
+	refuel_panel.visible = is_refueling
+	if not is_refueling:
+		return
+
+	refuel_fill.scale.x = _get_refuel_progress_fraction()
+	canister_fill.scale.x = _get_canister_fuel_fraction(refuel_canister)
+	refuel_label.text = "Refueling %.0f%%" % (_get_car_fuel_fraction(refuel_car) * 100.0)
+
+
+func _get_refuel_progress_fraction() -> float:
+	if refuel_car == null or refuel_target_fuel <= refuel_start_fuel:
+		return 0.0
+
+	var current := _get_car_fuel_amount(refuel_car)
+	return clampf((current - refuel_start_fuel) / (refuel_target_fuel - refuel_start_fuel), 0.0, 1.0)
+
+
+func _get_car_fuel_fraction(car: Node3D) -> float:
+	return float(car.call("get_fuel_fraction")) if car and car.has_method("get_fuel_fraction") else 0.0
+
+
+func _get_car_fuel_amount(car: Node3D) -> float:
+	return float(car.get("fuel_amount")) if car else 0.0
+
+
+func _get_car_max_fuel(car: Node3D) -> float:
+	return float(car.get("max_fuel")) if car else 1.0
+
+
+func _get_canister_fuel_fraction(canister: Node) -> float:
+	return float(canister.call("get_fuel_fraction")) if canister and canister.has_method("get_fuel_fraction") else 0.0

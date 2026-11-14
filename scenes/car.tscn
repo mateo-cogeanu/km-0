@@ -1,0 +1,231 @@
+[gd_scene format=3 uid="uid://bow82rjafetet"]
+
+[ext_resource type="Script" uid="uid://dqc3uxe20l45v" path="res://scripts/drivable_vehicle.gd" id="1_drivable_vehicle"]
+[ext_resource type="Script" uid="uid://2yhhp0p3sqyp" path="res://addons/gevp/scripts/wheel.gd" id="2_wheel"]
+[ext_resource type="PackedScene" path="res://assets/vehicles/car_model.tscn" id="3_sedan"]
+
+[sub_resource type="Curve" id="Curve_torque"]
+_data = [Vector2(0, 0.45), 0.0, 1.92593, 0, 0, Vector2(0.55, 1), 0.0, 0.0, 0, 0, Vector2(1, 0.68), -1.45455, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_car_body"]
+size = Vector3(2.2, 0.9, 4.3)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_interaction"]
+size = Vector3(2.8, 1.8, 5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_door_area"]
+size = Vector3(0.35, 1.15, 0.85)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hood_area"]
+size = Vector3(1.55, 0.45, 1.15)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_trunk_area"]
+size = Vector3(1.55, 0.45, 0.9)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_gas_cap_area"]
+size = Vector3(0.45, 0.45, 0.25)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_seat_area"]
+size = Vector3(0.8, 0.8, 0.9)
+
+[node name="Car" type="RigidBody3D" unique_id=537243193 node_paths=PackedStringArray("wheel_model_root", "camera_rig", "driver_camera", "first_person_camera_marker", "exit_point", "front_left_wheel", "front_right_wheel", "rear_left_wheel", "rear_right_wheel")]
+collision_layer = 3
+collision_mask = 3
+script = ExtResource("1_drivable_vehicle")
+wheel_model_root = NodePath("SedanModel")
+camera_rig = NodePath("CameraRig")
+driver_camera = NodePath("CameraRig/Camera3D")
+first_person_camera_marker = NodePath("CameraRig/FirstPersonCameraMarker")
+exit_point = NodePath("ExitPoint")
+front_left_wheel = NodePath("WheelFrontLeft")
+front_right_wheel = NodePath("WheelFrontRight")
+rear_left_wheel = NodePath("WheelRearLeft")
+rear_right_wheel = NodePath("WheelRearRight")
+steering_speed = 7.5
+countersteer_speed = 15.0
+steering_speed_decay = 0.12
+countersteer_assist = 1.1
+throttle_speed = 12.0
+braking_speed = 12.0
+brake_force_multiplier = 1.2
+traction_control_max_slip = 9.0
+stability_yaw_ground_multiplier = 5.0
+max_torque = 420.0
+max_rpm = 7200.0
+torque_curve = SubResource("Curve_torque")
+gear_ratios = Array[float]([3.4, 2.25, 1.55, 1.18, 0.95])
+final_drive = 3.55
+variable_torque_split = true
+front_variable_split = 0.35
+vehicle_mass = 1350.0
+front_weight_distribution = 0.54
+center_of_gravity_height_offset = -0.28
+inertia_multiplier = 1.35
+front_spring_length = 0.26
+front_damping_ratio = 0.72
+front_arb_ratio = 0.35
+rear_spring_length = 0.28
+rear_damping_ratio = 0.68
+rear_arb_ratio = 0.28
+braking_grip_multiplier = 1.8
+front_tire_radius = 0.39
+rear_tire_radius = 0.39
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1182293983]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.38, 0)
+shape = SubResource("BoxShape3D_car_body")
+
+[node name="InteractionArea" type="Area3D" parent="." unique_id=802928129]
+collision_layer = 0
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InteractionArea" unique_id=1697181027]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.55, 0)
+shape = SubResource("BoxShape3D_interaction")
+
+[node name="SedanModel" parent="." unique_id=1865641994 instance=ExtResource("3_sedan")]
+transform = Transform3D(-0.45, 0, 3.93402e-08, 0, 0.45, 0, -3.93402e-08, 0, -0.45, 0, -0.08, 0)
+
+[node name="EngineSound" type="AudioStreamPlayer3D" parent="."]
+position = Vector3(0, 0.85, -1.42)
+volume_db = -60.0
+unit_size = 4.0
+max_distance = 45.0
+
+[node name="EngineStartSound" type="AudioStreamPlayer3D" parent="."]
+position = Vector3(0, 0.85, -1.42)
+volume_db = -9.0
+unit_size = 4.0
+max_distance = 45.0
+
+[node name="AccessSound" type="AudioStreamPlayer3D" parent="."]
+position = Vector3(-0.8, 0.75, 0)
+volume_db = -10.0
+unit_size = 3.0
+max_distance = 24.0
+
+[node name="LeftHeadlight" type="SpotLight3D" parent="." groups=["vehicle_headlight"]]
+transform = Transform3D(1, 0, 0, 0, 0.984808, 0.173648, 0, -0.173648, 0.984808, -0.54, 0.58, -2.08)
+visible = false
+light_color = Color(1, 0.84, 0.58, 1)
+light_energy = 24.0
+shadow_enabled = false
+spot_range = 52.0
+spot_attenuation = 0.78
+spot_angle = 27.0
+
+[node name="RightHeadlight" type="SpotLight3D" parent="." groups=["vehicle_headlight"]]
+transform = Transform3D(1, 0, 0, 0, 0.984808, 0.173648, 0, -0.173648, 0.984808, 0.54, 0.58, -2.08)
+visible = false
+light_color = Color(1, 0.84, 0.58, 1)
+light_energy = 24.0
+shadow_enabled = false
+spot_range = 52.0
+spot_attenuation = 0.78
+spot_angle = 27.0
+
+[node name="DoorFL" type="Area3D" parent="." unique_id=1998560867]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DoorFL" unique_id=1823587432]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.14, 0.66, -0.36)
+shape = SubResource("BoxShape3D_door_area")
+
+[node name="DoorFR" type="Area3D" parent="." unique_id=678923249]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DoorFR" unique_id=89237041]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.14, 0.66, -0.36)
+shape = SubResource("BoxShape3D_door_area")
+
+[node name="DoorRL" type="Area3D" parent="." unique_id=1345434229]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DoorRL" unique_id=1847677139]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.14, 0.66, 0.76)
+shape = SubResource("BoxShape3D_door_area")
+
+[node name="DoorRR" type="Area3D" parent="." unique_id=358134036]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DoorRR" unique_id=1781722292]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.14, 0.66, 0.76)
+shape = SubResource("BoxShape3D_door_area")
+
+[node name="HoodTarget" type="Area3D" parent="." unique_id=281562720]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HoodTarget" unique_id=1914934645]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.82, -1.55)
+shape = SubResource("BoxShape3D_hood_area")
+
+[node name="TrunkTarget" type="Area3D" parent="." unique_id=2033775444]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TrunkTarget" unique_id=1220241560]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.82, 1.8)
+shape = SubResource("BoxShape3D_trunk_area")
+
+[node name="GasCapTarget" type="Area3D" parent="." unique_id=31554801]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="GasCapTarget" unique_id=2030446040]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.9, 1.05, 1.42)
+shape = SubResource("BoxShape3D_gas_cap_area")
+
+[node name="SeatTarget" type="Area3D" parent="." unique_id=1510183623]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="SeatTarget" unique_id=217988967]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.42, 0.85, 0.15)
+shape = SubResource("BoxShape3D_seat_area")
+
+[node name="WheelFrontLeft" type="RayCast3D" parent="." unique_id=1449137534 node_paths=PackedStringArray("wheel_node")]
+transform = Transform3D(1, 0, 0, 0, 0.999848, -0.0174524, 0, 0.0174524, 0.999848, -0.82, 0.31, -1.4)
+script = ExtResource("2_wheel")
+wheel_node = NodePath("WheelVisual")
+
+[node name="WheelVisual" type="Node3D" parent="WheelFrontLeft" unique_id=1630838947]
+
+[node name="WheelFrontRight" type="RayCast3D" parent="." unique_id=1691679189 node_paths=PackedStringArray("wheel_node")]
+transform = Transform3D(1, 0, 0, 0, 0.999848, 0.0174524, 0, -0.0174524, 0.999848, 0.82, 0.31, -1.4)
+script = ExtResource("2_wheel")
+wheel_node = NodePath("WheelVisual")
+
+[node name="WheelVisual" type="Node3D" parent="WheelFrontRight" unique_id=958855310]
+
+[node name="WheelRearLeft" type="RayCast3D" parent="." unique_id=1758820001 node_paths=PackedStringArray("wheel_node")]
+transform = Transform3D(1, 0, 0, 0, 0.999848, -0.0174524, 0, 0.0174524, 0.999848, -0.82, 0.31, 1.43)
+script = ExtResource("2_wheel")
+wheel_node = NodePath("WheelVisual")
+
+[node name="WheelVisual" type="Node3D" parent="WheelRearLeft" unique_id=331463215]
+
+[node name="WheelRearRight" type="RayCast3D" parent="." unique_id=587540478 node_paths=PackedStringArray("wheel_node")]
+transform = Transform3D(1, 0, 0, 0, 0.999848, 0.0174524, 0, -0.0174524, 0.999848, 0.82, 0.31, 1.43)
+script = ExtResource("2_wheel")
+wheel_node = NodePath("WheelVisual")
+
+[node name="WheelVisual" type="Node3D" parent="WheelRearRight" unique_id=144337597]
+
+[node name="CameraRig" type="Node3D" parent="." unique_id=614865618]
+transform = Transform3D(1, 0, 0, 0, 0.951057, -0.309017, 0, 0.309017, 0.951057, 0, 0.65, 0)
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig" unique_id=1314078461]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 6.2)
+fov = 70.0
+
+[node name="FirstPersonCameraMarker" type="Marker3D" parent="CameraRig"]
+transform = Transform3D(1, 0, 0, 0, 0.99863, 0.052336, 0, -0.052336, 0.99863, -0.42, 0.33, 0.1)
+
+[node name="ExitPoint" type="Marker3D" parent="." unique_id=134760343]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.245158, 1.834965, 0.15)

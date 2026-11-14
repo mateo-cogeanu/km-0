@@ -1,0 +1,83 @@
+[gd_scene format=3 uid="uid://crpdxpm3d21bv"]
+
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="1_player"]
+[ext_resource type="PackedScene" uid="uid://bow82rjafetet" path="res://scenes/car.tscn" id="2_car"]
+[ext_resource type="PackedScene" path="res://scenes/fuel_canister.tscn" id="5_fuel_canister"]
+[ext_resource type="PackedScene" uid="uid://3w0m5n65gjyd" path="res://scenes/spray_can.tscn" id="6_spray_can"]
+[ext_resource type="Script" uid="uid://y55b8mnggnom" path="res://scripts/pause_menu.gd" id="7_pause_menu"]
+[ext_resource type="Script" uid="uid://c7tk0ag24q38" path="res://scripts/infinite_road.gd" id="8_infinite_road"]
+[ext_resource type="Script" uid="uid://c4yiccydaipb4" path="res://scripts/day_night_cycle.gd" id="9_day_night"]
+[ext_resource type="PackedScene" path="res://scenes/shack.tscn" id="10_shack"]
+[ext_resource type="Script" path="res://scripts/multiplayer_game.gd" id="11_multiplayer_game"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_day"]
+sky_top_color = Color(0.18, 0.48, 0.9, 1)
+sky_horizon_color = Color(0.72, 0.88, 1, 1)
+sky_curve = 0.12
+sky_energy_multiplier = 0.8
+ground_bottom_color = Color(0.64, 0.76, 0.86, 1)
+ground_horizon_color = Color(0.78, 0.88, 0.95, 1)
+sun_angle_max = 0.18
+sun_curve = 0.04
+
+[sub_resource type="Sky" id="Sky_day"]
+sky_material = SubResource("ProceduralSkyMaterial_day")
+
+[sub_resource type="Environment" id="Environment_day"]
+background_mode = 2
+sky = SubResource("Sky_day")
+ambient_light_source = 3
+ambient_light_color = Color(0.86, 0.92, 1, 1)
+ambient_light_energy = 0.98
+tonemap_mode = 2
+tonemap_exposure = 1.0
+tonemap_white = 7.0
+glow_enabled = true
+glow_intensity = 0.045
+fog_enabled = true
+fog_light_color = Color(0.88, 0.9, 0.94, 1)
+fog_light_energy = 0.06
+fog_density = 0.00022
+
+[node name="Main" type="Node3D" unique_id=211834301]
+script = ExtResource("11_multiplayer_game")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=220251173]
+environment = SubResource("Environment_day")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1567081447]
+transform = Transform3D(0.819152, -0.573576, 0, 0.573576, 0.819152, 0, 0, 0, 1, 0, 8, 0)
+light_color = Color(1, 0.96, 0.86, 1)
+light_energy = 3.55
+light_angular_distance = 0.35
+shadow_enabled = true
+directional_shadow_max_distance = 140.0
+
+[node name="DayNightCycle" type="Node" parent="." unique_id=599554594 node_paths=PackedStringArray("world_environment", "sun")]
+script = ExtResource("9_day_night")
+world_environment = NodePath("../WorldEnvironment")
+sun = NodePath("../Sun")
+
+[node name="InfiniteRoad" type="Node3D" parent="." unique_id=1722768952 node_paths=PackedStringArray("target")]
+script = ExtResource("8_infinite_road")
+target = NodePath("../Car")
+
+[node name="Shack" parent="." unique_id=420111329 instance=ExtResource("10_shack")]
+position = Vector3(10.0, 0, -13.0)
+rotation_degrees = Vector3(0, -45, 0)
+
+[node name="FuelCanister" parent="." unique_id=428683478 instance=ExtResource("5_fuel_canister")]
+transform = Transform3D(0.939693, 0, 0.34202, 0, 1, 0, -0.34202, 0, 0.939693, 2.3455179, 0.55, -5.161368)
+
+[node name="SprayCan" parent="." unique_id=994482585 instance=ExtResource("6_spray_can")]
+transform = Transform3D(0.906308, 0, -0.422618, 0, 1, 0, 0.422618, 0, 0.906308, 1.7487178, 0.93301505, -5.3651485)
+
+[node name="Car" parent="." unique_id=928499299 instance=ExtResource("2_car")]
+transform = Transform3D(-0.00045375424, 0, 0.9999999, 0, 1, 0, -0.9999999, 0, -0.00045375424, 1.5288639, 0.4, -9.083752)
+
+[node name="Player" parent="." unique_id=544695213 instance=ExtResource("1_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.1488333, 1, -2.3679426)
+
+[node name="PauseMenu" type="CanvasLayer" parent="." unique_id=277122941]
+process_mode = 3
+script = ExtResource("7_pause_menu")

@@ -1,0 +1,83 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/menu_backdrop.gd" id="1"]
+[ext_resource type="PackedScene" path="res://assets/vehicles/car_model.tscn" id="2_car_model"]
+[ext_resource type="Script" path="res://scripts/day_night_cycle.gd" id="3_day_night"]
+[ext_resource type="Shader" path="res://assets/buildings/asphalt.gdshader" id="4_asphalt"]
+[ext_resource type="Script" path="res://scripts/abandoned_building.gd" id="5_workshop"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMaterial_menu"]
+sky_top_color = Color(0.15, 0.24, 0.42, 1)
+sky_horizon_color = Color(0.66, 0.49, 0.34, 1)
+ground_bottom_color = Color(0.13, 0.11, 0.09, 1)
+ground_horizon_color = Color(0.36, 0.28, 0.22, 1)
+
+[sub_resource type="Sky" id="Sky_menu"]
+sky_material = SubResource("SkyMaterial_menu")
+
+[sub_resource type="Environment" id="Environment_menu"]
+resource_local_to_scene = true
+sky = SubResource("Sky_menu")
+
+[sub_resource type="PlaneMesh" id="RoadMesh_menu"]
+size = Vector2(6.8, 440)
+
+[sub_resource type="ShaderMaterial" id="RoadMaterial_menu"]
+shader = ExtResource("4_asphalt")
+
+[sub_resource type="PlaneMesh" id="ShoulderMesh_menu"]
+size = Vector2(12, 440)
+
+[sub_resource type="StandardMaterial3D" id="ShoulderMaterial_menu"]
+albedo_color = Color(0.32, 0.265, 0.20, 1)
+roughness = 1.0
+specular_mode = 2
+
+[node name="World" type="Node3D"]
+script = ExtResource("1")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_menu")
+
+[node name="SunLight" type="DirectionalLight3D" parent="."]
+shadow_enabled = true
+
+[node name="DayNightCycle" type="Node" parent="." node_paths=PackedStringArray("world_environment", "sun")]
+script = ExtResource("3_day_night")
+world_environment = NodePath("../WorldEnvironment")
+sun = NodePath("../SunLight")
+day_length_seconds = 0.0
+time_of_day = 0.697
+midday_energy = 2.85
+dawn_dusk_energy = 1.4
+fill_light_energy = 0.49
+exposure = 0.86
+
+[node name="Shoulders" type="MeshInstance3D" parent="."]
+position = Vector3(2.1, -0.020, -204)
+mesh = SubResource("ShoulderMesh_menu")
+surface_material_override/0 = SubResource("ShoulderMaterial_menu")
+
+[node name="Road" type="MeshInstance3D" parent="."]
+position = Vector3(2.1, 0.005, -204)
+mesh = SubResource("RoadMesh_menu")
+surface_material_override/0 = SubResource("RoadMaterial_menu")
+
+[node name="Workshop" type="Node3D" parent="."]
+position = Vector3(11.1, 0, -13.5)
+rotation_degrees = Vector3(0, -17, 0)
+script = ExtResource("5_workshop")
+style = 5
+
+[node name="Car" type="Node3D" parent="."]
+position = Vector3(3.25, 0.088, 0.48)
+rotation_degrees = Vector3(0, 150, 0)
+
+[node name="Model" parent="Car" instance=ExtResource("2_car_model")]
+transform = Transform3D(-0.45, 0, 3.93402e-08, 0, 0.45, 0, -3.93402e-08, 0, -0.45, 0, -0.08, 0)
+
+[node name="Camera3D" type="Camera3D" parent="."]
+position = Vector3(-1.0, 2.7, 10.3)
+rotation_degrees = Vector3(-6, -12, 0)
+current = true
+fov = 58.0

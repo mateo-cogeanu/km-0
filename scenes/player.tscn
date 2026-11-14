@@ -1,0 +1,144 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/player_controller.gd" id="1_player_controller"]
+
+[ext_resource type="Script" path="res://scripts/driving_hud.gd" id="hud_driving"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.4
+height = 2.05
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
+radius = 0.4
+height = 2.05
+
+[sub_resource type="StandardMaterial3D" id="PlayerMaterial"]
+albedo_color = Color(0.18, 0.55, 0.95, 1)
+roughness = 0.65
+
+[node name="Player" type="CharacterBody3D"]
+collision_layer = 4
+collision_mask = 1
+script = ExtResource("1_player_controller")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="Model" type="MeshInstance3D" parent="."]
+mesh = SubResource("CapsuleMesh_player")
+surface_material_override/0 = SubResource("PlayerMaterial")
+
+[node name="NameTag" type="Label3D" parent="."]
+position = Vector3(0, 1.45, 0)
+billboard = 1
+no_depth_test = true
+text = "Player"
+font_size = 48
+outline_size = 10
+modulate = Color(1, 1, 1, 1)
+pixel_size = 0.006
+
+[node name="Head" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Head"]
+fov = 75.0
+
+[node name="HoldPoint" type="Marker3D" parent="Head/Camera3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -2)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Crosshair" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+mouse_filter = 2
+
+[node name="Horizontal" type="ColorRect" parent="HUD/Crosshair"]
+layout_mode = 0
+offset_left = -9.0
+offset_top = -1.0
+offset_right = 9.0
+offset_bottom = 1.0
+mouse_filter = 2
+color = Color(1, 1, 1, 0.85)
+
+[node name="Vertical" type="ColorRect" parent="HUD/Crosshair"]
+layout_mode = 0
+offset_left = -1.0
+offset_top = -9.0
+offset_right = 1.0
+offset_bottom = 9.0
+mouse_filter = 2
+color = Color(1, 1, 1, 0.85)
+
+[node name="DrivingHUD" type="Control" parent="HUD"]
+visible = false
+layout_mode = 3
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -126.0
+offset_right = 226.0
+offset_bottom = -16.0
+grow_vertical = 0
+pivot_offset = Vector2(-16, 126)
+mouse_filter = 2
+script = ExtResource("hud_driving")
+
+[node name="RefuelPanel" type="Control" parent="HUD"]
+visible = false
+layout_mode = 3
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 22.0
+offset_top = -130.0
+offset_right = 242.0
+offset_bottom = -78.0
+grow_vertical = 0
+pivot_offset = Vector2(-22, 130)
+mouse_filter = 2
+
+[node name="RefuelLabel" type="Label" parent="HUD/RefuelPanel"]
+layout_mode = 0
+offset_right = 210.0
+offset_bottom = 18.0
+text = "Refueling 0%"
+
+[node name="CarBarBackground" type="ColorRect" parent="HUD/RefuelPanel"]
+layout_mode = 0
+offset_top = 22.0
+offset_right = 210.0
+offset_bottom = 35.0
+color = Color(0.05, 0.06, 0.065, 0.78)
+
+[node name="CarBarFill" type="ColorRect" parent="HUD/RefuelPanel/CarBarBackground"]
+layout_mode = 0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = 207.0
+offset_bottom = 10.0
+pivot_offset = Vector2(3, 0)
+color = Color(0.26, 0.72, 0.95, 0.95)
+
+[node name="CanisterBarBackground" type="ColorRect" parent="HUD/RefuelPanel"]
+layout_mode = 0
+offset_top = 39.0
+offset_right = 210.0
+offset_bottom = 52.0
+color = Color(0.05, 0.06, 0.065, 0.78)
+
+[node name="CanisterBarFill" type="ColorRect" parent="HUD/RefuelPanel/CanisterBarBackground"]
+layout_mode = 0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = 207.0
+offset_bottom = 10.0
+pivot_offset = Vector2(3, 0)
+color = Color(0.93, 0.74, 0.24, 0.95)

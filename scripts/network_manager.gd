@@ -1,0 +1,232 @@
+extends Node
+
+signal lobby_list_changed
+signal lobby_state_changed
+signal connection_failed(message: String)
+signal game_start_requested
+
+const GAME_PORT := 24680
+const DISCOVERY_PORT := 24681
+const BROADCAST_INTERVAL := 1.0
+const LOBBY_TIMEOUT := 3.5
+const MAX_PLAYERS := 8
+
+var is_host := false
+var lobby_name := ""
+var local_player_name := "Player"
+var players: Dictionary = {}
+var discovered_lobbies: Dictionary = {}
+var game_in_progress := false
+
+var _discovery_listener := PacketPeerUDP.new()
+var _discovery_broadcaster := PacketPeerUDP.new()
+var _broadcast_elapsed := 0.0
+
+
+func _ready() -> void:
+	_setup_discovery()
+	multiplayer.peer_connected.connect(_on_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
+
+
+func _process(delta: float) -> void:
+	_read_discovery_packets()
+	_expire_lobbies()
+	if is_host and is_online():
+		_broadcast_elapsed += delta
+		if _broadcast_elapsed >= BROADCAST_INTERVAL:
+			_broadcast_elapsed = 0.0
+			_broadcast_lobby()
+
+
+func _setup_discovery() -> void:
+	var error := _discovery_listener.bind(DISCOVERY_PORT)
+	if error != OK:
+		push_warning("LAN lobby discovery could not listen on port %d." % DISCOVERY_PORT)
+	_discovery_broadcaster.set_broadcast_enabled(true)
+	_discovery_broadcaster.set_dest_address("255.255.255.255", DISCOVERY_PORT)
+
+
+func create_lobby(new_lobby_name: String, player_name: String) -> Error:
+	leave_lobby()
+	var peer := ENetMultiplayerPeer.new()
+	var error := peer.create_server(GAME_PORT, MAX_PLAYERS)
+	if error != OK:
+		connection_failed.emit("Could not create lobby (error %s)." % error)
+		return error
+	is_host = true
+	lobby_name = _clean_name(new_lobby_name, "Lobby")
+	local_player_name = _clean_name(player_name, "Host")
+	players = {1: {"name": local_player_name, "ready": false}}
+	multiplayer.multiplayer_peer = peer
+	_broadcast_lobby()
+	lobby_state_changed.emit()
+	return OK
+
+
+func join_lobby(address: String, player_name: String) -> Error:
+	leave_lobby()
+	var peer := ENetMultiplayerPeer.new()
+	var error := peer.create_client(address, GAME_PORT)
+	if error != OK:
+		connection_failed.emit("Could not connect to that lobby (error %s)." % error)
+		return error
+	is_host = false
+	local_player_name = _clean_name(player_name, "Player")
+	multiplayer.multiplayer_peer = peer
+	return OK
+
+
+func leave_lobby() -> void:
+	if is_online():
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	is_host = false
+	game_in_progress = false
+	lobby_name = ""
+	players.clear()
+	lobby_state_changed.emit()
+
+
+func is_online() -> bool:
+	# Godot uses an OfflineMultiplayerPeer in single-player, so a null check
+	# incorrectly reports that an offline game is connected to multiplayer.
+	var peer := multiplayer.multiplayer_peer
+	return peer != null and not (peer is OfflineMultiplayerPeer)
+
+
+func set_local_ready(ready: bool) -> void:
+	var peer_id := multiplayer.get_unique_id()
+	if is_host:
+		_set_player_ready(peer_id, ready)
+	else:
+		set_ready_on_server.rpc_id(1, ready)
+
+
+func can_host_start() -> bool:
+	if not is_host or players.is_empty():
+		return false
+	for data in players.values():
+		if not bool(data.get("ready", false)):
+			return false
+	return true
+
+
+func start_game() -> void:
+	if not can_host_start():
+		return
+	begin_game.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func begin_game() -> void:
+	game_in_progress = true
+	game_start_requested.emit()
+	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func register_player(player_name: String) -> void:
+	if not is_host:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	players[sender] = {"name": _clean_name(player_name, "Player"), "ready": false}
+	_sync_lobby_state()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func set_ready_on_server(ready: bool) -> void:
+	if not is_host:
+		return
+	_set_player_ready(multiplayer.get_remote_sender_id(), ready)
+
+
+@rpc("authority", "call_remote", "reliable")
+func receive_lobby_state(server_lobby_name: String, server_players: Dictionary) -> void:
+	lobby_name = server_lobby_name
+	players = server_players
+	lobby_state_changed.emit()
+
+
+func _set_player_ready(peer_id: int, ready: bool) -> void:
+	if not players.has(peer_id):
+		return
+	players[peer_id]["ready"] = ready
+	_sync_lobby_state()
+
+
+func _sync_lobby_state() -> void:
+	lobby_state_changed.emit()
+	if is_host:
+		receive_lobby_state.rpc(lobby_name, players)
+		_broadcast_lobby()
+
+
+func _on_peer_connected(_peer_id: int) -> void:
+	pass
+
+
+func _on_connected_to_server() -> void:
+	register_player.rpc_id(1, local_player_name)
+
+
+func _on_peer_disconnected(peer_id: int) -> void:
+	if is_host and players.erase(peer_id):
+		_sync_lobby_state()
+
+
+func _on_connection_failed() -> void:
+	connection_failed.emit("Connection to the lobby failed.")
+	leave_lobby()
+
+
+func _on_server_disconnected() -> void:
+	var was_playing := game_in_progress
+	connection_failed.emit("The lobby host disconnected.")
+	leave_lobby()
+	if was_playing:
+		get_tree().change_scene_to_file("res://scenes/menu.tscn")
+
+
+func _broadcast_lobby() -> void:
+	var packet := {
+		"km0_lobby": true,
+		"name": lobby_name,
+		"players": players.size(),
+		"max_players": MAX_PLAYERS,
+	}
+	_discovery_broadcaster.put_packet(JSON.stringify(packet).to_utf8_buffer())
+
+
+func _read_discovery_packets() -> void:
+	while _discovery_listener.get_available_packet_count() > 0:
+		var packet := _discovery_listener.get_packet()
+		var sender_ip := _discovery_listener.get_packet_ip()
+		var data = JSON.parse_string(packet.get_string_from_utf8())
+		if typeof(data) != TYPE_DICTIONARY or not data.get("km0_lobby", false):
+			continue
+		if is_host:
+			continue
+		data["address"] = sender_ip
+		data["last_seen"] = Time.get_ticks_msec() / 1000.0
+		discovered_lobbies[sender_ip] = data
+		lobby_list_changed.emit()
+
+
+func _expire_lobbies() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	var changed := false
+	for address in discovered_lobbies.keys():
+		if now - float(discovered_lobbies[address].get("last_seen", 0.0)) > LOBBY_TIMEOUT:
+			discovered_lobbies.erase(address)
+			changed = true
+	if changed:
+		lobby_list_changed.emit()
+
+
+func _clean_name(value: String, fallback: String) -> String:
+	var cleaned := value.strip_edges().substr(0, 24)
+	return fallback if cleaned.is_empty() else cleaned
