@@ -98,8 +98,8 @@ func _head_surface() -> void:
 	# The first loops form the throat and gums. Subsequent loops run up the face
 	# and around the skull, so there are no separate cheeks or lip meshes to intersect.
 	var loops := [
-		Vector4(0.004, 0.006, 0.116, -0.120),
-		Vector4(0.064, 0.065, 0.116, -0.069),
+		Vector4(0.004, 0.006, 0.116, 0.039),
+		Vector4(0.064, 0.065, 0.116, 0.052),
 		Vector4(0.096, 0.080, 0.116, 0.087),
 		Vector4(0.112, 0.093, 0.117, 0.145),
 		Vector4(0.121, 0.100, 0.118, 0.157),
@@ -119,9 +119,11 @@ func _head_surface() -> void:
 	facial_skin.roughness = 0.92
 	var mesh := SurfaceTool.new()
 	mesh.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var throat_end := Vector3(0, loops[0].z, loops[0].w)
+	var throat_end := Vector3(0, loops[0].z, loops[0].w - 0.006)
 	for i in range(80):
-		for point in [throat_end, _face_point(loops[0], 0, (i + 1) % 80), _face_point(loops[0], 0, i)]:
+		var a := _face_point(loops[0], 0, i)
+		var b := _face_point(loops[0], 0, (i + 1) % 80)
+		for point in [throat_end, a, b, throat_end, b, a]:
 			mesh.set_color(tones[0])
 			mesh.add_vertex(point)
 	for row in range(loops.size() - 1):
@@ -230,7 +232,6 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 		_place(legs[i], hip, knee, THIGH)
 		_place(shins[i], knee, ankle, SHIN)
 	head.position = shoulders + Vector3(0, 0.10, 0.28)
-	_place(neck, shoulders + Vector3(0, 0.03, -0.05), head.position + Vector3(0, 0.062, -0.115), 0.33)
 	var forward := (gaze - head.position).normalized()
 	if absf(forward.dot(Vector3.UP)) < 0.98:
 		head.basis = Basis.looking_at(forward, Vector3.UP, true)
@@ -239,6 +240,7 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 	var tilt := 0.045 * sin(elapsed * 1.45) + inspect * 0.24 + jerk * (0.16 + reveal * 0.025)
 	head.rotate_object_local(Vector3.BACK, tilt)
 	head.rotate_object_local(Vector3.RIGHT, jerk * 0.061)
+	_place(neck, shoulders + Vector3(0, 0.03, -0.05), head.position + head.basis * Vector3(0, 0.12, -0.135), 0.33)
 
 
 func _twitch(elapsed: float) -> float:
