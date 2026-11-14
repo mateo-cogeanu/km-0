@@ -2,7 +2,10 @@ extends "res://addons/gevp/scripts/vehicle.gd"
 
 const CrosshairTarget := preload("res://scripts/crosshair_target.gd")
 
-const ADD_PART_SOUND_PATH := "res://assets/audio/add.wav"
+const ENGINE_MOUNT := preload("res://assets/audio/vehicle/engine_mount.wav")
+const DOOR_LATCH := preload("res://assets/audio/vehicle/door_latch.wav")
+const WHEEL_MOUNT := preload("res://assets/audio/vehicle/wheel_mount.wav")
+const PANEL_RATTLE := preload("res://assets/audio/vehicle/panel_rattle.wav")
 const WELD_SOUND_PATH := "res://assets/audio/weld.wav"
 const PropShapes := preload("res://scripts/prop_shapes.gd")
 const TireEffects := preload("res://scripts/tire_effects.gd")
@@ -85,7 +88,6 @@ var electric_capacity: float = 0.0
 var wired_battery_count: int = 0
 var battery_wire_guide: Node3D
 var protected_parts: Dictionary = {}
-var add_part_sound: AudioStream
 var weld_sound: AudioStream
 var base_body_gravity_scale: float = 1.0
 var base_body_linear_damp: float = 0.0
@@ -111,6 +113,18 @@ var remote_engine_load := 0.0
 var _vehicle_network_send_elapsed := 0.0
 var _vehicle_input_send_elapsed := 0.0
 var audible_engine_variant := ""
+var ignition_variant := ""
+var ignition_remaining := 0.0
+var ignition_duration := 0.0
+var rear_brake_material: StandardMaterial3D
+var rear_reverse_material: StandardMaterial3D
+var rear_braking := false
+var reverse_lamps: Array[OmniLight3D] = []
+var rattle_cooldown := 0.0
+var camera_mount_position := Vector3.ZERO
+var camera_bump := 0.0
+var camera_previous_travel := 0.0
+var camera_travel_ready := false
 var tire_effects: Node3D
 
 @onready var engine_sound: AudioStreamPlayer3D = $EngineSound
@@ -130,6 +144,7 @@ func _ready() -> void:
 	_setup_interactables()
 	_setup_protected_parts()
 	_setup_headlights()
+	_setup_rear_lights()
 	_attach_model_wheels()
 	_setup_body_deformation()
 	_setup_engine_bay_models()
@@ -142,6 +157,7 @@ func _ready() -> void:
 	if camera_rig == null and driver_camera:
 		camera_rig = driver_camera.get_parent() as Node3D
 	if camera_rig:
+		camera_mount_position = camera_rig.position
 		camera_pitch = absf(camera_rig.rotation.x)
 		camera_yaw = camera_rig.rotation.y
 		_update_camera_rotation()
@@ -209,7 +225,7 @@ func _local_seat_can_toggle_camera() -> bool:
 
 func enter(player: Node3D, restoring: bool = false) -> void:
 	driver = player
-	_close_all_panels()
+	_latch_entry_door(player.global_position)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	set_first_person_camera_enabled(false)
 	if driver_camera:
@@ -219,7 +235,8 @@ func enter(player: Node3D, restoring: bool = false) -> void:
 		if NetworkManager.is_online() and is_multiplayer_authority():
 			_play_vehicle_access_audio.rpc(true)
 	else:
-		audible_engine_variant = _get_running_engine_variant()
+		ignition_variant = _get_running_engine_variant()
+		audible_engine_variant = ignition_variant
 
 
 func seat_capacity() -> int:
@@ -249,6 +266,7 @@ func _request_ride() -> void:
 	if seat == -1:
 		return
 	seat_occupants[seat] = peer_id
+	_latch_entry_door(rider.global_position)
 	_sync_seats.rpc(seat_occupants)
 	_play_vehicle_access_audio.rpc(true)
 
@@ -293,8 +311,7 @@ func _sync_seats(occupants: PackedInt32Array) -> void:
 		var seat := occupants.find(rider.get_multiplayer_authority())
 		if seat >= 0 or rider.active_vehicle == self:
 			rider.set_shared_seat(self, seat)
-	if occupants.count(0) != occupants.size():
-		_close_all_panels()
+
 
 
 func activate_shared_camera() -> void:
@@ -506,6 +523,8 @@ func exit() -> Vector3:
 		if NetworkManager.is_online() and is_multiplayer_authority():
 			_play_vehicle_access_audio.rpc(false)
 	driver = null
+	ignition_variant = ""
+	ignition_remaining = 0.0
 	_clear_inputs()
 	_update_engine_audio(0.0, "", 0.0, 0.0)
 
@@ -529,6 +548,7 @@ func _physics_process(delta: float) -> void:
 		angular_velocity = remote_angular_velocity
 		_update_engine_audio(delta, remote_engine_variant, remote_engine_rpm, remote_engine_load)
 		tire_effects.update_tires(wheel_array, linear_velocity, delta, true)
+		_update_rolling_feedback(delta)
 		return
 
 	network_input_age += delta
@@ -538,10 +558,13 @@ func _physics_process(delta: float) -> void:
 		linear_velocity = Vector3.ZERO
 		angular_velocity = Vector3.ZERO
 	_repair_protected_parts()
+	_update_ignition(delta)
 	_update_driver_inputs()
 	_update_fuel(delta)
 	super._physics_process(delta)
 	tire_effects.update_tires(wheel_array, linear_velocity, delta, false)
+	rear_braking = brake_amount > 0.08 or handbrake_input > 0.1
+	_update_rolling_feedback(delta)
 	var audible_variant := _get_running_engine_variant()
 	_update_engine_audio(delta, audible_variant, motor_rpm, throttle_amount)
 	_send_vehicle_network_state(delta, audible_variant)
@@ -582,7 +605,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 func _process(_delta: float) -> void:
 	if driver_camera and driver_camera.current:
+		_update_camera_suspension(_delta)
 		_update_camera_rotation()
+	else:
+		camera_travel_ready = false
 	_update_third_person_camera_collision()
 	if is_multiplayer_authority():
 		_repair_protected_parts()
@@ -612,7 +638,7 @@ func _send_vehicle_network_state(delta: float, audible_variant: String) -> void:
 	sync_vehicle_state.rpc(
 		global_transform, linear_velocity, angular_velocity, headlights_enabled,
 		audible_variant, motor_rpm, throttle_amount, fuel_amount, electric_charge,
-		current_gear, _wheel_motion()
+		current_gear, _wheel_motion(), Vector3(ignition_remaining, ignition_duration, float(rear_braking))
 	)
 
 
@@ -628,7 +654,8 @@ func sync_vehicle_state(
 	new_fuel: float,
 	new_charge: float,
 	new_gear: int,
-	wheels: Array
+	wheels: Array,
+	feedback: Vector3
 ) -> void:
 	remote_transform = new_transform
 	remote_linear_velocity = new_linear_velocity
@@ -636,6 +663,9 @@ func sync_vehicle_state(
 	remote_engine_variant = new_engine_variant
 	remote_engine_rpm = new_engine_rpm
 	remote_engine_load = new_engine_load
+	ignition_remaining = feedback.x
+	ignition_duration = feedback.y
+	rear_braking = feedback.z > 0.5
 	motor_rpm = new_engine_rpm
 	fuel_amount = new_fuel
 	electric_charge = new_charge
@@ -671,8 +701,10 @@ func _update_driver_inputs() -> void:
 	handbrake_input = controls.w
 	clutch_input = handbrake_input
 
-	if not _has_drive_energy() or not _has_required_drive_parts():
+	if not _has_drive_energy() or not _has_required_drive_parts() or ignition_remaining > 0.0:
 		throttle_input = 0.0
+		throttle_amount = 0.0
+		clutch_input = 1.0
 
 
 func _clear_inputs() -> void:
@@ -681,6 +713,21 @@ func _clear_inputs() -> void:
 	steering_input = 0.0
 	handbrake_input = 0.0
 	clutch_input = 0.0
+
+
+func _update_ignition(delta: float) -> void:
+	var variant := _get_running_engine_variant()
+	if variant != ignition_variant:
+		ignition_variant = variant
+		var sample := ENGINE_STARTS.get(variant) as AudioStream
+		ignition_duration = maxf(0.0, sample.get_length() - 0.14) if sample else 0.0
+		ignition_remaining = ignition_duration
+	else:
+		ignition_remaining = maxf(0.0, ignition_remaining - delta)
+
+
+func ignition_progress() -> float:
+	return 1.0 - ignition_remaining / ignition_duration if ignition_remaining > 0.0 else 1.0
 
 
 func _get_running_engine_variant() -> String:
@@ -726,6 +773,8 @@ func _update_engine_audio(delta: float, variant: String, rpm: float, engine_load
 		if engine_start_sound.playing:
 			var remaining := engine_start_sound.stream.get_length() - engine_start_sound.get_playback_position()
 			target_volume -= 18.0 * clampf(remaining / 0.35, 0.0, 1.0)
+		if ignition_remaining > 0.0:
+			target_volume = -60.0
 		if target_volume > -55.0 and not engine_sound.playing:
 			engine_sound.play()
 
@@ -733,6 +782,78 @@ func _update_engine_audio(delta: float, variant: String, rpm: float, engine_load
 	engine_sound.volume_db = lerpf(engine_sound.volume_db, target_volume, blend)
 	if target_volume <= -55.0 and engine_sound.volume_db <= -55.0 and engine_sound.playing:
 		engine_sound.stop()
+
+
+func _setup_rear_lights() -> void:
+	var lens := _find_part_node("Brake_Lights_Brake_lights_0") as MeshInstance3D
+	if lens == null:
+		return
+	var material := lens.get_active_material(0) as StandardMaterial3D
+	rear_brake_material = material.duplicate() as StandardMaterial3D if material else StandardMaterial3D.new()
+	rear_brake_material.emission = Color("#ff3020")
+	rear_brake_material.emission_energy_multiplier = 1.8
+	lens.set_surface_override_material(0, rear_brake_material)
+
+	rear_reverse_material = PropShapes.material(Color("#b5ac97"), 0.1, 0.4)
+	rear_reverse_material.emission = Color("#fff0d0")
+	rear_reverse_material.emission_energy_multiplier = 1.9
+	var tail := to_local(lens.global_position)
+	for side in [-1.0, 1.0]:
+		var at := Vector3(side * 0.59, tail.y - 0.07, tail.z + 0.055)
+		PropShapes.box(self, "ReverseLens", Vector3(0.17, 0.075, 0.028), at, rear_reverse_material)
+		var lamp := OmniLight3D.new()
+		lamp.position = at + Vector3.BACK * 0.18
+		lamp.light_color = Color("#fff0d0")
+		lamp.light_energy = 0.25
+		lamp.omni_range = 2.1
+		lamp.visible = false
+		add_child(lamp)
+		reverse_lamps.append(lamp)
+
+
+func _update_rolling_feedback(delta: float) -> void:
+	if rear_brake_material:
+		rear_brake_material.emission_enabled = rear_braking or headlights_enabled
+		rear_brake_material.emission_energy_multiplier = 1.8 if rear_braking else 0.28
+		var reversing := is_instance_valid(driver) and current_gear == -1
+		rear_reverse_material.emission_enabled = reversing
+		for lamp in reverse_lamps:
+			lamp.visible = reversing
+	rattle_cooldown = maxf(0.0, rattle_cooldown - delta)
+	if rattle_cooldown > 0.0 or not is_instance_valid(driver) or linear_velocity.length_squared() < 16.0:
+		return
+	var view := get_viewport().get_camera_3d()
+	if view == null or view.global_position.distance_squared_to(global_position) > 160.0:
+		return
+	for slot in ["hood", "trunk", "door_fl", "door_fr", "door_rl", "door_rr"]:
+		if not removable_parts.has(slot) or not removable_parts[slot]["installed"]:
+			continue
+		var area: Area3D = removable_parts[slot]["area"]
+		var panel := _get_interactable_part(area)
+		if panel == null:
+			continue
+		var closed: Vector3 = part_closed_rotation.get(panel.get_path(), panel.rotation)
+		var open_amount := _get_interactable_open_amount(area, panel, closed, area.get_meta("open_direction"))
+		if open_amount > 0.035 and open_amount < 0.48:
+			_play_sfx_3d(PANEL_RATTLE, panel.global_position, -24.0)
+			rattle_cooldown = randf_range(0.48, 1.25)
+			return
+
+
+func _update_camera_suspension(delta: float) -> void:
+	var travel := 0.0
+	var count := 0
+	for wheel in wheel_array:
+		if wheel.installed:
+			travel += wheel.spring_current_length
+			count += 1
+	travel /= maxi(1, count)
+	var impulse := clampf((camera_previous_travel - travel) * 1.6, -0.07, 0.07) if camera_travel_ready else 0.0
+	camera_previous_travel = travel
+	camera_travel_ready = true
+	camera_bump = clampf((camera_bump + impulse) * exp(-10.0 * delta), -0.075, 0.075)
+	var speed_gain := smoothstep(1.0, 9.0, linear_velocity.length())
+	camera_rig.position = camera_mount_position + Vector3.UP * camera_bump * speed_gain * GameSettings.camera_motion
 
 
 func _capture_base_body_physics() -> void:
@@ -1339,7 +1460,8 @@ func _sync_part_removed(slot: String, pose: Transform3D) -> void:
 func _sync_part_installed(slot: String, loose_path: NodePath) -> void:
 	var body := get_node_or_null(loose_path) as RigidBody3D
 	if body and not body.is_queued_for_deletion() and body.has_meta("vehicle_part_type"):
-		install_part(body, slot)
+		if install_part(body, slot):
+			_play_install_feedback(slot)
 
 
 func _detach_part(part_type: String) -> RigidBody3D:
@@ -1407,22 +1529,28 @@ func _mark_part_slot_empty(part_type: String, data: Dictionary) -> void:
 
 
 func can_install_part(body: RigidBody3D) -> bool:
+	return install_blocker(body).is_empty()
+
+
+func install_blocker(body: RigidBody3D) -> String:
 	if not is_instance_valid(body) or body.is_queued_for_deletion() or not body.has_meta("vehicle_part_type"):
-		return false
+		return "Doesn’t fit this vehicle"
 	var part_type := _get_install_target_part_type(body)
 	if not removable_parts.has(part_type):
-		return false
+		if _is_wheel_part_type(str(body.get_meta("vehicle_part_type"))):
+			return "Move closer to an empty wheel mount" if _get_installed_wheel_count() < wheel_array.size() else "Wheel slots occupied"
+		return "Doesn’t fit this vehicle"
 	if _get_loose_part_visual(body, part_type) == null:
-		return false
+		return "Doesn’t fit this vehicle"
 	if _requires_hood_open(part_type) and not _has_hood_access():
-		return false
-
+		return "Open the hood"
 	var data: Dictionary = removable_parts[part_type]
-	if bool(data.get("installed", true)):
-		return false
-
+	if data["installed"]:
+		return "Slot occupied"
 	var snap_position := (data["ghost"] as Node3D).global_position
-	return body.global_position.distance_to(snap_position) <= part_snap_distance
+	if body.global_position.distance_to(snap_position) > part_snap_distance:
+		return "Move closer to the mount"
+	return ""
 
 
 func install_part(body: RigidBody3D, restore_slot: String = "") -> bool:
@@ -1487,8 +1615,26 @@ func install_part(body: RigidBody3D, restore_slot: String = "") -> bool:
 	if part_type == "battery":
 		_refresh_electric_capacity()
 	if not restoring:
-		_play_sfx_3d(add_part_sound, part.global_position)
+		_play_install_feedback(part_type)
 	return true
+
+
+func _play_install_feedback(slot: String) -> void:
+	var part: Node3D = removable_parts[slot]["part"]
+	var stream := ENGINE_MOUNT
+	if _is_wheel_part_type(slot):
+		stream = WHEEL_MOUNT
+	elif slot.begins_with("door_") or slot in ["hood", "trunk"]:
+		stream = DOOR_LATCH
+	# Let the visual seat a few centimeters without moving the mount or hitbox.
+	var visual: Node3D = part
+	if not part is MeshInstance3D and part.get_child_count() > 0 and part.get_child(0) is Node3D:
+		visual = part.get_child(0)
+	var rest := visual.position
+	visual.position += visual.get_parent_node_3d().global_basis.inverse() * Vector3.UP * 0.035
+	var settle := visual.create_tween()
+	settle.tween_property(visual, "position", rest, 0.12).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_play_sfx_3d(stream, part.global_position, -8.0)
 
 
 func _assign_trip_part_ids() -> void:
@@ -1865,17 +2011,16 @@ func _get_loose_part_parent() -> Node:
 
 
 func _setup_sound_effects() -> void:
-	add_part_sound = AudioStreamWAV.load_from_file(ADD_PART_SOUND_PATH)
 	weld_sound = AudioStreamWAV.load_from_file(WELD_SOUND_PATH)
 
 
-func _play_sfx_3d(stream: AudioStream, position: Vector3) -> void:
+func _play_sfx_3d(stream: AudioStream, position: Vector3, gain := -2.0) -> void:
 	if stream == null or not is_inside_tree() or get_tree().current_scene == null:
 		return
 
 	var player := AudioStreamPlayer3D.new()
 	player.stream = stream
-	player.volume_db = -2.0
+	player.volume_db = gain
 	player.max_distance = 28.0
 	get_tree().current_scene.add_child(player)
 	player.global_position = position
@@ -2472,6 +2617,8 @@ func _drag_interactable(area: Area3D, drag_amount: float) -> void:
 	part.rotation = closed_rotation
 	_apply_panel_rotation(part, open_axis, open_direction * open_angle * target_open)
 	_update_panel_target(area)
+	if current_open > 0.08 and target_open < 0.01:
+		_play_sfx_3d(DOOR_LATCH, part.global_position, -13.0)
 	if NetworkManager.is_online():
 		_sync_panels.rpc({str(area.name): part.rotation})
 
@@ -2482,6 +2629,22 @@ func _get_interactable_open_amount(area: Area3D, part: Node3D, closed_rotation: 
 	var delta := _get_axis_rotation(part.rotation, open_axis) - _get_axis_rotation(closed_rotation, open_axis)
 
 	return clamp(delta / (open_direction * open_angle), 0.0, 1.0)
+
+
+func _latch_entry_door(from: Vector3) -> void:
+	var side := to_local(from)
+	var area_name := "DoorFL" if side.x < 0.0 else "DoorFR"
+	if NetworkManager.is_online() and side.z > 0.45:
+		area_name = "DoorRL" if side.x < 0.0 else "DoorRR"
+	var area := get_node_or_null(area_name) as Area3D
+	if area == null or area.collision_layer == 0:
+		return
+	var part := _get_interactable_part(area)
+	if part:
+		part.rotation = part_closed_rotation.get(part.get_path(), part.rotation)
+		_update_panel_target(area)
+		if NetworkManager.is_online() and is_multiplayer_authority():
+			_sync_panels.rpc({area_name: part.rotation})
 
 
 func _close_all_panels() -> void:

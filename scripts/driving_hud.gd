@@ -67,6 +67,7 @@ func show_vehicle(vehicle: Node3D) -> void:
 	visible = is_instance_valid(vehicle)
 	if not visible:
 		return
+	var ignition: float = vehicle.ignition_progress()
 	var planar_speed := Vector2(vehicle.linear_velocity.x, vehicle.linear_velocity.z).length()
 	speed_label.text = "%d" % roundi(planar_speed * 3.6)
 	var gear: int = vehicle.current_gear
@@ -78,6 +79,9 @@ func show_vehicle(vehicle: Node3D) -> void:
 	fuel_bar.visible = not pedal
 	fuel_bar.value = fuel
 	rev_bar.visible = not pedal
-	rev_bar.value = vehicle.motor_rpm / maxf(vehicle.max_rpm, 1.0)
+	rev_bar.value = (vehicle.motor_rpm / maxf(vehicle.max_rpm, 1.0)) * smoothstep(0.2, 1.0, ignition)
+	fuel_bar.modulate.a = lerpf(0.28, 1.0, ignition)
+	if ignition < 1.0:
+		fuel_label.text = "Powering on…" if vehicle.current_engine_variant == "Electric" else "Starting…"
 	lights_label.visible = not pedal and vehicle.headlights_enabled
 	lights_label.modulate = Color("#d2ecb9")

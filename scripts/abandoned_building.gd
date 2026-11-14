@@ -76,11 +76,13 @@ func add_traces(stop_index: int, vehicle_kind: int) -> void:
 		return
 	var worn_metal := Shapes.material(Color("#70695d"), 0.40)
 	if style == 5:
+		_add_bench_dust()
 		# An old shipping strap hangs from a mostly bare shelf.
 		var strap := Shapes.material(Color("#7e7149"), 0.06)
 		Shapes.box(self, "PackingStrap", Vector3(0.035, 0.009, 0.44), Vector3(2.66, 1.615, 0.94), strap).rotation.y = -0.17
 		Shapes.box(self, "StrapEnd", Vector3(0.035, 0.26, 0.009), Vector3(2.68, 1.487, 1.16), strap).rotation.x = 0.14
 	elif style == 3:
+		_add_old_tire_marks()
 		# An ordinary wheel chock set aside after use.
 		var rubber := Shapes.material(Color("#49443b"))
 		var chock := Vector3(-2.5, 0.065, -1.68)
@@ -89,10 +91,36 @@ func add_traces(stop_index: int, vehicle_kind: int) -> void:
 	elif profile <= 2 and vehicle_kind >= 0:
 		_add_open_toolbox(worn_metal)
 	else:
+		_add_bench_dust()
 		var cloth := Shapes.material(Color("#786c57"))
 		Shapes.box(self, "ShopRag", Vector3(0.22, 0.018, 0.29), Vector3(2.72, 0.977, -2.18), cloth).rotation.y = -0.29
 		Shapes.tube(self, "WrenchHandle", Vector3(2.55, 0.994, -2.27), Vector3(2.74, 0.998, -2.20), 0.011, worn_metal)
 		Shapes.cylinder(self, "WrenchEnd", Vector3(2.74, 0.998, -2.20), Vector3.UP, 0.032, 0.018, worn_metal, 8)
+
+
+func _add_bench_dust() -> void:
+	var dust := Shapes.material(Color(0.61, 0.54, 0.44, 0.28))
+	dust.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# Four patches leave the footprint of a small toolbox in the dust.
+	for rect in [Vector4(1.18, -2.32, 0.24, 0.42), Vector4(2.0, -2.32, 0.38, 0.42),
+			Vector4(1.55, -2.49, 0.50, 0.08), Vector4(1.55, -2.15, 0.50, 0.08)]:
+		var patch := Shapes.box(self, "BenchDust", Vector3(rect.z, 0.002, rect.w), Vector3(rect.x, 0.972, rect.y), dust)
+		patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+func _add_old_tire_marks() -> void:
+	var skid := Shapes.material(Color(0.19, 0.16, 0.13, 0.25))
+	skid.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var haze := Shapes.material(Color(0.19, 0.16, 0.13, 0.09))
+	haze.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	for side in [-1.0, 1.0]:
+		var x: float = -0.66 + side * 0.8
+		for i in range(8):
+			var z := 1.54 + i * 0.31
+			var track := Shapes.box(self, "OldTread", Vector3(0.12 + i % 3 * 0.016, 0.002, 0.21),
+				Vector3(x + sin(i * 0.43) * 0.065, 0.012, z), skid if i in [3, 4, 6] else haze)
+			track.rotation.y = 0.08 * side
+			track.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _add_open_toolbox(worn_metal: Material) -> void:

@@ -17,6 +17,8 @@ var volume_slider: HSlider
 var volume_value: Label
 var sensitivity_slider: HSlider
 var sensitivity_value: Label
+var camera_motion_slider: HSlider
+var camera_motion_value: Label
 var ui_scale_slider: HSlider
 var ui_scale_value: Label
 var show_fps_check: CheckBox
@@ -143,6 +145,12 @@ func _build_ui() -> void:
 	sensitivity_value.custom_minimum_size = Vector2(52.0, 0.0)
 	_add_slider_row(game_controls, "Mouse sensitivity", sensitivity_slider, sensitivity_value)
 
+	camera_motion_slider = _create_slider(0.0, 1.0, 0.05)
+	camera_motion_value = Label.new()
+	camera_motion_value.custom_minimum_size.x = 72
+	camera_motion_slider.value_changed.connect(_on_camera_motion_changed)
+	_add_slider_row(game_controls, "Camera motion", camera_motion_slider, camera_motion_value)
+
 	ui_scale_slider = _create_slider(1.0, 1.8, 0.05)
 	ui_scale_slider.value_changed.connect(_on_ui_scale_changed)
 	ui_scale_value = Label.new()
@@ -232,6 +240,8 @@ func _sync_from_settings() -> void:
 	_update_volume_label()
 	sensitivity_slider.value = GameSettings.mouse_sensitivity_scale
 	_update_sensitivity_label()
+	camera_motion_slider.set_value_no_signal(GameSettings.camera_motion)
+	_show_camera_motion_value(GameSettings.camera_motion)
 	ui_scale_slider.set_value_no_signal(GameSettings.ui_scale)
 	_update_ui_scale_label()
 	show_fps_check.button_pressed = GameSettings.show_fps
@@ -299,3 +309,13 @@ func _update_ui_scale_label() -> void:
 func _save_player_name() -> void:
 	GameSettings.set_player_name(player_name_edit.text)
 	player_name_edit.text = GameSettings.player_name
+
+
+func _on_camera_motion_changed(value: float) -> void:
+	GameSettings.camera_motion = value
+	GameSettings.save_settings()
+	_show_camera_motion_value(value)
+
+
+func _show_camera_motion_value(value: float) -> void:
+	camera_motion_value.text = "Off" if value == 0.0 else "%d%%" % roundi(value * 100.0)

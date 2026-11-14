@@ -1,5 +1,6 @@
 extends Node3D
 
+const GRAVEL_PING := preload("res://assets/audio/vehicle/gravel_ping.wav")
 const RoadAudio := preload("res://scripts/road_audio.gd")
 const Terrain := preload("res://scripts/roadside_terrain.gd")
 const TIRE_SOUNDS := [RoadAudio.ASPHALT, RoadAudio.GRAVEL, RoadAudio.SOIL]
@@ -10,6 +11,8 @@ const RANGE_SQUARED := 75.0 * 75.0
 static var dust_mesh: QuadMesh
 
 var sounds: Array[AudioStreamPlayer3D] = []
+var gravel_player: AudioStreamPlayer3D
+var gravel_cooldown := 0.0
 var emitters: Dictionary[Wheel, CPUParticles3D] = {}
 
 
@@ -18,6 +21,7 @@ func update_tires(wheels: Array[Wheel], velocity: Vector3, delta: float, remote:
 	var nearby := camera != null and camera.global_position.distance_squared_to(global_position) < RANGE_SQUARED
 	var speed := Vector2(velocity.x, velocity.z).length()
 	var rolling := Vector3.ZERO
+	var grit_position := Vector3.ZERO
 	var dusty_wheels: Array[Wheel] = []
 	if not nearby or speed < 0.8:
 		for dust in emitters.values():
@@ -40,6 +44,8 @@ func update_tires(wheels: Array[Wheel], velocity: Vector3, delta: float, remote:
 			if surface <= 0 or speed < 3.0:
 				continue
 			var at := wheel.get_collision_point()
+			if surface == 1:
+				grit_position = at
 			var cover := Terrain.dust_amount(at.z) if surface == 2 else 0.58
 			var density := cover * smoothstep(3.0, 23.0, speed)
 			if density < 0.02:
@@ -59,6 +65,7 @@ func update_tires(wheels: Array[Wheel], velocity: Vector3, delta: float, remote:
 		for wheel in emitters:
 			if wheel not in dusty_wheels:
 				emitters[wheel].emitting = false
+	_update_gravel_ping(delta, speed, rolling.y, grit_position)
 	var loudness := smoothstep(0.8, 26.0, speed)
 	if sounds.is_empty() and rolling.length_squared() > 0.0:
 		_add_sounds()
@@ -71,6 +78,23 @@ func update_tires(wheels: Array[Wheel], velocity: Vector3, delta: float, remote:
 		RoadAudio.smooth_gain(sound, gain, 1.0 - exp(-delta * 14.0))
 		if gain == 0.0 and sound.playing and sound.volume_db < -57.0:
 			sound.stop()
+
+
+func _update_gravel_ping(delta: float, speed: float, contact: float, at: Vector3) -> void:
+	gravel_cooldown = maxf(0.0, gravel_cooldown - delta)
+	if gravel_cooldown > 0.0 or contact <= 0.0 or speed < 5.0:
+		return
+	if gravel_player == null:
+		gravel_player = AudioStreamPlayer3D.new()
+		gravel_player.stream = GRAVEL_PING
+		gravel_player.unit_size = 2.7
+		gravel_player.max_distance = 18.0
+		add_child(gravel_player)
+	gravel_player.global_position = at + Vector3.UP * 0.35
+	gravel_player.volume_db = lerpf(-36.0, -25.0, smoothstep(5.0, 28.0, speed) * sqrt(contact))
+	gravel_player.pitch_scale = randf_range(0.83, 1.22)
+	gravel_player.play()
+	gravel_cooldown = randf_range(0.23, 1.05) / lerpf(0.65, 1.4, smoothstep(5.0, 25.0, speed))
 
 
 func _surface(ground: StaticBody3D) -> int:
@@ -144,5 +168,7 @@ func _add_dust_emitter() -> CPUParticles3D:
 
 
 func _exit_tree() -> void:
+	if gravel_player:
+		gravel_player.stop()
 	for sound in sounds:
 		sound.stop()

@@ -1100,8 +1100,13 @@ func _interaction_text() -> String:
 	var target := hit.get("collider") as Node3D
 	var car := _vehicle_from_target(target)
 	if is_instance_valid(held_object):
-		if car and car.can_install_part(held_object):
-			return "E  Install %s" % _object_title(held_object)
+		if car and held_object.has_meta("vehicle_part_type") and held_object.get_meta("vehicle_part_type") != "aux_battery":
+			var reason: String = car.install_blocker(held_object)
+			if reason.is_empty():
+				return "E  Install %s" % _object_title(held_object)
+			if not _find_touching_vehicle(held_object):
+				return "%s   ·   E  Drop" % reason
+			return "%s   ·   E  Weld" % reason
 		if held_object.is_in_group("fuel_canister") and _find_refuel_car():
 			return "E  Refuel"
 		if _is_spray_can(held_object) and car:
