@@ -15,7 +15,7 @@ static func cast(view: Camera3D, distance: float, exclusions: Array = []) -> Dic
 
 	# The chassis is a simple physics box. Allow visible exterior targets on that
 	# car, while preserving the body hit for anything hidden behind the car.
-	query.exclude.append(hit.collider.get_rid())
+	query.exclude = query.exclude + [hit.collider.get_rid()]
 	var detail := _visible_hit(space, query)
 	if not detail.is_empty() and detail.collider is Area3D and detail.collider.get_parent() == hit.collider:
 		var vehicle: Node3D = hit.collider
@@ -35,6 +35,6 @@ static func _visible_hit(space: PhysicsDirectSpaceState3D, query: PhysicsRayQuer
 	while not hit.is_empty() and hit.collider is Area3D and hit.collider.is_in_group("vehicle_removable_part"):
 		if hit.collider.get_parent().can_target_part(hit.collider):
 			break
-		query.exclude.append(hit.collider.get_rid())
+		query.exclude = query.exclude + [hit.collider.get_rid()]
 		hit = space.intersect_ray(query)
 	return hit
