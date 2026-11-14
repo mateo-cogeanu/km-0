@@ -45,6 +45,9 @@ var shared_seat := -1
 var name_tags: Dictionary = {}
 var interaction_tip: PanelContainer
 var interaction_label: Label
+var radio_caption: PanelContainer
+var radio_caption_label: Label
+var listening_radio: Area3D
 var push_send_elapsed := 0.0
 var refuel_network_amount := 0.0
 var spray_network_amount := 0.0
@@ -570,6 +573,8 @@ func _setup_fps_label() -> void:
 
 
 func _apply_ui_scale() -> void:
+	if radio_caption:
+		_layout_radio_caption()
 	var hud_scale := Vector2.ONE * GameSettings.ui_scale
 	$HUD/Crosshair.scale = hud_scale
 	driving_hud.scale = Vector2.ONE * minf(GameSettings.ui_scale, get_viewport().get_visible_rect().size.x / 242.0)
@@ -661,6 +666,14 @@ func _handle_interaction() -> void:
 
 	if held_object:
 		_drop_held_object()
+		return
+
+	var radio_hit := _crosshair_hit(grab_distance)
+	var radio := radio_hit.get("collider") as Area3D
+	if radio and radio.is_in_group("road_radio"):
+		if is_instance_valid(listening_radio) and listening_radio != radio:
+			listening_radio.stop_listening()
+		radio.toggle_listening(self)
 		return
 
 	if _try_enter_vehicle():
@@ -1075,7 +1088,47 @@ func _create_interaction_tip() -> void:
 	interaction_tip.hide()
 
 
+func can_listen_to_radio(at: Vector3) -> bool:
+	return not is_instance_valid(active_vehicle) and camera.global_position.distance_squared_to(at) <= 36.0
+
+
+func show_radio_caption(radio: Area3D, message: String) -> void:
+	listening_radio = radio
+	if radio_caption == null:
+		radio_caption = PanelContainer.new()
+		radio_caption.theme = Style.make_theme()
+		radio_caption.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 10))
+		radio_caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		radio_caption_label = Style.label("", 17)
+		radio_caption_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		radio_caption_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		radio_caption.add_child(radio_caption_label)
+		$HUD.add_child(radio_caption)
+	radio_caption_label.text = message
+	_layout_radio_caption()
+
+
+func clear_radio_caption(radio: Area3D) -> void:
+	if listening_radio == radio:
+		listening_radio = null
+		if radio_caption:
+			radio_caption.hide()
+
+
+func _layout_radio_caption() -> void:
+	var extent := get_viewport().get_visible_rect().size
+	var ui_scale: float = GameSettings.ui_scale
+	radio_caption_label.custom_minimum_size.x = minf(600.0, (extent.x - 52.0) / ui_scale)
+	radio_caption.reset_size()
+	radio_caption.scale = Vector2.ONE * ui_scale
+	var scaled := radio_caption.size * ui_scale
+	radio_caption.position = Vector2((extent.x - scaled.x) * 0.5, extent.y - scaled.y - 60.0)
+	radio_caption.visible = not gameplay_ui_open()
+
+
 func _update_interaction_tip() -> void:
+	if is_instance_valid(listening_radio) and radio_caption:
+		radio_caption.visible = not gameplay_ui_open()
 	var tip := "" if gameplay_ui_open() else _interaction_text()
 	interaction_tip.visible = not tip.is_empty()
 	if tip.is_empty():
@@ -1123,6 +1176,8 @@ func _interaction_text() -> String:
 		return "E  Drop %s" % _object_title(held_object)
 	if target == null:
 		return ""
+	if target.is_in_group("road_radio") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
+		return "E  Turn off radio" if target == listening_radio else ("E  Key the relay radio" if target.relay else "E  Tune the workshop radio")
 	if target.is_in_group("shack_interactable"):
 		return "Hold left mouse and drag  Move %s" % ("shutter" if target.name == "GarageDoorTarget" else "door")
 	if target is Area3D and car:

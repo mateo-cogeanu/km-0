@@ -13,6 +13,9 @@ var shutter: Node3D
 var side_door: Area3D
 
 
+const RoadRadio := preload("res://scripts/road_radio.gd")
+
+
 func _ready() -> void:
 	_setup_highlight_material()
 	var garage := $GarageModel
@@ -21,6 +24,12 @@ func _ready() -> void:
 	garage.build()
 	shutter = $GarageModel/GarageShutter
 	side_door = _register_door("ShackDoorTarget", "shack_door", "min_x", -1.0, 96.0)
+	if garage.starting_garage:
+		var radio := RoadRadio.new()
+		radio.name = "WorkshopRadio"
+		radio.position = Vector3(1.45, 1.053, -2.29)
+		var bench := garage.get_node("Workbench")
+		bench.add_child(radio)
 
 
 func get_door_state() -> Dictionary:

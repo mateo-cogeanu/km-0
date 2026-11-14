@@ -63,6 +63,15 @@ func _ready() -> void:
 		if block in [-1, -2, -3]:
 			vehicle_kind = -block - 1
 	garage.add_traces(stop_index, vehicle_kind)
+	if stop_index == -5:
+		var radio := RoadRadio.new()
+		radio.name = "RelayRadio"
+		radio.relay = true
+		radio.position = Vector3(-2.55, 1.08, -0.18)
+		radio.rotation.y = PI / 2.0
+		add_child(radio)
+		var cabinet := Shapes.material(Color("#676559"), 0.2)
+		Shapes.box(self, "RelayCabinet", Vector3(0.57, 0.99, 0.58), Vector3(-2.57, 0.495, -0.18), cabinet, true)
 
 	# Dynamic finds live outside the streamed scenery so carried and parked items survive.
 	var world := get_tree().current_scene
