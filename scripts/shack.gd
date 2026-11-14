@@ -1,5 +1,7 @@
 extends Node3D
 
+const CrosshairTarget := preload("res://scripts/crosshair_target.gd")
+
 @export var interact_distance: float = 6.0
 
 var hovered_interactable: Area3D
@@ -128,12 +130,15 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	var player := get_tree().get_first_node_in_group("local_player")
+	if player and player.gameplay_ui_open():
+		return
 	var camera := get_viewport().get_camera_3d()
 	if camera and camera.is_in_group("driving_camera"):
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed and hovered_interactable:
-			dragged_interactable = hovered_interactable
+		if event.pressed:
+			dragged_interactable = _find_pointed_interactable()
 		elif not event.pressed:
 			dragged_interactable = null
 			_set_hovered_interactable(_find_pointed_interactable())
@@ -192,23 +197,13 @@ func _register_door(area_name: String, door_name: String, hinge_edge: String, op
 
 
 func _find_pointed_interactable() -> Area3D:
-	var camera := get_viewport().get_camera_3d()
-	if camera == null:
+	var view := get_viewport().get_camera_3d()
+	var player := get_tree().get_first_node_in_group("local_player")
+	if view == null or (player and player.gameplay_ui_open()):
 		return null
-
-	var viewport_center := get_viewport().get_visible_rect().size * 0.5
-	var ray_from := camera.project_ray_origin(viewport_center)
-	var ray_to := ray_from + camera.project_ray_normal(viewport_center) * interact_distance
-	var query := PhysicsRayQueryParameters3D.create(ray_from, ray_to)
-	query.collide_with_areas = true
-	query.collide_with_bodies = true
-	query.collision_mask = 1 | 8
-
-	var result := get_world_3d().direct_space_state.intersect_ray(query)
-	if result.is_empty() or not result.collider is Area3D:
-		return null
-
-	var area := result.collider as Area3D
+	var exclusions: Array = player._raycast_exclusions() if player else []
+	var hit := CrosshairTarget.cast(view, interact_distance, exclusions)
+	var area := hit.get("collider") as Area3D
 	return area if area == shutter.target or area == side_door else null
 
 

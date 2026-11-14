@@ -8,11 +8,14 @@ var card: PanelContainer
 var resume_button: Button
 var settings_button: Button
 var settings_panel: PanelContainer
+var tutorial: Control
+var tutorial_card: PanelContainer
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_ui()
+	_build_tutorial()
 	get_viewport().size_changed.connect(_fit_layout)
 	GameSettings.settings_changed.connect(_fit_layout)
 	_fit_layout()
@@ -20,7 +23,9 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
-		if settings_panel.visible:
+		if tutorial.visible:
+			_close_tutorial()
+		elif settings_panel.visible:
 			settings_panel.close()
 		elif overlay.visible:
 			_resume_game()
@@ -70,6 +75,7 @@ func _build_ui() -> void:
 func _fit_layout() -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
 	Style.fit_panel(card, viewport_size, false)
+	Style.fit_panel(tutorial_card, viewport_size, false)
 
 
 func _pause_game() -> void:
@@ -122,3 +128,50 @@ func _open_settings() -> void:
 func _close_settings() -> void:
 	card.show()
 	settings_button.grab_focus()
+
+
+func gameplay_ui_open() -> bool:
+	return (overlay != null and overlay.visible) or (tutorial != null and tutorial.visible)
+
+
+func _build_tutorial() -> void:
+	tutorial = ColorRect.new()
+	tutorial.color = Color(0.04, 0.04, 0.04, 0.58)
+	tutorial.theme = Style.make_theme()
+	add_child(tutorial)
+	tutorial.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	tutorial_card = PanelContainer.new()
+	tutorial_card.custom_minimum_size.x = 400
+	tutorial.add_child(tutorial_card)
+	var items := Style.vbox(10)
+	tutorial_card.add_child(items)
+	items.add_child(Style.heading("Getting started", 34))
+	for item in [
+		"WASD to move  ·  Shift to sprint",
+		"Aim at a part and press E to pick it up.",
+		"Hold left mouse and drag to open a door or hood.",
+		"Aim at the car and press E to fit a held part.",
+		"Open the fuel cap, aim at it and press E with fuel in hand.",
+		"Look into the open cabin and press E to get in.",
+		"WASD to drive  ·  Space to brake  ·  E to exit",
+	]:
+		items.add_child(Style.label(item, 16))
+	if NetworkManager.is_online():
+		items.add_child(Style.caption("The first player in drives. Passengers can orbit the camera."))
+	var actions := HBoxContainer.new()
+	items.add_child(actions)
+	var start := Style.button("Play", 17)
+	start.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(start)
+	var skip := Style.button("Skip tutorial", 17)
+	skip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_child(skip)
+	start.pressed.connect(_close_tutorial)
+	skip.pressed.connect(_close_tutorial)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	start.grab_focus.call_deferred()
+
+
+func _close_tutorial() -> void:
+	tutorial.hide()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED

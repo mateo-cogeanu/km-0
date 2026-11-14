@@ -1,5 +1,7 @@
 extends "res://addons/gevp/scripts/vehicle.gd"
 
+const CrosshairTarget := preload("res://scripts/crosshair_target.gd")
+
 const ADD_PART_SOUND_PATH := "res://assets/audio/add.wav"
 const WELD_SOUND_PATH := "res://assets/audio/weld.wav"
 const PropShapes := preload("res://scripts/prop_shapes.gd")
@@ -179,6 +181,9 @@ func _exit_tree() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	var local_player := get_tree().get_first_node_in_group("local_player")
+	if local_player and local_player.gameplay_ui_open():
+		return
 	if not driver_camera or not driver_camera.current or (NetworkManager.is_online() and not seat_occupants.has(multiplayer.get_unique_id())):
 		if not _has_driving_camera():
 			_handle_interactable_input(event)
@@ -194,8 +199,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		)
 		_update_camera_rotation()
 
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_C:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_C and _local_seat_can_toggle_camera():
 		set_first_person_camera_enabled(not first_person_camera_enabled)
+
+
+func _local_seat_can_toggle_camera() -> bool:
+	return not NetworkManager.is_online() or seat_occupants.find(multiplayer.get_unique_id()) == 0
 
 
 func enter(player: Node3D, restoring: bool = false) -> void:
@@ -288,11 +297,11 @@ func _sync_seats(occupants: PackedInt32Array) -> void:
 		_close_all_panels()
 
 
-func activate_shared_camera(seat: int) -> void:
+func activate_shared_camera() -> void:
 	camera_yaw = 0.0
-	camera_pitch = 0.0 if seat > 0 else deg_to_rad(18.0)
+	camera_pitch = deg_to_rad(18.0)
 	_update_camera_rotation()
-	set_first_person_camera_enabled(seat > 0)
+	set_first_person_camera_enabled(false)
 	driver_camera.make_current()
 
 
@@ -328,7 +337,7 @@ func _receive_driver_controls(controls: Vector4) -> void:
 func _read_driver_controls() -> Vector4:
 	var world := get_tree().current_scene
 	var pause_menu := world.get_node_or_null("PauseMenu") if world else null
-	if pause_menu and pause_menu.overlay.visible:
+	if pause_menu and pause_menu.gameplay_ui_open():
 		return Vector4.ZERO
 	return Vector4(
 		_action_or_keys("Throttle", [KEY_W, KEY_UP]),
@@ -572,6 +581,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 
 func _process(_delta: float) -> void:
+	if driver_camera and driver_camera.current:
+		_update_camera_rotation()
 	_update_third_person_camera_collision()
 	if is_multiplayer_authority():
 		_repair_protected_parts()
@@ -923,13 +934,7 @@ func set_first_person_camera_enabled(enabled: bool) -> void:
 
 	if first_person_camera_enabled and first_person_camera_marker:
 		driver_camera.transform = first_person_camera_marker.transform
-		if NetworkManager.is_online():
-			var local_seat := seat_occupants.find(multiplayer.get_unique_id())
-			if local_seat > 0:
-				driver_camera.position.x = 0.42 if local_seat % 2 == 1 else -0.42
-				if local_seat > 1:
-					driver_camera.position.x = -driver_camera.position.x
-					driver_camera.position.z += 0.9
+
 	else:
 		driver_camera.transform = third_person_camera_transform
 
@@ -1429,7 +1434,14 @@ func install_part(body: RigidBody3D, restore_slot: String = "") -> bool:
 	area.monitorable = true
 	area.collision_layer = 8
 	area.set_meta("part_path", area.get_path_to(part))
-	area.set_meta("visual_path", area.get_path_to(part))
+	var visual := part
+	if part_type in ["hood", "trunk"]:
+		visual = part.get_child(0) as Node3D
+	area.set_meta("visual_path", area.get_path_to(visual))
+	if area.has_meta("follows_panel"):
+		area.remove_meta("panel_center")
+		_fit_panel_target(area, visual)
+		part_closed_rotation[part.get_path()] = part.rotation
 	if data.has("wheel"):
 		var wheel: Wheel = data["wheel"]
 		var native_radius: float = part.get_meta("native_wheel_radius")
@@ -1629,6 +1641,7 @@ func restore_trip_panel_rotations(rotations: Dictionary) -> void:
 			var pivot := _get_interactable_part(area)
 			if pivot:
 				pivot.rotation = rotations[area_name]
+				_update_panel_target(area)
 
 
 func get_trip_paint() -> Dictionary:
@@ -2223,7 +2236,38 @@ func _register_interactable(
 	area.set_meta("open_direction", open_direction)
 	area.set_meta("open_axis", open_axis)
 	area.set_meta("open_angle_degrees", open_angle_degrees)
+	if open_angle_degrees > 0.0:
+		_fit_panel_target(area, visual_part)
 	part_closed_rotation[part.get_path()] = part.rotation
+
+
+func _fit_panel_target(area: Area3D, visual: Node3D) -> void:
+	var bounds := _get_local_visual_bounds(visual)
+	var shape := area.get_child(0) as CollisionShape3D
+	var box := BoxShape3D.new()
+	box.size = bounds.size.max(Vector3.ONE * 0.03)
+	shape.shape = box
+	area.set_meta("follows_panel", true)
+	_update_panel_target(area, visual)
+
+
+func _update_panel_target(area: Area3D, visual: Node3D = null) -> void:
+	if not area.has_meta("follows_panel") or area.collision_layer == 0:
+		return
+	if visual == null:
+		visual = _get_interactable_visual(area)
+	if visual == null:
+		return
+	if not area.has_meta("panel_center"):
+		area.set_meta("panel_center", _get_local_visual_bounds(visual).get_center())
+	var shape := area.get_child(0) as CollisionShape3D
+	var center: Vector3 = area.get_meta("panel_center")
+	shape.global_transform = visual.global_transform * Transform3D(Basis.IDENTITY, center)
+
+
+func can_target_part(area: Area3D) -> bool:
+	var slot := String(area.get_meta("part_type", ""))
+	return not _requires_hood_open(slot) or _has_hood_access()
 
 
 func _find_first_part_node(part_paths: Array[String]) -> Node3D:
@@ -2313,8 +2357,10 @@ func _has_driving_camera() -> bool:
 
 func _handle_interactable_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed and hovered_interactable and hovered_interactable.is_in_group("car_interactable"):
-			dragged_interactable = hovered_interactable
+		if event.pressed:
+			var target := _find_pointed_interactable()
+			if target and target.is_in_group("car_interactable") and float(target.get_meta("open_angle_degrees", 0.0)) > 0:
+				dragged_interactable = target
 		elif not event.pressed:
 			dragged_interactable = null
 			_set_hovered_interactable(_find_pointed_interactable())
@@ -2324,25 +2370,17 @@ func _handle_interactable_input(event: InputEvent) -> void:
 
 
 func _find_pointed_interactable() -> Area3D:
-	var camera := get_viewport().get_camera_3d()
-	if camera == null:
+	var view := get_viewport().get_camera_3d()
+	if view == null:
 		return null
-
-	var viewport_center := get_viewport().get_visible_rect().size * 0.5
-	var ray_from := camera.project_ray_origin(viewport_center)
-	var ray_to := ray_from + camera.project_ray_normal(viewport_center) * interact_distance
-	var query := PhysicsRayQueryParameters3D.create(ray_from, ray_to)
-	query.collide_with_areas = true
-	query.collide_with_bodies = false
-
-	var result := get_world_3d().direct_space_state.intersect_ray(query)
-	if result.is_empty() or not result.collider is Area3D:
+	var player := get_tree().get_first_node_in_group("local_player")
+	if player and (player.gameplay_ui_open() or is_instance_valid(player.held_object)):
 		return null
-
-	var area := result.collider as Area3D
-	if area.get_parent() == self and (area.is_in_group("car_interactable") or area.is_in_group("vehicle_seat") or area.is_in_group("vehicle_removable_part")):
+	var exclusions: Array = player._raycast_exclusions() if player else []
+	var hit := CrosshairTarget.cast(view, interact_distance, exclusions)
+	var area := hit.get("collider") as Area3D
+	if area and area.get_parent() == self and can_target_part(area):
 		return area
-
 	return null
 
 
@@ -2406,6 +2444,7 @@ func _drag_interactable(area: Area3D, drag_amount: float) -> void:
 		return
 	part.rotation = closed_rotation
 	_apply_panel_rotation(part, open_axis, open_direction * open_angle * target_open)
+	_update_panel_target(area)
 	if NetworkManager.is_online():
 		_sync_panels.rpc({str(area.name): part.rotation})
 
@@ -2429,6 +2468,7 @@ func _close_all_panels() -> void:
 			continue
 
 		part.rotation = part_closed_rotation.get(part.get_path(), part.rotation) as Vector3
+		_update_panel_target(area)
 
 
 func _get_axis_rotation(rotation: Vector3, axis: String) -> float:
@@ -2499,8 +2539,12 @@ func _update_camera_rotation() -> void:
 	if camera_rig == null:
 		return
 
-	camera_rig.rotation.y = camera_yaw
-	camera_rig.rotation.x = camera_pitch
+	if first_person_camera_enabled:
+		camera_rig.rotation = Vector3(camera_pitch, camera_yaw, 0)
+		return
+	var forward := -global_basis.z.slide(Vector3.UP)
+	var heading := atan2(-forward.x, -forward.z) if forward.length_squared() > 0.001 else 0.0
+	camera_rig.global_basis = Basis(Vector3.UP, heading + camera_yaw) * Basis(Vector3.RIGHT, -camera_pitch)
 
 
 func _update_third_person_camera_collision() -> void:
