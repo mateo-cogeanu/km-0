@@ -1,6 +1,6 @@
 extends "res://scripts/drivable_vehicle.gd"
 
-const Shapes := preload("res://scripts/prop_shapes.gd")
+const BikeModel := preload("res://scripts/two_wheeler_model.gd")
 const BIKE_ENGINE := preload("res://assets/vehicles/parts/bike_engine.tscn")
 
 @export var motorized := false
@@ -125,7 +125,7 @@ func can_receive_fuel() -> bool:
 
 
 func get_gas_hole_position() -> Vector3:
-	return to_global(Vector3(0, 0.93, -0.32))
+	return to_global(Vector3(0, 1.01, -0.32))
 
 
 func get_fuel_text() -> String:
@@ -194,77 +194,15 @@ func process_stability() -> void:
 
 
 func _build_bike() -> void:
-	var paint := Shapes.material(Color("#a94132") if motorized else Color("#38786c"), 0.32, 0.4)
-	var metal := Shapes.material(Color("#a6b1ad"), 0.62, 0.4)
-	var rubber := Shapes.material(Color("#242326"), 0.02, 0.66)
-	var bright := Shapes.material(Color("#ddd5ab"))
-	var rear := Vector3(0, 0.34, 0.84)
-	var axle := Vector3(0, 0.34, -0.84)
-	var head := Vector3(0, 0.98, -0.52)
-	var saddle := Vector3(0, 0.92, 0.32)
-	var crank := Vector3(0, 0.35, 0.06)
-	var frame_radius := 0.043 if motorized else 0.026
-	for span in [[head, saddle], [head, crank], [saddle, crank], [saddle, rear], [crank, rear]]:
-		Shapes.tube(self, "FrameTube", span[0], span[1], frame_radius, paint)
-	Shapes.box(self, "Saddle", Vector3(0.28 if motorized else 0.20, 0.075, 0.4 if motorized else 0.26), saddle + Vector3(0, 0.05, 0.06), rubber)
-	fork = Node3D.new()
-	add_child(fork)
-	fork.position = Vector3(0, 0.34, -0.84)
-	for side in [-1.0, 1.0]:
-		var width: float = side * (0.125 if motorized else 0.085)
-		Shapes.tube(fork, "ForkLeg", Vector3(width, 0, 0), head - axle + Vector3(width, 0, 0), frame_radius * 0.8, metal)
-		Shapes.tube(fork, "Handlebar", head - axle + Vector3(0, 0.02, 0), head - axle + Vector3(side * 0.33, 0.13, 0.07), 0.024, metal)
-		Shapes.cylinder(fork, "Grip", head - axle + Vector3(side * 0.345, 0.13, 0.07), Vector3.RIGHT, 0.031, 0.115, rubber)
-	_make_wheel(front_left_wheel.wheel_node, rubber, metal)
-	_make_wheel(rear_left_wheel.wheel_node, rubber, metal)
-	if motorized:
-		Shapes.box(self, "FuelTank", Vector3(0.34, 0.26, 0.62), Vector3(0, 0.82, -0.23), paint)
-		Shapes.cylinder(self, "FuelCap", Vector3(0, 0.957, -0.32), Vector3.UP, 0.071, 0.026, metal)
-		Shapes.cylinder(fork, "Headlamp", Vector3(0, 0.54, 0.17), Vector3.FORWARD, 0.095, 0.11, metal)
-		Shapes.cylinder(fork, "Lens", Vector3(0, 0.54, 0.11), Vector3.FORWARD, 0.080, 0.016, bright)
-		var headlight := SpotLight3D.new()
-		headlight.add_to_group("vehicle_headlight")
-		fork.add_child(headlight)
-		headlight.position = Vector3(0, 0.54, 0.085)
-		Shapes.box(self, "RearFender", Vector3(0.25, 0.068, 0.47), Vector3(0, 0.73, 0.82), paint)
-		Shapes.tube(self, "Exhaust", Vector3(0.19, 0.32, -0.2), Vector3(0.20, 0.35, 0.99), 0.045, metal)
-		var motor := BIKE_ENGINE.instantiate() as MeshInstance3D
-		add_child(motor)
-		motor.position = Vector3(0, 0.47, 0.0)
-	else:
-		pedal_crank = Node3D.new()
-		add_child(pedal_crank)
-		pedal_crank.position = crank
-		Shapes.cylinder(pedal_crank, "Chainring", Vector3(0.067, 0, 0), Vector3.RIGHT, 0.11, 0.022, metal)
-		for side in [-1.0, 1.0]:
-			var at := Vector3(0.14 * side, 0.12 * side, 0.0)
-			Shapes.tube(pedal_crank, "Crank", Vector3(at.x, 0, 0), at, 0.019, metal)
-			Shapes.box(pedal_crank, "Pedal", Vector3(0.10, 0.029, 0.068), at, rubber)
-
-
-func _make_wheel(parent: Node3D, rubber: Material, metal: Material) -> void:
-	var mesh := TorusMesh.new()
-	var tire_depth := 0.060 if motorized else 0.029
-	mesh.outer_radius = 0.34
-	mesh.inner_radius = 0.34 - tire_depth * 2.0
-	mesh.rings = 24
-	mesh.ring_segments = 10
-	var tire := MeshInstance3D.new()
-	tire.mesh = mesh
-	tire.material_override = rubber
-	parent.add_child(tire)
-	tire.rotation.z = PI * 0.5
-	var rim := TorusMesh.new()
-	rim.outer_radius = mesh.inner_radius + 0.022
-	rim.inner_radius = mesh.inner_radius - 0.008
-	rim.rings = 24
-	rim.ring_segments = 8
-	var rim_visual := tire.duplicate() as MeshInstance3D
-	rim_visual.mesh = rim
-	rim_visual.material_override = metal
-	parent.add_child(rim_visual)
-	Shapes.cylinder(parent, "Hub", Vector3.ZERO, Vector3.RIGHT, 0.055, 0.12, metal)
-	for index in range(12 if motorized else 16):
-		var angle := index * TAU / (12.0 if motorized else 16.0)
-		var edge := Vector3(0, cos(angle), sin(angle)) * rim.inner_radius
-		Shapes.tube(parent, "Spoke", Vector3(0.035 * (-1.0 if index % 2 else 1.0), 0, 0), edge, 0.011 if motorized else 0.005, metal)
+	var model := BikeModel.build(self, front_left_wheel.wheel_node, rear_left_wheel.wheel_node, motorized)
+	fork = model["fork"]
+	pedal_crank = model["pedals"]
+	if not motorized:
+		return
+	var motor := BIKE_ENGINE.instantiate() as MeshInstance3D
+	motor.position = Vector3(0, 0.47, 0)
+	add_child(motor)
+	var headlight := SpotLight3D.new()
+	headlight.add_to_group("vehicle_headlight")
+	headlight.position = Vector3(0, 0.535, 0.036)
+	fork.add_child(headlight)
