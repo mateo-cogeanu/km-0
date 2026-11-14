@@ -4,7 +4,6 @@ const Style := preload("res://scripts/menu_style.gd")
 
 var lobby_list: ItemList
 var lobby_name_edit: LineEdit
-var player_name_edit: LineEdit
 var status_label: Label
 var lobby_count: Label
 var empty_label: Label
@@ -84,7 +83,7 @@ func _build_ui() -> void:
 func _build_browser() -> void:
 	setup_panel = Style.vbox(8)
 	content.add_child(setup_panel)
-	player_name_edit = _add_field(setup_panel, "Your name", "Player")
+	setup_panel.add_child(Style.caption("Playing as %s" % GameSettings.player_name))
 
 	var browse_header := HBoxContainer.new()
 	setup_panel.add_child(browse_header)
@@ -178,7 +177,7 @@ func _fit_layout() -> void:
 func _create_lobby() -> void:
 	if NetworkManager.is_online():
 		return
-	if NetworkManager.create_lobby(lobby_name_edit.text, player_name_edit.text) == OK:
+	if NetworkManager.create_lobby(lobby_name_edit.text, GameSettings.player_name) == OK:
 		_set_status("Lobby created.")
 		ready_button.grab_focus()
 
@@ -186,7 +185,7 @@ func _create_lobby() -> void:
 func _join_lobby() -> void:
 	if NetworkManager.is_online() or not NetworkManager.discovered_lobbies.has(selected_address):
 		return
-	if NetworkManager.join_lobby(selected_address, player_name_edit.text) == OK:
+	if NetworkManager.join_lobby(selected_address, GameSettings.player_name) == OK:
 		_set_status("Connecting to lobby…")
 		_refresh_room()
 		back_button.grab_focus()
@@ -289,6 +288,11 @@ func _add_player_row(peer_id: int, data: Dictionary, is_local: bool) -> void:
 	if peer_id == 1:
 		row.add_child(Style.label("HOST", 12, Style.AMBER))
 	row.add_child(Style.label("READY" if is_ready else "NOT READY", 12, Style.GREEN if is_ready else Style.MUTED))
+	if NetworkManager.is_host and peer_id != 1:
+		var kick := Style.button("Kick", 13)
+		kick.custom_minimum_size = Vector2(52, 28)
+		kick.pressed.connect(NetworkManager.kick_player.bind(peer_id))
+		row.add_child(kick)
 
 
 func _set_status(message: String, tint: Color = Style.MUTED) -> void:

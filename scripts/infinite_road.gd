@@ -250,7 +250,7 @@ func _update_stop(index: int, tracking: Vector3, segment: Node3D, players: Array
 	elif multiplayer.is_server():
 		for player in players:
 			if absf(player.global_position.z - z) <= segment_length * 3.0:
-				spawn_stop.rpc(index, player.get_multiplayer_authority())
+				spawn_stop.rpc(index)
 				break
 
 

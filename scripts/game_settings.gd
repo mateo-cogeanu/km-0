@@ -1,6 +1,7 @@
 extends Node
 
 signal settings_changed
+signal player_name_changed(value: String)
 
 const CONFIG_PATH := "user://settings.cfg"
 const SECTION := "settings"
@@ -9,6 +10,7 @@ const RENDER_SCALE_OPTIONS: Array[float] = [0.5, 0.67, 0.75, 1.0]
 const SHADOW_OPTIONS: Array[String] = ["Off", "Medium", "High", "Ultra"]
 const LIGHTING_OPTIONS: Array[String] = ["Performance", "Balanced", "Cinematic"]
 
+var player_name := ""
 var fps_cap: int = 90
 var vsync_enabled: bool = true
 var fullscreen_enabled: bool = false
@@ -32,6 +34,7 @@ func load_settings() -> void:
 	if config.load(CONFIG_PATH) != OK:
 		return
 
+	player_name = str(config.get_value(SECTION, "player_name", "")).strip_edges().substr(0, 24)
 	fps_cap = int(config.get_value(SECTION, "fps_cap", fps_cap))
 	if not FPS_OPTIONS.has(fps_cap):
 		fps_cap = 90
@@ -49,6 +52,7 @@ func load_settings() -> void:
 
 func save_settings() -> void:
 	var config := ConfigFile.new()
+	config.set_value(SECTION, "player_name", player_name)
 	config.set_value(SECTION, "fps_cap", fps_cap)
 	config.set_value(SECTION, "vsync_enabled", vsync_enabled)
 	config.set_value(SECTION, "fullscreen_enabled", fullscreen_enabled)
@@ -168,3 +172,12 @@ func _nearest_render_scale(value: float) -> float:
 			best_value = option
 
 	return best_value
+
+
+func set_player_name(value: String) -> void:
+	var cleaned := value.strip_edges().substr(0, 24)
+	if cleaned.is_empty() or cleaned == player_name:
+		return
+	player_name = cleaned
+	save_settings()
+	player_name_changed.emit(player_name)

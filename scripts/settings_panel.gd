@@ -5,6 +5,7 @@ signal closed
 const Style := preload("res://scripts/menu_style.gd")
 
 var align_left := false
+var player_name_edit: LineEdit
 var fps_option: OptionButton
 var render_scale_option: OptionButton
 var shadow_option: OptionButton
@@ -41,6 +42,7 @@ func open() -> void:
 
 
 func close() -> void:
+	_save_player_name()
 	visible = false
 	closed.emit()
 
@@ -122,6 +124,12 @@ func _build_ui() -> void:
 	fullscreen_check.text = "On"
 	fullscreen_check.toggled.connect(_on_fullscreen_toggled)
 	_add_row(display_controls, "Fullscreen", fullscreen_check)
+
+	player_name_edit = LineEdit.new()
+	player_name_edit.max_length = 24
+	player_name_edit.placeholder_text = "Player name"
+	player_name_edit.text_submitted.connect(func(_value: String) -> void: _save_player_name())
+	_add_row(game_controls, "Player name", player_name_edit)
 
 	volume_slider = _create_slider(0.0, 1.0, 0.01)
 	volume_slider.value_changed.connect(_on_volume_changed)
@@ -210,6 +218,7 @@ func _sync_from_settings() -> void:
 	if fps_option == null:
 		return
 
+	player_name_edit.text = GameSettings.player_name
 	var fps_index := maxi(GameSettings.FPS_OPTIONS.find(GameSettings.fps_cap), 0)
 	fps_option.select(fps_index)
 	var render_index := maxi(GameSettings.RENDER_SCALE_OPTIONS.find(GameSettings.render_scale), 0)
@@ -285,3 +294,8 @@ func _update_sensitivity_label() -> void:
 
 func _update_ui_scale_label() -> void:
 	ui_scale_value.text = "%.2fx" % GameSettings.ui_scale
+
+
+func _save_player_name() -> void:
+	GameSettings.set_player_name(player_name_edit.text)
+	player_name_edit.text = GameSettings.player_name

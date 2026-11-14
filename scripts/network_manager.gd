@@ -4,6 +4,7 @@ signal lobby_list_changed
 signal lobby_state_changed
 signal connection_failed(message: String)
 signal game_start_requested
+signal player_disconnected(peer_id: int)
 
 const GAME_PORT := 24680
 const DISCOVERY_PORT := 24681
@@ -17,6 +18,7 @@ var local_player_name := "Player"
 var players: Dictionary = {}
 var discovered_lobbies: Dictionary = {}
 var game_in_progress := false
+var kicked_peers: Dictionary = {}
 
 var _discovery_listener := PacketPeerUDP.new()
 var _discovery_broadcaster := PacketPeerUDP.new()
@@ -35,7 +37,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_read_discovery_packets()
 	_expire_lobbies()
-	if is_host and is_online():
+	if is_host and is_online() and not game_in_progress:
 		_broadcast_elapsed += delta
 		if _broadcast_elapsed >= BROADCAST_INTERVAL:
 			_broadcast_elapsed = 0.0
@@ -53,7 +55,7 @@ func _setup_discovery() -> void:
 func create_lobby(new_lobby_name: String, player_name: String) -> Error:
 	leave_lobby()
 	var peer := ENetMultiplayerPeer.new()
-	var error := peer.create_server(GAME_PORT, MAX_PLAYERS)
+	var error := peer.create_server(GAME_PORT, MAX_PLAYERS - 1, 4)
 	if error != OK:
 		connection_failed.emit("Could not create lobby (error %s)." % error)
 		return error
@@ -70,7 +72,7 @@ func create_lobby(new_lobby_name: String, player_name: String) -> Error:
 func join_lobby(address: String, player_name: String) -> Error:
 	leave_lobby()
 	var peer := ENetMultiplayerPeer.new()
-	var error := peer.create_client(address, GAME_PORT)
+	var error := peer.create_client(address, GAME_PORT, 4)
 	if error != OK:
 		connection_failed.emit("Could not connect to that lobby (error %s)." % error)
 		return error
@@ -86,6 +88,7 @@ func leave_lobby() -> void:
 		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	is_host = false
 	game_in_progress = false
+	kicked_peers.clear()
 	lobby_name = ""
 	players.clear()
 	lobby_state_changed.emit()
@@ -107,8 +110,11 @@ func set_local_ready(ready: bool) -> void:
 
 
 func can_host_start() -> bool:
-	if not is_host or players.is_empty():
+	if not is_host or game_in_progress or players.is_empty():
 		return false
+	for peer_id in multiplayer.get_peers():
+		if not players.has(peer_id):
+			return false
 	for data in players.values():
 		if not bool(data.get("ready", false)):
 			return false
@@ -118,11 +124,13 @@ func can_host_start() -> bool:
 func start_game() -> void:
 	if not can_host_start():
 		return
-	begin_game.rpc()
+	multiplayer.multiplayer_peer.refuse_new_connections = true
+	begin_game.rpc(players.duplicate(true))
 
 
 @rpc("authority", "call_local", "reliable")
-func begin_game() -> void:
+func begin_game(roster: Dictionary) -> void:
+	players = roster
 	game_in_progress = true
 	game_start_requested.emit()
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
@@ -130,9 +138,11 @@ func begin_game() -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func register_player(player_name: String) -> void:
-	if not is_host:
+	if not is_host or game_in_progress:
 		return
 	var sender := multiplayer.get_remote_sender_id()
+	if players.has(sender) or kicked_peers.has(sender):
+		return
 	players[sender] = {"name": _clean_name(player_name, "Player"), "ready": false}
 	_sync_lobby_state()
 
@@ -152,7 +162,7 @@ func receive_lobby_state(server_lobby_name: String, server_players: Dictionary) 
 
 
 func _set_player_ready(peer_id: int, ready: bool) -> void:
-	if not players.has(peer_id):
+	if game_in_progress or not players.has(peer_id):
 		return
 	players[peer_id]["ready"] = ready
 	_sync_lobby_state()
@@ -161,12 +171,15 @@ func _set_player_ready(peer_id: int, ready: bool) -> void:
 func _sync_lobby_state() -> void:
 	lobby_state_changed.emit()
 	if is_host:
-		receive_lobby_state.rpc(lobby_name, players)
+		for peer_id in multiplayer.get_peers():
+			if not kicked_peers.has(peer_id):
+				receive_lobby_state.rpc_id(peer_id, lobby_name, players)
 		_broadcast_lobby()
 
 
 func _on_peer_connected(_peer_id: int) -> void:
-	pass
+	if is_host and not game_in_progress:
+		_sync_lobby_state()
 
 
 func _on_connected_to_server() -> void:
@@ -174,7 +187,12 @@ func _on_connected_to_server() -> void:
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
-	if is_host and players.erase(peer_id):
+	kicked_peers.erase(peer_id)
+	if not players.erase(peer_id):
+		return
+	if game_in_progress:
+		player_disconnected.emit(peer_id)
+	elif is_host:
 		_sync_lobby_state()
 
 
@@ -194,6 +212,7 @@ func _on_server_disconnected() -> void:
 func _broadcast_lobby() -> void:
 	var packet := {
 		"km0_lobby": true,
+		"version": ProjectSettings.get_setting("application/config/version"),
 		"name": lobby_name,
 		"players": players.size(),
 		"max_players": MAX_PLAYERS,
@@ -208,7 +227,7 @@ func _read_discovery_packets() -> void:
 		var data = JSON.parse_string(packet.get_string_from_utf8())
 		if typeof(data) != TYPE_DICTIONARY or not data.get("km0_lobby", false):
 			continue
-		if is_host:
+		if is_host or data.get("version") != ProjectSettings.get_setting("application/config/version"):
 			continue
 		data["address"] = sender_ip
 		data["last_seen"] = Time.get_ticks_msec() / 1000.0
@@ -230,3 +249,23 @@ func _expire_lobbies() -> void:
 func _clean_name(value: String, fallback: String) -> String:
 	var cleaned := value.strip_edges().substr(0, 24)
 	return fallback if cleaned.is_empty() else cleaned
+
+
+func kick_player(peer_id: int) -> void:
+	if not is_host or game_in_progress or peer_id == 1 or not players.has(peer_id):
+		return
+	kicked_peers[peer_id] = true
+	players.erase(peer_id)
+	var connection := multiplayer.multiplayer_peer
+	removed_from_lobby.rpc_id(peer_id)
+	_sync_lobby_state()
+	# Give the reliable reason a chance to leave before enforcing the disconnect.
+	await get_tree().create_timer(0.25).timeout
+	if multiplayer.multiplayer_peer == connection and multiplayer.get_peers().has(peer_id):
+		connection.disconnect_peer(peer_id)
+
+
+@rpc("authority", "call_remote", "reliable")
+func removed_from_lobby() -> void:
+	leave_lobby()
+	connection_failed.emit("The host removed you from the lobby.")

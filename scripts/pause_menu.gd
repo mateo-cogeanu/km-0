@@ -22,7 +22,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if settings_panel.visible:
 			settings_panel.close()
-		elif get_tree().paused:
+		elif overlay.visible:
 			_resume_game()
 		else:
 			_pause_game()
@@ -73,7 +73,7 @@ func _fit_layout() -> void:
 
 
 func _pause_game() -> void:
-	get_tree().paused = true
+	get_tree().paused = not NetworkManager.is_online()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	overlay.show()
 	resume_button.grab_focus()

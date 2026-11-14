@@ -97,6 +97,9 @@ var third_person_camera_transform: Transform3D
 var deformable_meshes: Array[MeshInstance3D] = []
 var deformation_data: Dictionary = {}
 var deformation_cooldown: float = 0.0
+var seat_occupants := PackedInt32Array()
+var network_controls := Vector4.ZERO
+var network_input_age := 0.0
 var remote_transform: Transform3D
 var remote_linear_velocity: Vector3
 var remote_angular_velocity: Vector3
@@ -104,6 +107,7 @@ var remote_engine_variant := ""
 var remote_engine_rpm := 0.0
 var remote_engine_load := 0.0
 var _vehicle_network_send_elapsed := 0.0
+var _vehicle_input_send_elapsed := 0.0
 var audible_engine_variant := ""
 var tire_effects: Node3D
 
@@ -175,17 +179,9 @@ func _exit_tree() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if NetworkManager.is_online() and not is_multiplayer_authority():
-		return
-
-	if driver == null:
+	if not driver_camera or not driver_camera.current or (NetworkManager.is_online() and not seat_occupants.has(multiplayer.get_unique_id())):
 		if not _has_driving_camera():
 			_handle_interactable_input(event)
-		return
-
-	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_L or event.keycode == KEY_H):
-		toggle_headlights()
-		get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -217,10 +213,249 @@ func enter(player: Node3D, restoring: bool = false) -> void:
 		audible_engine_variant = _get_running_engine_variant()
 
 
+func seat_capacity() -> int:
+	return 4 if removable_parts.has("door_fl") else 1
+
+
+func request_ride() -> void:
+	if multiplayer.is_server():
+		_request_ride()
+	else:
+		_request_ride.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_ride() -> void:
+	if not multiplayer.is_server():
+		return
+	var peer_id := _request_peer_id()
+	var rider := get_tree().current_scene.get_node_or_null(str(peer_id)) as Node3D
+	if rider == null or not _can_reach(peer_id) or rider.active_vehicle != null:
+		return
+	if linear_velocity.length() > 4.0 or not can_enter_from_position(rider.global_position):
+		return
+	if seat_occupants.is_empty():
+		seat_occupants.resize(seat_capacity())
+	var seat := seat_occupants.find(0)
+	if seat == -1:
+		return
+	seat_occupants[seat] = peer_id
+	_sync_seats.rpc(seat_occupants)
+	_play_vehicle_access_audio.rpc(true)
+
+
+func request_leave() -> void:
+	if multiplayer.is_server():
+		_request_leave()
+	else:
+		_request_leave.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_leave() -> void:
+	if multiplayer.is_server():
+		_release_seat(_request_peer_id())
+
+
+func remove_disconnected_rider(peer_id: int) -> void:
+	if multiplayer.is_server():
+		_release_seat(peer_id)
+
+
+func _release_seat(peer_id: int) -> void:
+	var seat := seat_occupants.find(peer_id)
+	if seat < 0:
+		return
+	seat_occupants[seat] = 0
+	_sync_seats.rpc(seat_occupants)
+	_play_vehicle_access_audio.rpc(false)
+
+
+@rpc("authority", "call_local", "reliable")
+func _sync_seats(occupants: PackedInt32Array) -> void:
+	seat_occupants = occupants
+	var world := get_tree().current_scene
+	var next_driver := world.get_node_or_null(str(occupants[0])) as Node3D
+	if driver != next_driver:
+		driver = next_driver
+		network_controls = Vector4.ZERO
+		network_input_age = 0.0
+	for rider in get_tree().get_nodes_in_group("road_stream_player"):
+		var seat := occupants.find(rider.get_multiplayer_authority())
+		if seat >= 0 or rider.active_vehicle == self:
+			rider.set_shared_seat(self, seat)
+	if occupants.count(0) != occupants.size():
+		_close_all_panels()
+
+
+func activate_shared_camera(seat: int) -> void:
+	camera_yaw = 0.0
+	camera_pitch = 0.0 if seat > 0 else deg_to_rad(18.0)
+	_update_camera_rotation()
+	set_first_person_camera_enabled(seat > 0)
+	driver_camera.make_current()
+
+
+func _request_peer_id() -> int:
+	var sender := multiplayer.get_remote_sender_id()
+	return multiplayer.get_unique_id() if sender == 0 else sender
+
+
+func _can_reach(peer_id: int, distance := 8.0) -> bool:
+	var player := get_tree().current_scene.get_node_or_null(str(peer_id)) as Node3D
+	return is_instance_valid(player) and player.global_position.distance_squared_to(global_position) <= distance * distance
+
+
+func send_driver_controls(delta: float) -> void:
+	if not is_instance_valid(driver) or not driver.is_multiplayer_authority() or seat_occupants.is_empty():
+		return
+	_vehicle_input_send_elapsed += delta
+	if _vehicle_input_send_elapsed < 0.033:
+		return
+	_vehicle_input_send_elapsed = 0.0
+	_receive_driver_controls.rpc_id(1, _read_driver_controls())
+
+
+@rpc("any_peer", "call_remote", "unreliable_ordered", 3)
+func _receive_driver_controls(controls: Vector4) -> void:
+	if not multiplayer.is_server() or seat_occupants.is_empty() or seat_occupants[0] != multiplayer.get_remote_sender_id():
+		return
+	if controls.is_finite():
+		network_controls = controls.clamp(Vector4(0, 0, -1, 0), Vector4.ONE)
+		network_input_age = 0.0
+
+
+func _read_driver_controls() -> Vector4:
+	var world := get_tree().current_scene
+	var pause_menu := world.get_node_or_null("PauseMenu") if world else null
+	if pause_menu and pause_menu.overlay.visible:
+		return Vector4.ZERO
+	return Vector4(
+		_action_or_keys("Throttle", [KEY_W, KEY_UP]),
+		_action_or_keys("Brakes", [KEY_S, KEY_DOWN]),
+		_action_or_keys("SteerLeft", [KEY_A, KEY_LEFT]) - _action_or_keys("SteerRight", [KEY_D, KEY_RIGHT]),
+		_action_or_keys("Handbrake", [KEY_SPACE])
+	)
+
+
+func request_work(action: String, target: Variant, value: Variant = null) -> void:
+	if multiplayer.is_server():
+		_request_work(action, target, value)
+	else:
+		_request_work.rpc_id(1, action, target, value)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_work(action: String, target: Variant, value: Variant) -> void:
+	if not multiplayer.is_server() or not _can_reach(_request_peer_id()):
+		return
+	var requester := get_tree().current_scene.get_node(str(_request_peer_id()))
+	if requester.active_vehicle != null and (action != "lights" or requester.active_vehicle != self):
+		return
+	match action:
+		"panel":
+			if target is StringName and value is float and is_finite(value):
+				var area := get_node_or_null(NodePath(target)) as Area3D
+				if area and area.get_parent() == self and area.is_in_group("car_interactable") and area.collision_layer != 0:
+					_drag_interactable(area, clampf(value, -170, 170))
+		"paint":
+			if target in ["Chassis", "FL_Door", "FR_Door", "RL_Door", "RR_Door"] and value is Vector2 and value.is_finite():
+				var swatches: Array = get_tree().current_scene.get_node(str(_request_peer_id())).spray_colors
+				var index := clampi(int(value.x), 0, swatches.size() - 1)
+				if paint_named_part(target, swatches[index], clampf(value.y, 0, 0.15)):
+					_sync_paint.rpc(get_trip_paint())
+		"lights":
+			toggle_headlights()
+		"remove":
+			if target is NodePath:
+				var area := get_node_or_null(target) as Area3D
+				var body := remove_installed_part(area) if area and area.get_parent() == self else null
+				if body:
+					var peer_id := _request_peer_id()
+					if peer_id == 1:
+						_grab_removed_part(body.get_path())
+					else:
+						_grab_removed_part.rpc_id(peer_id, body.get_path())
+		"install", "fuel", "weld", "unweld", "wire":
+			if target is NodePath:
+				var object := get_node_or_null(target) as RigidBody3D
+				if is_instance_valid(object) and object.global_position.distance_squared_to(global_position) <= 25.0:
+					_work_on_object(action, object, value)
+
+
+func _work_on_object(action: String, object: RigidBody3D, value: Variant) -> void:
+	match action:
+		"install":
+			if value is Transform3D and value.is_finite() and value.origin.distance_squared_to(global_position) <= 25.0:
+				var previous_position := object.global_position
+				object.global_position = value.origin
+				if not install_part(object):
+					object.global_position = previous_position
+		"fuel":
+			if object.is_in_group("fuel_canister") and value is float and is_finite(value) and object.global_position.distance_to(get_gas_hole_position()) < 1.6:
+				var accepted := receive_fuel(minf(object.fuel_amount, clampf(value, 0, 0.8)))
+				object.fuel_amount -= accepted
+				if accepted > 0.0:
+					_sync_canister.rpc(object.get_path(), object.fuel_amount)
+		"weld":
+			var path := object.get_path()
+			var pose := object.global_transform
+			if weld_object(object):
+				_sync_attachment.rpc(action, path, pose)
+		"unweld", "wire":
+			var path := object.get_path()
+			if (unweld_object(object) if action == "unweld" else wire_battery(object)):
+				_sync_attachment.rpc(action, path, object.global_transform)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_attachment(action: String, path: NodePath, pose: Transform3D) -> void:
+	var object := get_node_or_null(path) as RigidBody3D
+	if object == null:
+		return
+	match action:
+		"weld":
+			object.global_transform = pose
+			weld_object(object)
+		"unweld":
+			unweld_object(object)
+			object.global_transform = pose
+		"wire":
+			object.set_meta("wired_battery", true)
+			_refresh_electric_capacity()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_canister(path: NodePath, amount: float) -> void:
+	var canister := get_node_or_null(path)
+	if canister and canister.is_in_group("fuel_canister"):
+		canister.fuel_amount = amount
+
+
+@rpc("authority", "call_remote", "reliable")
+func _grab_removed_part(path: NodePath) -> void:
+	var object := get_node_or_null(path) as RigidBody3D
+	var player := get_tree().current_scene.get_node_or_null(str(multiplayer.get_unique_id()))
+	if player and object:
+		player._begin_grab_object(object, object.global_position)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_paint(paint: Dictionary) -> void:
+	restore_trip_paint(paint)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_panels(panels: Dictionary) -> void:
+	restore_trip_panel_rotations(panels)
+
+
 func can_enter_from_position(player_position: Vector3) -> bool:
 	var local_player := to_local(player_position)
-	var door_type := "door_fl" if local_player.x < 0.0 else "door_fr"
-	var area_name := "DoorFL" if local_player.x < 0.0 else "DoorFR"
+	var left := local_player.x < 0.0
+	var rear := NetworkManager.is_online() and local_player.z > 0.45
+	var door_type := ("door_rl" if left else "door_rr") if rear else ("door_fl" if left else "door_fr")
+	var area_name := ("DoorRL" if left else "DoorRR") if rear else ("DoorFL" if left else "DoorFR")
 	if removable_parts.has(door_type):
 		var door_data: Dictionary = removable_parts[door_type]
 		if not bool(door_data.get("installed", true)):
@@ -279,6 +514,7 @@ func _play_vehicle_access_audio(entering: bool) -> void:
 
 func _physics_process(delta: float) -> void:
 	if NetworkManager.is_online() and not is_multiplayer_authority():
+		send_driver_controls(delta)
 		global_transform = global_transform.interpolate_with(remote_transform, minf(delta * 12.0, 1.0))
 		linear_velocity = remote_linear_velocity
 		angular_velocity = remote_angular_velocity
@@ -286,6 +522,7 @@ func _physics_process(delta: float) -> void:
 		tire_effects.update_tires(wheel_array, linear_velocity, delta, true)
 		return
 
+	network_input_age += delta
 	_restore_base_body_physics()
 	if global_position.y < -15.0:
 		global_position.y = 2.0
@@ -335,15 +572,13 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 
 func _process(_delta: float) -> void:
-	if NetworkManager.is_online() and not is_multiplayer_authority():
-		return
-
-	_repair_protected_parts()
+	_update_third_person_camera_collision()
+	if is_multiplayer_authority():
+		_repair_protected_parts()
 	_update_snap_ghost_visibility()
 	_update_battery_wire_guide()
-	_update_third_person_camera_collision()
 
-	if driver or _has_driving_camera():
+	if _has_driving_camera():
 		dragged_interactable = null
 		_set_hovered_interactable(null)
 		return
@@ -365,7 +600,8 @@ func _send_vehicle_network_state(delta: float, audible_variant: String) -> void:
 	_vehicle_network_send_elapsed = 0.0
 	sync_vehicle_state.rpc(
 		global_transform, linear_velocity, angular_velocity, headlights_enabled,
-		audible_variant, motor_rpm, throttle_amount
+		audible_variant, motor_rpm, throttle_amount, fuel_amount, electric_charge,
+		current_gear, _wheel_motion()
 	)
 
 
@@ -377,7 +613,11 @@ func sync_vehicle_state(
 	new_headlights_enabled: bool,
 	new_engine_variant: String,
 	new_engine_rpm: float,
-	new_engine_load: float
+	new_engine_load: float,
+	new_fuel: float,
+	new_charge: float,
+	new_gear: int,
+	wheels: Array
 ) -> void:
 	remote_transform = new_transform
 	remote_linear_velocity = new_linear_velocity
@@ -385,8 +625,25 @@ func sync_vehicle_state(
 	remote_engine_variant = new_engine_variant
 	remote_engine_rpm = new_engine_rpm
 	remote_engine_load = new_engine_load
+	motor_rpm = new_engine_rpm
+	fuel_amount = new_fuel
+	electric_charge = new_charge
+	current_gear = new_gear
+	for i in mini(wheel_array.size(), wheels.size()):
+		var wheel: Wheel = wheel_array[i]
+		var motion: Vector3 = wheels[i]
+		wheel.rotation.y = motion.x
+		wheel.spin = motion.y
+		wheel.spring_current_length = motion.z
 	if headlights_enabled != new_headlights_enabled:
 		set_headlights_enabled(new_headlights_enabled)
+
+
+func _wheel_motion() -> Array[Vector3]:
+	var motion: Array[Vector3] = []
+	for wheel in wheel_array:
+		motion.append(Vector3(wheel.rotation.y, wheel.spin, wheel.spring_current_length))
+	return motion
 
 
 func _update_driver_inputs() -> void:
@@ -394,15 +651,14 @@ func _update_driver_inputs() -> void:
 		_clear_inputs()
 		return
 
-	throttle_input = _action_or_keys("Throttle", [KEY_W, KEY_UP])
-	brake_input = _action_or_keys("Brakes", [KEY_S, KEY_DOWN])
-	steering_input = _action_or_keys("SteerLeft", [KEY_A, KEY_LEFT]) - _action_or_keys("SteerRight", [KEY_D, KEY_RIGHT])
-	handbrake_input = _action_or_keys("Handbrake", [KEY_SPACE])
+	var controls := _read_driver_controls()
+	if NetworkManager.is_online() and not driver.is_multiplayer_authority():
+		controls = network_controls if network_input_age < 0.4 else Vector4.ZERO
+	throttle_input = controls.x if current_gear != -1 else controls.y
+	brake_input = controls.y if current_gear != -1 else controls.x
+	steering_input = controls.z
+	handbrake_input = controls.w
 	clutch_input = handbrake_input
-
-	if current_gear == -1:
-		brake_input = _action_or_keys("Throttle", [KEY_W, KEY_UP])
-		throttle_input = _action_or_keys("Brakes", [KEY_S, KEY_DOWN])
 
 	if not _has_drive_energy() or not _has_required_drive_parts():
 		throttle_input = 0.0
@@ -667,6 +923,13 @@ func set_first_person_camera_enabled(enabled: bool) -> void:
 
 	if first_person_camera_enabled and first_person_camera_marker:
 		driver_camera.transform = first_person_camera_marker.transform
+		if NetworkManager.is_online():
+			var local_seat := seat_occupants.find(multiplayer.get_unique_id())
+			if local_seat > 0:
+				driver_camera.position.x = 0.42 if local_seat % 2 == 1 else -0.42
+				if local_seat > 1:
+					driver_camera.position.x = -driver_camera.position.x
+					driver_camera.position.z += 0.9
 	else:
 		driver_camera.transform = third_person_camera_transform
 
@@ -1074,7 +1337,7 @@ func _detach_part(part_type: String) -> RigidBody3D:
 	if part_type == "engine":
 		body.set_meta("engine_variant", current_engine_variant)
 	body.add_to_group("vehicle_loose_part")
-	_get_loose_part_parent().add_child(body)
+	_get_loose_part_parent().add_child(body, true)
 	body.global_transform = part.global_transform.orthonormalized() if data.has("wheel") else part.global_transform
 	part.reparent(body, true)
 	if data.has("wheel"):
@@ -1116,9 +1379,6 @@ func _mark_part_slot_empty(part_type: String, data: Dictionary) -> void:
 func can_install_part(body: RigidBody3D) -> bool:
 	if not is_instance_valid(body) or body.is_queued_for_deletion() or not body.has_meta("vehicle_part_type"):
 		return false
-	if NetworkManager.is_online() and not is_multiplayer_authority():
-		return false
-
 	var part_type := _get_install_target_part_type(body)
 	if not removable_parts.has(part_type):
 		return false
@@ -1433,7 +1693,10 @@ func _paint_gas_cap(color: Color, amount: float) -> void:
 
 func _apply_random_body_color() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.randomize()
+	if NetworkManager.is_online():
+		rng.seed = hash(str(get_path()))
+	else:
+		rng.randomize()
 	var color := Color.from_hsv(rng.randf(), rng.randf_range(0.55, 0.9), rng.randf_range(0.45, 0.95), 1.0)
 	paint_named_part("Chassis", color, 1.0)
 	for door_name in ["FL_Door", "FR_Door", "RL_Door", "RR_Door"]:
@@ -2077,7 +2340,7 @@ func _find_pointed_interactable() -> Area3D:
 		return null
 
 	var area := result.collider as Area3D
-	if area.is_in_group("car_interactable") or area.is_in_group("vehicle_seat") or area.is_in_group("vehicle_removable_part"):
+	if area.get_parent() == self and (area.is_in_group("car_interactable") or area.is_in_group("vehicle_seat") or area.is_in_group("vehicle_removable_part")):
 		return area
 
 	return null
@@ -2138,8 +2401,13 @@ func _drag_interactable(area: Area3D, drag_amount: float) -> void:
 	var current_open := _get_interactable_open_amount(area, part, closed_rotation, open_direction)
 	var target_open: float = clamp(current_open + drag_amount * 0.006, 0.0, 1.0)
 
+	if NetworkManager.is_online() and not multiplayer.is_server():
+		request_work("panel", area.name, drag_amount)
+		return
 	part.rotation = closed_rotation
 	_apply_panel_rotation(part, open_axis, open_direction * open_angle * target_open)
+	if NetworkManager.is_online():
+		_sync_panels.rpc({str(area.name): part.rotation})
 
 
 func _get_interactable_open_amount(area: Area3D, part: Node3D, closed_rotation: Vector3, open_direction: float) -> float:
@@ -2236,7 +2504,7 @@ func _update_camera_rotation() -> void:
 
 
 func _update_third_person_camera_collision() -> void:
-	if driver_camera == null or camera_rig == null or first_person_camera_enabled or driver == null:
+	if driver_camera == null or camera_rig == null or first_person_camera_enabled or not driver_camera.current:
 		return
 
 	driver_camera.transform = third_person_camera_transform

@@ -39,6 +39,10 @@ var held_original_angular_damp: float = 0.0
 var held_original_contact_monitor: bool = false
 var held_original_max_contacts_reported: int = 0
 var active_vehicle: Node3D
+var shared_seat := -1
+var name_tags: Dictionary = {}
+var refuel_network_amount := 0.0
+var spray_network_amount := 0.0
 var hovered_grab_object: Node3D
 var highlight_material: StandardMaterial3D
 var refuel_car: Node3D
@@ -74,17 +78,16 @@ var _held_network_send_elapsed := 0.0
 
 func _ready() -> void:
 	add_to_group("road_stream_player")
-	$NameTag.text = player_name
 	var locally_controlled := is_multiplayer_authority()
 	if locally_controlled:
 		camera.make_current()
 	$HUD.visible = locally_controlled
 	$Model.visible = not locally_controlled or not NetworkManager.is_online()
-	$NameTag.visible = not locally_controlled
 	if not locally_controlled:
 		remote_position = global_position
 		remote_rotation_y = rotation.y
 		return
+	GameSettings.player_name_changed.connect(_update_player_name)
 	var wind := CabinWind.new()
 	wind.name = "CabinWind"
 	add_child(wind)
@@ -100,12 +103,72 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
+func _process(_delta: float) -> void:
+	if not NetworkManager.is_online() or not is_multiplayer_authority():
+		return
+	var view := get_viewport().get_camera_3d()
+	if view == null:
+		return
+	var bounds := get_viewport().get_visible_rect().size
+	var seen := {}
+	for other in get_tree().get_nodes_in_group("road_stream_player"):
+		if other == self or not other.visible or other.global_position.distance_squared_to(view.global_position) > 65.0 * 65.0:
+			continue
+		var head_at: Vector3 = other.global_position + Vector3.UP * 0.9
+		if view.is_position_behind(head_at):
+			continue
+		var head_screen := view.unproject_position(head_at)
+		if not Rect2(Vector2.ZERO, bounds).has_point(head_screen):
+			continue
+		var sight := PhysicsRayQueryParameters3D.create(view.global_position, head_at, 1)
+		if is_instance_valid(active_vehicle):
+			sight.exclude = [active_vehicle.get_rid()]
+		if not get_world_3d().direct_space_state.intersect_ray(sight).is_empty():
+			continue
+		seen[other] = true
+		var label: Label = name_tags.get(other)
+		if label == null:
+			label = Label.new()
+			label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			label.add_theme_constant_override("outline_size", 5)
+			label.add_theme_color_override("font_outline_color", Color(0.07, 0.06, 0.05, 0.94))
+			$HUD.add_child(label)
+			name_tags[other] = label
+		label.text = other.player_name
+		label.add_theme_font_size_override("font_size", roundi(14 * GameSettings.ui_scale))
+		label.size = label.get_minimum_size()
+		var above := view.unproject_position(head_at + Vector3.UP * 0.43)
+		label.position = Vector2(above.x - label.size.x * 0.5, above.y - label.size.y).clamp(
+			Vector2(4, 4), (bounds - label.size - Vector2(4, 4)).max(Vector2(4, 4)))
+	for other in name_tags.keys():
+		if not seen.has(other):
+			name_tags[other].queue_free()
+			name_tags.erase(other)
+
+
+func _update_player_name(value: String) -> void:
+	player_name = value
+	if NetworkManager.is_online():
+		_sync_player_name.rpc(value)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_player_name(value: String) -> void:
+	player_name = value.strip_edges().substr(0, 24)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_multiplayer_authority():
 		return
 	if is_instance_valid(active_vehicle):
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_L, KEY_H]:
+			_toggle_vehicle_lights(active_vehicle)
+			get_viewport().set_input_as_handled()
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
-			_exit_vehicle()
+			if NetworkManager.is_online():
+				active_vehicle.request_leave()
+			else:
+				_exit_vehicle()
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
@@ -139,6 +202,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	if not is_multiplayer_authority():
+		if is_instance_valid(active_vehicle):
+			global_position = active_vehicle.global_position
+			return
 		global_position = global_position.lerp(remote_position, minf(delta * 14.0, 1.0))
 		rotation.y = lerp_angle(rotation.y, remote_rotation_y, minf(delta * 14.0, 1.0))
 		return
@@ -150,7 +216,8 @@ func _physics_process(delta: float) -> void:
 		_send_network_transform(delta)
 		return
 
-	var input_direction := _get_input_direction()
+	var controls_active := not NetworkManager.is_online() or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var input_direction := _get_input_direction() if controls_active else Vector3.ZERO
 	var world_direction := (global_transform.basis * input_direction).normalized()
 	var is_crouching := Input.is_key_pressed(KEY_C)
 	var is_sprinting := Input.is_key_pressed(KEY_SHIFT) and not is_crouching
@@ -165,7 +232,7 @@ func _physics_process(delta: float) -> void:
 
 	if not is_on_floor():
 		velocity.y -= gravity * delta
-	elif Input.is_key_pressed(KEY_SPACE) and not is_crouching:
+	elif controls_active and Input.is_key_pressed(KEY_SPACE) and not is_crouching:
 		velocity.y = jump_velocity
 
 	move_and_slide()
@@ -386,6 +453,12 @@ func _update_spray_paint(delta: float) -> void:
 
 	var color := spray_colors[spray_color_index]
 	var amount := spray_strength * delta
+	if NetworkManager.is_online():
+		spray_network_amount += amount
+		if spray_network_amount < 0.075:
+			return
+		amount = spray_network_amount
+		spray_network_amount = 0.0
 	if _spray_paint_area(color, amount):
 		return
 
@@ -409,7 +482,7 @@ func _spray_paint_area(color: Color, amount: float) -> bool:
 	if car == null or not car.has_method("paint_named_part"):
 		return false
 
-	return bool(car.call("paint_named_part", part_name, color, amount))
+	return _paint_vehicle(car, part_name, color, amount)
 
 
 func _spray_paint_body(color: Color, amount: float) -> bool:
@@ -421,7 +494,14 @@ func _spray_paint_body(color: Color, amount: float) -> bool:
 	if not car.is_in_group("drivable") or not car.has_method("paint_named_part"):
 		return false
 
-	return bool(car.call("paint_named_part", "Chassis", color, amount))
+	return _paint_vehicle(car, "Chassis", color, amount)
+
+
+func _paint_vehicle(car: Node3D, part_name: String, color: Color, amount: float) -> bool:
+	if NetworkManager.is_online():
+		car.request_work("paint", part_name, Vector2(spray_color_index, amount))
+		return true
+	return car.paint_named_part(part_name, color, amount)
 
 
 func _paint_part_from_area(area: Area3D) -> String:
@@ -591,36 +671,67 @@ func _handle_interaction() -> void:
 
 
 func _try_enter_vehicle() -> bool:
-	var space_state := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(
 		camera.global_position,
-		camera.global_position + -camera.global_transform.basis.z * vehicle_interact_distance
+		camera.global_position - camera.global_basis.z * vehicle_interact_distance
 	)
-	query.exclude = [self]
+	query.exclude = _raycast_exclusions()
 	query.collide_with_areas = true
 	query.collide_with_bodies = false
-	var result := space_state.intersect_ray(query)
-
-	if result.is_empty():
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
 		return false
 
-	var target := result.collider as Node3D
-	if target == null or not target.is_in_group("vehicle_seat"):
+	var target := hit.collider as Area3D
+	if target == null:
+		return false
+	var seat_target := target.is_in_group("vehicle_seat")
+	var door_target := target.name in [&"DoorFL", &"DoorFR", &"DoorRL", &"DoorRR"]
+	if not seat_target and not (NetworkManager.is_online() and door_target):
 		return false
 
 	var car := target.get_parent() as Node3D
 	if car == null or not car.is_in_group("drivable"):
 		return false
-	if NetworkManager.is_online() and not car.is_multiplayer_authority():
+	if _is_interaction_occluded(hit.position, car) or not car.can_enter_from_position(global_position):
 		return false
-
-	if _is_interaction_occluded(result.position, car):
-		return false
-	if car.has_method("can_enter_from_position") and not bool(car.call("can_enter_from_position", global_position)):
-		return false
-
-	_enter_vehicle(car)
+	if NetworkManager.is_online():
+		if car.seat_occupants.size() == car.seat_capacity() and not car.seat_occupants.has(0):
+			return false
+		car.request_ride()
+	else:
+		_enter_vehicle(car)
 	return true
+
+
+func set_shared_seat(vehicle: Node3D, seat: int) -> void:
+	var previous_seat := shared_seat
+	shared_seat = seat
+	if seat < 0:
+		active_vehicle = null
+		collision_shape.set_deferred("disabled", false)
+		show()
+		var side := -1.0 if previous_seat % 2 == 0 else 1.0
+		var outside := vehicle.to_global(Vector3(side * 1.7, 1.0, 0.0))
+		global_position = outside if _is_exit_position_clear(outside) else _find_safe_exit_position(vehicle, outside)
+		remote_position = global_position
+		if is_multiplayer_authority():
+			_reset_standing_shape()
+			velocity = Vector3.ZERO
+			camera.make_current()
+			$HUD/Crosshair.show()
+			_update_fuel_hud()
+		return
+	if active_vehicle == vehicle:
+		return
+	active_vehicle = vehicle
+	global_position = vehicle.global_position
+	collision_shape.set_deferred("disabled", true)
+	hide()
+	if is_multiplayer_authority():
+		_set_hovered_grab_object(null)
+		$HUD/Crosshair.hide()
+		vehicle.activate_shared_camera(seat)
 
 
 func _enter_vehicle(car: Node3D, restoring: bool = false) -> void:
@@ -698,6 +809,11 @@ func _try_weld_held_object() -> bool:
 		return false
 
 	var object := held_object
+	if NetworkManager.is_online():
+		_drop_held_object()
+		_set_hovered_grab_object(null)
+		car.request_work("weld", object.get_path())
+		return true
 	_restore_held_object_physics()
 	held_object = null
 	_set_hovered_grab_object(null)
@@ -731,6 +847,12 @@ func _try_install_vehicle_part() -> bool:
 		return false
 
 	var object := held_object
+	if NetworkManager.is_online():
+		var pose := object.global_transform
+		_drop_held_object()
+		_set_hovered_grab_object(null)
+		destination.request_work("install", object.get_path(), pose)
+		return true
 	_restore_held_object_physics()
 	held_object = null
 	_set_hovered_grab_object(null)
@@ -755,6 +877,9 @@ func _try_wire_pointed_battery() -> bool:
 	if not bool(car.call("can_wire_battery", battery)):
 		return false
 
+	if NetworkManager.is_online():
+		car.request_work("wire", battery.get_path())
+		return true
 	return bool(car.call("wire_battery", battery))
 
 
@@ -771,6 +896,9 @@ func _try_remove_vehicle_part() -> bool:
 	if car == null or not car.has_method("remove_installed_part"):
 		return false
 
+	if NetworkManager.is_online():
+		car.request_work("remove", car.get_path_to(area))
+		return true
 	var loose_part := car.call("remove_installed_part", area) as RigidBody3D
 	if loose_part == null:
 		return false
@@ -813,15 +941,22 @@ func _find_refuel_car() -> Node3D:
 
 func _try_toggle_vehicle_headlights() -> bool:
 	if active_vehicle and active_vehicle.has_method("toggle_headlights"):
-		active_vehicle.call("toggle_headlights")
+		_toggle_vehicle_lights(active_vehicle)
 		return true
 
 	var car := _find_pointed_or_nearby_vehicle()
 	if car == null or not car.has_method("toggle_headlights"):
 		return false
 
-	car.call("toggle_headlights")
+	_toggle_vehicle_lights(car)
 	return true
+
+
+func _toggle_vehicle_lights(car: Node3D) -> void:
+	if NetworkManager.is_online():
+		car.request_work("lights", "")
+	else:
+		car.toggle_headlights()
 
 
 func _find_pointed_or_nearby_vehicle() -> Node3D:
@@ -878,12 +1013,20 @@ func _update_refuel(delta: float) -> void:
 		return
 
 	var requested := refuel_rate * delta
+	if NetworkManager.is_online() and not multiplayer.is_server():
+		refuel_network_amount += requested
+		if refuel_network_amount >= 0.55:
+			refuel_car.request_work("fuel", refuel_canister.get_path(), refuel_network_amount)
+			refuel_network_amount = 0.0
+		return
 	var available := float(refuel_canister.call("drain_fuel", requested))
 	if available <= 0.0:
 		_stop_refuel()
 		return
 
 	var accepted := float(refuel_car.call("receive_fuel", available))
+	if NetworkManager.is_online() and accepted > 0.0:
+		refuel_car._sync_canister.rpc(refuel_canister.get_path(), refuel_canister.fuel_amount + available - accepted)
 	var leftover := available - accepted
 	if leftover > 0.0:
 		refuel_canister.fuel_amount += leftover
@@ -893,6 +1036,7 @@ func _update_refuel(delta: float) -> void:
 
 
 func _stop_refuel() -> void:
+	refuel_network_amount = 0.0
 	refuel_car = null
 	refuel_canister = null
 	refuel_start_fuel = 0.0
@@ -931,6 +1075,9 @@ func _try_unweld_pointed_object() -> bool:
 	if car == null or not car.has_method("unweld_object"):
 		return false
 
+	if NetworkManager.is_online():
+		car.request_work("unweld", object.get_path())
+		return true
 	return bool(car.call("unweld_object", object))
 
 

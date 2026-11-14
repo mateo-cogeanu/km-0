@@ -16,7 +16,7 @@ func _ready() -> void:
 		$Car.global_transform = _garage_car_transform(garage, 0)
 		$Car.reset_physics_interpolation()
 		_place_player($Player, garage, 0)
-		$Player.player_name = "Player"
+		$Player.player_name = GameSettings.player_name
 		if TripSave.continue_requested:
 			TripSave.continue_requested = false
 			$Car.start_with_removed_panels = false
@@ -31,25 +31,28 @@ func _ready() -> void:
 	await get_tree().process_frame
 	var ids: Array = NetworkManager.players.keys()
 	ids.sort()
-	garage.get_node("GarageModel").add_coop_bays(ids.size() - 1)
-	for index in ids.size():
-		var peer_id: int = int(ids[index])
+	var car_count := ceili(ids.size() / 4.0)
+	garage.get_node("GarageModel").add_coop_bays(car_count - 1)
+	for index in car_count:
 		var car := CAR_SCENE.instantiate()
-		car.name = "Car_%s" % peer_id
+		car.name = "Car_%d" % (index + 1)
 		car.transform = global_transform.affine_inverse() * _garage_car_transform(garage, index)
-		car.set_multiplayer_authority(peer_id)
 		add_child(car)
 		if index == 0:
 			_add_workshop_batteries(car, garage)
-		if $InfiniteRoad and peer_id == multiplayer.get_unique_id():
 			$InfiniteRoad.target = car
 
+	for index in ids.size():
+		var peer_id: int = int(ids[index])
 		var player := PLAYER_SCENE.instantiate()
 		player.name = str(peer_id)
 		player.player_name = str(NetworkManager.players[peer_id].get("name", "Player"))
-		_place_player(player, garage, index)
+		_place_player(player, garage, index / 4)
+		var offset := float(index % 4) - 1.5
+		player.position += global_transform.basis.inverse() * garage.global_basis.x * offset * 0.86
 		player.set_multiplayer_authority(peer_id)
 		add_child(player)
+	NetworkManager.player_disconnected.connect(_remove_disconnected_player)
 
 	# Select the local view after all player and car cameras have entered the viewport.
 	var local_player := get_node(str(multiplayer.get_unique_id()))
@@ -74,3 +77,11 @@ func _place_player(player: Node3D, garage: Node3D, index: int) -> void:
 func _add_workshop_batteries(car: Node3D, garage: Node3D) -> void:
 	car._spawn_aux_battery(self, "ExtraBatteryLoose", garage.to_global(Vector3(-2.35, 0.24, -4.48)))
 	car._spawn_aux_battery(self, "ExtraBatteryLoose2", garage.to_global(Vector3(-2.48, 0.24, -4.96)))
+
+
+func _remove_disconnected_player(peer_id: int) -> void:
+	var player := get_node_or_null(str(peer_id))
+	if player:
+		player.queue_free()
+	for vehicle in get_tree().get_nodes_in_group("drivable"):
+		vehicle.remove_disconnected_rider(peer_id)

@@ -24,6 +24,8 @@ func _ready() -> void:
 	$Menu/MultiplayerButton.pressed.connect(_open_multiplayer)
 	$Menu/SettingsButton.pressed.connect(_open_settings)
 	$Menu/QuitButton.pressed.connect(_quit_game)
+	if GameSettings.player_name.is_empty():
+		_prompt_for_name.call_deferred()
 
 
 func _start_game() -> void:
@@ -67,3 +69,36 @@ func _close_settings() -> void:
 
 func _apply_menu_scale() -> void:
 	Style.fit_panel($Menu, size, true)
+
+
+func _prompt_for_name() -> void:
+	var prompt := AcceptDialog.new()
+	prompt.title = "Your name"
+	prompt.dialog_text = "Choose the name other players will see."
+	prompt.ok_button_text = "Continue"
+	prompt.unresizable = true
+	add_child(prompt)
+	var field := LineEdit.new()
+	field.max_length = 24
+	field.placeholder_text = "Player name"
+	field.custom_minimum_size.x = 280
+	prompt.add_child(field)
+	prompt.get_ok_button().disabled = true
+	field.text_changed.connect(func(value: String) -> void:
+		prompt.get_ok_button().disabled = value.strip_edges().is_empty()
+	)
+	field.text_submitted.connect(func(value: String) -> void:
+		if not value.strip_edges().is_empty():
+			prompt.get_ok_button().pressed.emit()
+	)
+	prompt.confirmed.connect(func() -> void:
+		GameSettings.set_player_name(field.text)
+		prompt.queue_free()
+	)
+	prompt.canceled.connect(func() -> void: _show_name_prompt.call_deferred(prompt, field))
+	_show_name_prompt(prompt, field)
+
+
+func _show_name_prompt(prompt: AcceptDialog, field: LineEdit) -> void:
+	prompt.popup_centered()
+	field.grab_focus()
