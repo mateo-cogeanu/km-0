@@ -23,6 +23,8 @@ const SEDAN_LOADOUTS := [
 ]
 
 var stop_index: int
+var saved_body_style := -1
+var legacy_car_spares := false
 var vehicle_owner := 1
 var legacy_layout := false
 var use_sedan_loadout := true
@@ -83,7 +85,7 @@ func _ready() -> void:
 	if vehicle_kind == 2 or rng.randf() < 0.73:
 		_spawn_part(finds, "SpareBattery", BATTERY, Vector3(2.76, 0.56, 0.35), Vector3(0.13, 0.073, 0.094), "aux_battery")
 	if vehicle_kind < 0 and not legacy_layout:
-		Salvage.add_parts(finds, garage.style, stop_index)
+		Salvage.add_parts(finds, garage.style, stop_index, legacy_car_spares)
 	if vehicle_kind >= 0:
 		var vehicle: RigidBody3D = (SEDAN if vehicle_kind == 0 else BIKE).instantiate()
 		vehicle.name = ["Sedan", "Bicycle", "Motorbike"][vehicle_kind]
@@ -93,6 +95,11 @@ func _ready() -> void:
 		if vehicle_kind == 0:
 			vehicle.start_with_random_body_color = false
 			vehicle.fuel_amount = 0.0
+			if saved_body_style >= 0:
+				vehicle.body_style = saved_body_style
+			elif not legacy_layout and stop_index != -5:
+				vehicle.body_style = posmod(hash("body-style:%d" % stop_index), 3)
+			saved_body_style = vehicle.body_style
 			if not legacy_layout:
 				vehicle.sedan_trim = 1 + posmod(hash("trim:%d" % stop_index), 3)
 				if use_sedan_loadout:

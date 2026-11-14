@@ -7,6 +7,7 @@ const DOOR_LATCH := preload("res://assets/audio/vehicle/door_latch.wav")
 const WHEEL_MOUNT := preload("res://assets/audio/vehicle/wheel_mount.wav")
 const PANEL_RATTLE := preload("res://assets/audio/vehicle/panel_rattle.wav")
 const WELD_SOUND_PATH := "res://assets/audio/weld.wav"
+const CarModel := preload("res://scripts/compact_car_model.gd")
 const PropShapes := preload("res://scripts/prop_shapes.gd")
 const TireEffects := preload("res://scripts/tire_effects.gd")
 const ENGINE_LOOPS := {
@@ -54,6 +55,7 @@ const COOLANT_RESERVOIR_MODEL := preload("res://assets/vehicles/parts/coolantres
 @export var start_with_removed_panels: bool = true
 @export_range(0, 12, 1) var minimum_missing_starting_parts: int = 2
 @export_range(0, 12, 1) var maximum_missing_starting_parts: int = 4
+@export_enum("Sedan", "Hatchback", "Wagon") var body_style := 0
 @export_enum("Original", "Touring", "Rally", "Fleet") var sedan_trim := 0
 @export var electric_battery_capacity_per_pack: float = 35.0
 @export_group("Body Damage")
@@ -141,6 +143,8 @@ func _ready() -> void:
 	_setup_highlight_material()
 	_setup_snap_ghost_material()
 	_setup_sound_effects()
+	if wheel_model_root:
+		CarModel.new().build(wheel_model_root, body_style)
 	_setup_interactables()
 	_setup_protected_parts()
 	_setup_headlights()
@@ -237,6 +241,10 @@ func enter(player: Node3D, restoring: bool = false) -> void:
 	else:
 		ignition_variant = _get_running_engine_variant()
 		audible_engine_variant = ignition_variant
+
+
+func get_vehicle_title() -> String:
+	return ["sedan", "hatchback", "wagon"][body_style] if wheel_model_root else "vehicle"
 
 
 func seat_capacity() -> int:
@@ -785,21 +793,25 @@ func _update_engine_audio(delta: float, variant: String, rpm: float, engine_load
 
 
 func _setup_rear_lights() -> void:
-	var lens := _find_part_node("Brake_Lights_Brake_lights_0") as MeshInstance3D
-	if lens == null:
+	var mount := _find_part_node("RearLightMount")
+	if mount == null:
 		return
-	var material := lens.get_active_material(0) as StandardMaterial3D
+	var lenses := mount.find_children("BrakeLens*", "MeshInstance3D", false, false)
+	if lenses.is_empty():
+		return
+	var material := (lenses[0] as MeshInstance3D).get_active_material(0) as StandardMaterial3D
 	rear_brake_material = material.duplicate() as StandardMaterial3D if material else StandardMaterial3D.new()
 	rear_brake_material.emission = Color("#ff3020")
 	rear_brake_material.emission_energy_multiplier = 1.8
-	lens.set_surface_override_material(0, rear_brake_material)
+	for lens: MeshInstance3D in lenses:
+		lens.material_override = rear_brake_material
 
 	rear_reverse_material = PropShapes.material(Color("#b5ac97"), 0.1, 0.4)
 	rear_reverse_material.emission = Color("#fff0d0")
 	rear_reverse_material.emission_energy_multiplier = 1.9
-	var tail := to_local(lens.global_position)
+	var tail := to_local(mount.global_position)
 	for side in [-1.0, 1.0]:
-		var at := Vector3(side * 0.59, tail.y - 0.07, tail.z + 0.055)
+		var at := Vector3(side * 0.426, tail.y, tail.z + 0.043)
 		PropShapes.box(self, "ReverseLens", Vector3(0.17, 0.075, 0.028), at, rear_reverse_material)
 		var lamp := OmniLight3D.new()
 		lamp.position = at + Vector3.BACK * 0.18
@@ -897,10 +909,10 @@ func _setup_body_deformation() -> void:
 
 	for node in wheel_model_root.find_children("*", "MeshInstance3D", true, false):
 		var mesh_instance := node as MeshInstance3D
-		if mesh_instance == null or mesh_instance.mesh == null:
+		if mesh_instance == null or not mesh_instance.mesh is ArrayMesh:
 			continue
 		var mesh_name := mesh_instance.name.to_lower()
-		if not mesh_name.contains("_chassis_") and not mesh_name.contains("_bumpers_"):
+		if not mesh_instance.get_meta("body_paint", false) and mesh_name not in ["frontbumper", "rearbumper"]:
 			continue
 		if mesh_name.contains("interior") or mesh_name.contains("window"):
 			continue
@@ -1040,9 +1052,9 @@ func _apply_graphics_quality() -> void:
 func _configure_headlight_transform(light: Light3D) -> void:
 	match light.name:
 		"LeftHeadlight":
-			light.position = Vector3(-0.54, 0.72, -2.45)
+			light.position = Vector3(-0.52, 0.654, -2.19)
 		"RightHeadlight":
-			light.position = Vector3(0.54, 0.72, -2.45)
+			light.position = Vector3(0.52, 0.654, -2.19)
 		_:
 			pass
 	light.rotation_degrees = Vector3(-4.0, 0.0, 0.0)
@@ -1118,7 +1130,7 @@ func is_gas_cap_open() -> bool:
 
 
 func get_gas_hole_position() -> Vector3:
-	var cap := _find_part_node("gascap")
+	var cap := _find_part_node("FuelFiller")
 	if cap:
 		return cap.global_position
 
@@ -1232,10 +1244,10 @@ func _setup_interactables() -> void:
 	_register_interactable("DoorFR", ["FR_Door"], 1.0, "y", 72.0)
 	_register_interactable("DoorRL", ["RL_Door"], -1.0, "y", 72.0)
 	_register_interactable("DoorRR", ["RR_Door"], 1.0, "y", 72.0)
-	_register_interactable("HoodTarget", ["Hood", "Bonnet", "Chassis_Chassis_0_001"], -1.0, "x", 68.0, "max_y")
-	_register_interactable("TrunkTarget", ["Trunk", "Boot", "Chassis_Chassis_0_002"], 1.0, "x", 72.0, "min_y")
-	_register_interactable("GasCapTarget", ["gascap"], -1.0, "y", 105.0, "min_z")
-	_register_interactable("SeatTarget", ["SedanModel/Sketchfab_model/Car_Sedan_FBX/RootNode/Interior", "Interior"], 0.0, "y", 0.0)
+	_register_interactable("HoodTarget", ["HoodTargetHinge"], 1.0, "x", 68.0)
+	_register_interactable("TrunkTarget", ["TrunkTargetHinge"], -1.0, "x", 72.0)
+	_register_interactable("GasCapTarget", ["GasCapTargetHinge"], 1.0, "y", 105.0)
+	_register_interactable("SeatTarget", ["Interior"], 0.0, "y", 0.0)
 
 	var seat := get_node_or_null("SeatTarget") as Area3D
 	if seat:
@@ -1265,11 +1277,13 @@ func _setup_engine_bay_models() -> void:
 		var model_root := engine.get_parent_node_3d()
 		var air_filter := AIR_FILTER_MODEL.instantiate() as Node3D
 		air_filter.name = "AirFilter"
-		air_filter.position = engine.position + Vector3(-1.36, -0.22, 0.32)
+		air_filter.position = engine.position + Vector3(0.535, 0.0, -0.12)
+		air_filter.scale = Vector3.ONE * 0.38
 		model_root.add_child(air_filter)
 		var reservoir := COOLANT_RESERVOIR_MODEL.instantiate() as Node3D
 		reservoir.name = "CoolantReservoir"
-		reservoir.position = engine.position + Vector3(-1.34, -0.19, -0.44)
+		reservoir.position = engine.position + Vector3(0.56, 0.02, 0.24)
+		reservoir.scale = Vector3.ONE * 0.38
 		model_root.add_child(reservoir)
 
 
@@ -1488,6 +1502,8 @@ func _detach_part(part_type: String) -> RigidBody3D:
 	body.set_meta("trip_part_id", part.get_meta("trip_part_id", ""))
 	if part_type == "engine":
 		body.set_meta("engine_variant", current_engine_variant)
+	if part_type == "trunk":
+		body.set_meta("body_style", part.get_meta("body_style", body_style))
 	body.add_to_group("vehicle_loose_part")
 	_get_loose_part_parent().add_child(body, true)
 	body.global_transform = part.global_transform.orthonormalized() if data.has("wheel") else part.global_transform
@@ -1542,6 +1558,8 @@ func install_blocker(body: RigidBody3D) -> String:
 		return "Doesn’t fit this vehicle"
 	if _get_loose_part_visual(body, part_type) == null:
 		return "Doesn’t fit this vehicle"
+	if part_type == "trunk" and body.get_meta("body_style", CarModel.SEDAN) != body_style:
+		return "This rear lid fits a different body style"
 	if _requires_hood_open(part_type) and not _has_hood_access():
 		return "Open the hood"
 	var data: Dictionary = removable_parts[part_type]
@@ -1791,6 +1809,10 @@ func paint_named_part(part_name: String, color: Color, amount: float) -> bool:
 	_paint_meshes_recursive(part, color, amount, target_name)
 	if target_name == "Chassis":
 		_paint_gas_cap(color, amount)
+		for title in ["Hood", "Trunk"]:
+			var panel := _find_part_node(title)
+			if panel:
+				_paint_meshes_recursive(panel, color, amount, "Chassis")
 	return true
 
 
@@ -1805,13 +1827,16 @@ func get_trip_panel_rotations() -> Dictionary:
 	return rotations
 
 
-func restore_trip_panel_rotations(rotations: Dictionary) -> void:
+func restore_trip_panel_rotations(rotations: Dictionary, legacy_car := false) -> void:
 	for area_name in rotations:
 		var area := get_node_or_null(area_name) as Area3D
 		if area and area.collision_layer != 0:
 			var pivot := _get_interactable_part(area)
 			if pivot:
-				pivot.rotation = rotations[area_name]
+				var angle: Vector3 = rotations[area_name]
+				if legacy_car and area_name in ["HoodTarget", "TrunkTarget", "GasCapTarget"]:
+					angle = -angle
+				pivot.rotation = angle
 				_update_panel_target(area)
 
 
@@ -1824,7 +1849,20 @@ func get_trip_paint() -> Dictionary:
 	return paint
 
 
-func restore_trip_paint(paint: Dictionary) -> void:
+func restore_trip_paint(paint: Dictionary, legacy_car := false) -> void:
+	if legacy_car:
+		var colors := {}
+		for path: String in paint:
+			var panel := "Chassis"
+			for door: String in CarModel.DOORS:
+				if path.contains("/" + door + "/"):
+					panel = door
+					break
+			if not colors.has(panel):
+				colors[panel] = paint[path]
+		for panel: String in colors:
+			paint_named_part(panel, colors[panel], 1.0)
+		return
 	for path in paint:
 		var mesh := get_node_or_null(path) as MeshInstance3D
 		if mesh:
@@ -1857,6 +1895,8 @@ func _paint_meshes_recursive(node: Node, color: Color, amount: float, target_nam
 
 
 func _is_paintable_mesh(mesh_instance: MeshInstance3D, target_name: String) -> bool:
+	if mesh_instance.has_meta("body_paint"):
+		return bool(mesh_instance.get_meta("body_paint"))
 	var mesh_name := mesh_instance.name.to_lower()
 	if mesh_name.contains("window") or mesh_name.contains("glass"):
 		return false
@@ -1893,24 +1933,21 @@ func _apply_sedan_trim() -> void:
 	for door in ["FL_Door", "FR_Door", "RL_Door", "RR_Door"]:
 		paint_named_part(door, tint, 1.0)
 	var rubber := PropShapes.material(Color("#242829"), 0.12)
-	var metal := PropShapes.material(Color("#656963"), 0.52)
-	var roof := Node3D.new()
-	roof.name = "TrimAccessories"
-	add_child(roof)
+	var accessories := Node3D.new()
+	accessories.name = "TrimAccessories"
+	add_child(accessories)
 	match sedan_trim:
 		1:
-			for side in [-1.0, 1.0]:
-				PropShapes.box(roof, "RoofRail", Vector3(0.055, 0.08, 1.32), Vector3(side * 0.51, 1.88, 0.25), metal)
-			for z in [-0.24, 0.72]:
-				PropShapes.box(roof, "Crossbar", Vector3(1.15, 0.07, 0.085), Vector3(0, 1.93, z), rubber)
+			for z in [-0.17, 0.47]:
+				for side in [-1.0, 1.0]:
+					PropShapes.box(accessories, "CrossbarFoot", Vector3(0.092, 0.057, 0.10), Vector3(side * 0.53, 1.707, z), rubber)
+				PropShapes.box(accessories, "Crossbar", Vector3(1.20, 0.033, 0.073), Vector3(0, 1.752, z), rubber)
 		2:
-			PropShapes.box(roof, "BumperGuard", Vector3(1.12, 0.095, 0.12), Vector3(0, 0.46, -2.49), metal)
-			for x in [-0.28, 0.28]:
-				PropShapes.cylinder(roof, "AuxLamp", Vector3(x, 0.65, -2.49), Vector3.FORWARD, 0.105, 0.12, rubber)
-				PropShapes.cylinder(roof, "LampLens", Vector3(x, 0.65, -2.557), Vector3.FORWARD, 0.086, 0.018, metal)
+			for side in [-1.0, 1.0]:
+				PropShapes.box(accessories, "BumperOverrider", Vector3(0.087, 0.13, 0.053), Vector3(side * 0.52, 0.39, -2.226), rubber)
 		3:
 			for side in [-1.0, 1.0]:
-				PropShapes.box(roof, "SillGuard", Vector3(0.10, 0.14, 2.18), Vector3(side * 0.91, 0.39, 0.04), rubber)
+				PropShapes.box(accessories, "SillGuard", Vector3(0.022, 0.071, 1.90), Vector3(side * 0.900, 0.27, 0.038), rubber)
 
 
 func _apply_automotive_finish() -> void:
@@ -2399,6 +2436,8 @@ func _register_interactable(
 		return
 
 	var visual_part := part
+	if part.name in ["HoodTargetHinge", "TrunkTargetHinge", "GasCapTargetHinge"]:
+		visual_part = part.get_child(0) as Node3D
 	if hinge_edge != "":
 		part = _create_hinge_pivot(area_name, part, hinge_edge)
 

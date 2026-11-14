@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://dqc3uxe20l45v" path="res://scripts/drivable_vehicle.gd" id="1_drivable_vehicle"]
 [ext_resource type="Script" uid="uid://2yhhp0p3sqyp" path="res://addons/gevp/scripts/wheel.gd" id="2_wheel"]
-[ext_resource type="PackedScene" path="res://assets/vehicles/car_model.tscn" id="3_sedan"]
 
 [sub_resource type="Curve" id="Curve_torque"]
 _data = [Vector2(0, 0.45), 0.0, 1.92593, 0, 0, Vector2(0.55, 1), 0.0, 0.0, 0, 0, Vector2(1, 0.68), -1.45455, 0.0, 0, 0]
@@ -84,8 +83,7 @@ collision_mask = 0
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.55, 0)
 shape = SubResource("BoxShape3D_interaction")
 
-[node name="SedanModel" parent="." unique_id=1865641994 instance=ExtResource("3_sedan")]
-transform = Transform3D(-0.45, 0, 3.93402e-08, 0, 0.45, 0, -3.93402e-08, 0, -0.45, 0, -0.08, 0)
+[node name="SedanModel" type="Node3D" parent="."]
 
 [node name="EngineSound" type="AudioStreamPlayer3D" parent="."]
 position = Vector3(0, 0.85, -1.42)

@@ -1,5 +1,6 @@
 extends Node3D
 
+const CarModel := preload("res://scripts/compact_car_model.gd")
 const Shapes := preload("res://scripts/prop_shapes.gd")
 const Terrain := preload("res://scripts/roadside_terrain.gd")
 const ROAD_X := 2.1
@@ -16,6 +17,7 @@ var camera_parallax := Vector2.ZERO
 
 func _ready() -> void:
 	camera_base_transform = menu_camera.transform
+	CarModel.new(Color("#7e3830")).build($Car, CarModel.WAGON, false)
 	$Workshop.build()
 	_add_landscape()
 

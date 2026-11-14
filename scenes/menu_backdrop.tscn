@@ -1,7 +1,6 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/menu_backdrop.gd" id="1"]
-[ext_resource type="PackedScene" path="res://assets/vehicles/car_model.tscn" id="2_car_model"]
 [ext_resource type="Script" path="res://scripts/day_night_cycle.gd" id="3_day_night"]
 [ext_resource type="Shader" path="res://assets/buildings/asphalt.gdshader" id="4_asphalt"]
 [ext_resource type="Script" path="res://scripts/abandoned_building.gd" id="5_workshop"]
@@ -70,11 +69,8 @@ script = ExtResource("5_workshop")
 style = 5
 
 [node name="Car" type="Node3D" parent="."]
-position = Vector3(3.25, 0.088, 0.48)
+position = Vector3(3.25, 0.01, 0.48)
 rotation_degrees = Vector3(0, 150, 0)
-
-[node name="Model" parent="Car" instance=ExtResource("2_car_model")]
-transform = Transform3D(-0.45, 0, 3.93402e-08, 0, 0.45, 0, -3.93402e-08, 0, -0.45, 0, -0.08, 0)
 
 [node name="Camera3D" type="Camera3D" parent="."]
 position = Vector3(-1.0, 2.7, 10.3)

@@ -116,10 +116,16 @@ func save_trip() -> bool:
 		driving = str(world.get_path_to(player.active_vehicle))
 	var road: Node3D = world.get_node("InfiniteRoad")
 	var stop_doors := {}
+	var car_body_styles := {}
+	var legacy_spare_stops: Array = []
 	var legacy_stops: Array = []
 	var sedan_loadout_stops: Array = []
 	for index in road.stops:
 		stop_doors[index] = road.stops[index].get_door_state()
+		if road.stops[index].legacy_car_spares:
+			legacy_spare_stops.append(index)
+		if road.stops[index].saved_body_style >= 0:
+			car_body_styles[index] = road.stops[index].saved_body_style
 		if road.stops[index].legacy_layout:
 			legacy_stops.append(index)
 		elif road.stops[index].use_sedan_loadout:
@@ -135,6 +141,8 @@ func save_trip() -> bool:
 		"stops": road.stops.keys(),
 		"garage_doors": world.get_node("Shack").get_door_state(),
 		"stop_doors": stop_doors,
+		"car_body_styles": car_body_styles,
+		"legacy_spare_stops": legacy_spare_stops,
 		"legacy_stops": legacy_stops,
 		"sedan_loadout_stops": sedan_loadout_stops,
 		"vehicles": vehicles,
@@ -184,8 +192,10 @@ func restore_trip(world: Node) -> void:
 	var stop_doors: Dictionary = data.get("stop_doors", {})
 	var legacy_stops: Array = data.get("legacy_stops", data["stops"])
 	var sedan_loadout_stops: Array = data.get("sedan_loadout_stops", [])
+	var car_body_styles: Dictionary = data.get("car_body_styles", {})
+	var legacy_spare_stops: Array = data.get("legacy_spare_stops", data["stops"] if not data.has("car_body_styles") else [])
 	for index in data["stops"]:
-		road.spawn_stop(index, 1, index in legacy_stops, index in sedan_loadout_stops, true)
+		road.spawn_stop(index, 1, index in legacy_stops, index in sedan_loadout_stops, true, clampi(car_body_styles.get(index, 0), 0, 2), index in legacy_spare_stops)
 		road.stops[index].restore_door_state(stop_doors.get(index, {}))
 	# Recreate supplied parts from older trips only if the save still uses them.
 	var starter: Node3D = world.get_node("Car")
@@ -255,8 +265,9 @@ func restore_trip(world: Node) -> void:
 	for car_path in data["vehicles"]:
 		var car: Node3D = world.get_node_or_null(car_path)
 		if car:
-			car.restore_trip_paint(data["vehicles"][car_path]["paint"])
-			car.restore_trip_panel_rotations(data["vehicles"][car_path].get("panels", {}))
+			var legacy_car: bool = car.wheel_model_root != null and not data.has("car_body_styles")
+			car.restore_trip_paint(data["vehicles"][car_path]["paint"], legacy_car)
+			car.restore_trip_panel_rotations(data["vehicles"][car_path].get("panels", {}), legacy_car)
 			car._apply_engine_variant(data["vehicles"][car_path]["engine"])
 			car._refresh_electric_capacity()
 			car.electric_charge = data["vehicles"][car_path]["charge"]

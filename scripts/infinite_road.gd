@@ -255,7 +255,7 @@ func _update_stop(index: int, tracking: Vector3, segment: Node3D, players: Array
 
 
 @rpc("authority", "call_local", "reliable")
-func spawn_stop(index: int, vehicle_owner: int = 1, legacy_layout: bool = false, use_sedan_loadout: bool = true, restoring: bool = false) -> void:
+func spawn_stop(index: int, vehicle_owner: int = 1, legacy_layout: bool = false, use_sedan_loadout: bool = true, restoring: bool = false, saved_body_style: int = -1, legacy_car_spares := false) -> void:
 	if stops.has(index):
 		return
 	var z := (index + 0.5) * segment_length
@@ -268,6 +268,8 @@ func spawn_stop(index: int, vehicle_owner: int = 1, legacy_layout: bool = false,
 	stop.legacy_layout = legacy_layout
 	stop.use_sedan_loadout = use_sedan_loadout
 	stop.restoring = restoring
+	stop.saved_body_style = saved_body_style
+	stop.legacy_car_spares = legacy_car_spares
 	stop.position = Vector3(at.x, 0, at.z)
 	stop.rotation.y = -side * PI * 0.5
 	add_child(stop)

@@ -1,20 +1,18 @@
 extends RefCounted
 
-const SEDAN_MODEL := preload("res://assets/vehicles/car_model.tscn")
+const CarModel := preload("res://scripts/compact_car_model.gd")
 const PART_MODELS := {
 	"battery": preload("res://assets/vehicles/parts/batterypack.glb"),
 	"radiator": preload("res://assets/vehicles/parts/radiatorassembly.glb"),
 	"V8": preload("res://assets/vehicles/parts/v8engine.glb"),
 	"Electric": preload("res://assets/vehicles/parts/electricmotor.glb"),
 }
-const BODY_NODES := {
-	"hood": "Chassis_Chassis_0_001", "trunk": "Chassis_Chassis_0_002",
-	"door_fl": "FL_Door", "door_fr": "FR_Door", "door_rl": "RL_Door", "door_rr": "RR_Door",
-	"wheel_fl": "FL_Wheel", "battery": "Battery", "radiator": "Radiator", "engine": "Engine",
-}
+const DOOR_NAMES := {"door_fl": "FL_Door", "door_fr": "FR_Door", "door_rl": "RL_Door", "door_rr": "RR_Door"}
+const ENGINE_SCALES := {"engine": Vector3(0.3268, 0.253, 0.3268), "radiator": Vector3(0.327, 0.253, 0.058),
+	"battery": Vector3(0.196, 0.276, 0.152)}
 
 
-static func add_parts(finds: Node3D, garage_style: int, stop_index: int) -> void:
+static func add_parts(finds: Node3D, garage_style: int, stop_index: int, legacy_car_spares: bool) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("km0:salvage:%d" % stop_index)
 	# Empty buildings tend to have leftovers from the work that happened there.
@@ -25,7 +23,7 @@ static func add_parts(finds: Node3D, garage_style: int, stop_index: int) -> void
 		["door_fl", "door_fr", "hood", "radiator", "engine"],
 	]
 	var pool: Array = pools[garage_style - 3].duplicate()
-	var shell := SEDAN_MODEL.instantiate() as Node3D
+	var model := CarModel.new(Color("#857962"))
 	var stock := Node3D.new()
 	stock.name = "Salvage"
 	finds.add_child(stock)
@@ -33,29 +31,13 @@ static func add_parts(finds: Node3D, garage_style: int, stop_index: int) -> void
 	for i in rng.randi_range(1, 3):
 		var slot: String = pool.pop_at(rng.randi_range(0, pool.size() - 1))
 		var key: String = ["V8", "Electric"][rng.randi_range(0, 1)] if slot == "engine" else slot
-		var source := shell.find_child(BODY_NODES[slot], true, false) as Node3D
-		var visual := source.duplicate() as Node3D
-		if PART_MODELS.has(key):
-			var replacement: Node = PART_MODELS[key].instantiate()
-			var imported := replacement as MeshInstance3D
-			if imported == null:
-				imported = replacement.find_children("*", "MeshInstance3D", true, false)[0] as MeshInstance3D
-			(visual as MeshInstance3D).mesh = imported.mesh
-			replacement.free()
-		# The hood and trunk bolt on by their hinge, so keep that pivot on a spare.
-		if slot in ["hood", "trunk"]:
-			var hinge := Node3D.new()
-			hinge.name = "HoodTargetHinge" if slot == "hood" else "TrunkTargetHinge"
-			var panel: MeshInstance3D = visual
-			var mesh_bounds := panel.mesh.get_aabb()
-			var edge := mesh_bounds.get_center()
-			edge.y = mesh_bounds.end.y if slot == "hood" else mesh_bounds.position.y
-			panel.transform = Transform3D(Basis.IDENTITY, -edge)
-			hinge.add_child(panel)
-			visual = hinge
-		else:
-			visual.position = Vector3.ZERO
-		visual.scale *= 0.45
+
+		var holder := Node3D.new()
+		var body_style := CarModel.SEDAN if legacy_car_spares else posmod(hash("lid:%d:%d" % [stop_index, i]), 3)
+		var visual := _make_spare(holder, model, slot, key, body_style)
+		holder.remove_child(visual)
+		holder.free()
+		visual.position = Vector3.ZERO
 		var body := RigidBody3D.new()
 		body.collision_layer = 16
 		body.collision_mask = 17
@@ -64,6 +46,8 @@ static func add_parts(finds: Node3D, garage_style: int, stop_index: int) -> void
 		body.contact_monitor = true
 		body.max_contacts_reported = 8
 		body.set_meta("vehicle_part_type", slot)
+		if slot == "trunk":
+			body.set_meta("body_style", body_style)
 		if slot == "engine":
 			body.set_meta("engine_variant", key)
 		var bounds := _bounds(visual)
@@ -86,7 +70,29 @@ static func add_parts(finds: Node3D, garage_style: int, stop_index: int) -> void
 		body.add_to_group("vehicle_loose_part")
 		stock.add_child(body)
 		body.set_meta("trip_part_id", str(finds.get_parent().get_path_to(body)))
-	shell.free()
+
+
+static func _make_spare(holder: Node3D, model: RefCounted, slot: String, key: String, style: int) -> Node3D:
+	match slot:
+		"hood":
+			return model.make_hood(holder)
+		"trunk":
+			return model.make_tailgate(holder, style)
+		"wheel_fl":
+			return model.make_wheel(holder, "SpareWheel")
+	if DOOR_NAMES.has(slot):
+		return model.make_door(holder, DOOR_NAMES[slot])
+	var part: Node = PART_MODELS[key].instantiate()
+	var imported := part as MeshInstance3D
+	if imported == null:
+		imported = part.find_children("*", "MeshInstance3D", true, false)[0] as MeshInstance3D
+	var visual := MeshInstance3D.new()
+	visual.name = slot.capitalize()
+	visual.mesh = imported.mesh
+	visual.scale = ENGINE_SCALES[slot]
+	holder.add_child(visual)
+	part.free()
+	return visual
 
 
 static func _bounds(node: Node3D, parent := Transform3D.IDENTITY) -> AABB:

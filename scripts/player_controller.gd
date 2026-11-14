@@ -1123,7 +1123,7 @@ func _interaction_text() -> String:
 		if (door or target.is_in_group("vehicle_seat")) and car.can_enter_from_position(global_position):
 			if NetworkManager.is_online() and car.seat_occupants.size() == car.seat_capacity() and not car.seat_occupants.has(0):
 				return "All seats occupied"
-			return "E  Enter vehicle"
+			return "E  Enter %s" % car.get_vehicle_title()
 		if target.name == "GasCapTarget":
 			return "Hold left mouse and drag  Move fuel cap"
 		if car.can_target_part(target):
