@@ -4,4 +4,4 @@ Update `application/config/version` in `project.godot` whenever you make a game 
 
 # GitHub
 
-Commit and push each game update to the tracked branch on GitHub. Push work in progress and experimental changes too, even if checks fail. Report any failures and whatever remains unfinished. Publish a release when requested.
+Commit and push each game update to the tracked branch on GitHub. Push work in progress and experimental changes too, even if checks fail. Publish a GitHub release for every game update using the version in `project.godot`. Include x64 and ARM64 archives for Windows, Linux, and macOS and a SHA-256 checksum file. Report any failed checks or missing builds.
