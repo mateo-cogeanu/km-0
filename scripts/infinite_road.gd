@@ -3,7 +3,9 @@ extends Node3D
 const Shapes := preload("res://scripts/prop_shapes.gd")
 const Stop := preload("res://scripts/roadside_stop.gd")
 const Terrain := preload("res://scripts/roadside_terrain.gd")
+const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const ROAD_END := 9.0
+const HOUSE_APPROACH := -1000.0
 const STOP_BLOCK := 12
 const GROUND_TILE_SIZE := 160.0
 const GROUND_DEPTH := 8.0
@@ -153,13 +155,16 @@ func _create_segment(index: int) -> Node3D:
 	var segment := Node3D.new()
 	segment.name = "Road_%d" % index
 	add_child(segment)
-	var start := index * segment_length
-	segment.position.z = start
-	var end := minf(start + segment_length, ROAD_END)
+	var segment_start := index * segment_length
+	segment.position.z = segment_start
+	var end := minf(segment_start + segment_length, ROAD_END)
+	var start := maxf(segment_start, HOUSE_APPROACH)
 	var stop_side := _stop_side(index) if index < -1 else 0.0
-	terrain.populate(segment, start, segment_length, index, absi(index) <= 1, stop_side, _road_x)
+	terrain.populate(segment, segment_start, segment_length, index, absi(index) <= 1, stop_side, _road_x)
 	if start >= end:
 		return segment
+	if start == HOUSE_APPROACH:
+		_build_house_turnoff(segment)
 	var half := road_width * 0.5
 	_add_strip(segment, "Asphalt", start, end, -half, half, 0.0, road_material, "Road")
 	_add_strip(segment, "GravelLeft", start, end, -half - shoulder_width, -half, -0.009, gravel, "Dirt")
@@ -175,6 +180,21 @@ func _create_segment(index: int) -> Node3D:
 	if end == ROAD_END:
 		_add_strip(segment, "CrumbledEnd", end - 0.10, end + 0.48, -half, half, -0.012, gravel)
 	return segment
+
+
+func _build_house_turnoff(segment: Node3D) -> void:
+	var house := RoadEndHouse.new()
+	house.name = "RoadEndHouse"
+	segment.add_child(house)
+	var at := _sample(HOUSE_APPROACH + 5.0, 13.0) - segment.position
+	house.position = Vector3(at.x, 0.0, at.z)
+	house.rotation.y = -PI * 0.5
+	var entry := house.position + Vector3.LEFT * 6.1
+	var drive_start := _sample(HOUSE_APPROACH + 8.0, road_width * 0.5 + 0.6) - segment.position
+	var drive := Shapes.box(segment, "HouseTurnoff", Vector3(3.1, 0.04, drive_start.distance_to(entry) + 2.0),
+		(drive_start + entry) * 0.5, gravel, true)
+	drive.position.y = -0.04
+	drive.rotation.y = atan2(entry.x - drive_start.x, entry.z - drive_start.z)
 
 
 func _add_strip(segment: Node3D, title: String, from_z: float, to_z: float, left: float, right: float, lift: float, material: Material, surface_group: String = "") -> void:
@@ -225,7 +245,7 @@ func _stop_side(index: int) -> float:
 
 
 func _update_stop(index: int, tracking: Vector3, segment: Node3D, players: Array[Node]) -> void:
-	if not _has_stop(index):
+	if (index + 0.5) * segment_length <= HOUSE_APPROACH or not _has_stop(index):
 		return
 	var z := (index + 0.5) * segment_length
 	var side := _stop_side(index)

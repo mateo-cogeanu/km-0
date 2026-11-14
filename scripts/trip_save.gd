@@ -130,9 +130,12 @@ func save_trip() -> bool:
 			legacy_stops.append(index)
 		elif road.stops[index].use_sedan_loadout:
 			sedan_loadout_stops.append(index)
+	var player_pose: Transform3D = player.global_transform
+	if player.ending_locked:
+		player_pose.origin = player.ending_return_position
 	var data := {
 		"version": SAVE_VERSION,
-		"player": player.global_transform,
+		"player": player_pose,
 		"look": player.look_rotation_x,
 		"driving": driving,
 		"first_person": player.active_vehicle.first_person_camera_enabled if not driving.is_empty() else false,

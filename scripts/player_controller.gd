@@ -48,6 +48,8 @@ var interaction_label: Label
 var radio_caption: PanelContainer
 var radio_caption_label: Label
 var listening_radio: Area3D
+var ending_locked := false
+var ending_return_position := Vector3.ZERO
 var push_send_elapsed := 0.0
 var refuel_network_amount := 0.0
 var spray_network_amount := 0.0
@@ -168,7 +170,7 @@ func _sync_player_name(value: String) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not is_multiplayer_authority() or gameplay_ui_open():
+	if ending_locked or not is_multiplayer_authority() or gameplay_ui_open():
 		return
 	if is_instance_valid(active_vehicle):
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_L, KEY_H]:
@@ -211,6 +213,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if ending_locked:
+		return
 	if not is_multiplayer_authority():
 		if is_instance_valid(active_vehicle):
 			global_position = active_vehicle.global_position
@@ -264,6 +268,22 @@ func _physics_process(delta: float) -> void:
 	_update_refuel_hud()
 	_update_fps_label()
 	_send_network_transform(delta)
+
+
+func lock_for_ending(return_position: Vector3) -> void:
+	ending_locked = true
+	ending_return_position = return_position
+	velocity = Vector3.ZERO
+	if is_instance_valid(listening_radio):
+		listening_radio.stop_listening()
+	if is_instance_valid(held_object):
+		_drop_held_object()
+	$HUD.hide()
+
+
+func aim_ending_camera(at: Vector3, amount: float) -> void:
+	var target := camera.global_transform.looking_at(at)
+	camera.global_basis = camera.global_basis.slerp(target.basis, clampf(amount, 0.0, 1.0))
 
 
 func _send_network_transform(delta: float) -> void:

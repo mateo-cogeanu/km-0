@@ -23,6 +23,9 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
+		var player := get_tree().get_first_node_in_group("local_player")
+		if player and player.ending_locked:
+			return
 		if tutorial.visible:
 			_close_tutorial()
 		elif settings_panel.visible:

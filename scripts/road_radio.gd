@@ -13,7 +13,8 @@ const LINES := [
 	[
 		[0.58, "Workshop, I can hear you now. I’m at the pump house."],
 		[4.23, "Keep to the service road."],
-		[5.92, "If you find a working set, leave it on this channel."],
+		[5.92, "When the pavement ends, it’s the house on the right."],
+		[8.87, "I’ll leave the door open."],
 	],
 ]
 
