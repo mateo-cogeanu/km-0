@@ -107,6 +107,7 @@ static func _build_motorcycle(frame: Node3D, fork: Node3D, paint: Material, allo
 		S.tube(frame, "DownTube", HEAD + offset * 0.72, foot, 0.033, steel)
 		S.tube(frame, "EngineCradle", foot, pivot + Vector3(0, -0.09, 0), 0.028, steel)
 		S.tube(frame, "SeatRail", Vector3(0, 0.80, 0.28) + offset, Vector3(0, 0.77, 0.82) + offset, 0.023, steel)
+		S.tube(frame, "SeatMount", Vector3(side * 0.09, 0.78, 0.61), Vector3(side * 0.10, 0.91, 0.59), 0.015, steel)
 		S.tube(frame, "Swingarm", pivot, REAR + offset, 0.029, steel)
 		_axle(frame, "SwingarmBolt", pivot + Vector3(side * 0.026, 0, 0), 0.023, 0.012, alloy, 6)
 		_coil_shock(frame, REAR + offset + Vector3(0, 0, -0.11), Vector3(0, 0.77, 0.56) + offset, alloy, steel)
@@ -118,6 +119,8 @@ static func _build_motorcycle(frame: Node3D, fork: Node3D, paint: Material, allo
 	S.cylinder(frame, "FuelCap", Vector3(0, 1.009, -0.32), Vector3.UP, 0.049, 0.016, alloy, 24)
 	_loft(frame, "StitchedBenchSeat", [[0.00, 0.901, 0.080, 0.030], [0.12, 0.928, 0.134, 0.046],
 		[0.38, 0.933, 0.150, 0.044], [0.67, 0.938, 0.14, 0.042], [0.79, 0.933, 0.076, 0.030]], leather)
+	_loft(frame, "SideCovers", [[0.12, 0.816, 0.091, 0.035], [0.27, 0.825, 0.124, 0.069],
+		[0.43, 0.83, 0.112, 0.064], [0.56, 0.841, 0.032, 0.037]], paint)
 	for side in [-1.0, 1.0]:
 		S.tube(frame, "SeatPiping", Vector3(side * 0.13, 0.924, 0.18), Vector3(side * 0.14, 0.929, 0.65), 0.004, steel)
 	_fender(frame, REAR, 0.13, -0.86, 1.05, paint)
