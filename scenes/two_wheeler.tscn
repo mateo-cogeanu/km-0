@@ -15,7 +15,7 @@ point_count = 3
 
 [node name="TwoWheeler" type="RigidBody3D" node_paths=PackedStringArray("front_left_wheel", "rear_left_wheel", "camera_rig", "driver_camera", "first_person_camera_marker", "exit_point")]
 script = ExtResource("1")
-collision_layer = 3
+collision_layer = 2
 collision_mask = 3
 torque_curve = SubResource("Torque")
 front_left_wheel = NodePath("FrontWheelRay")

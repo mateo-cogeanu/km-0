@@ -127,7 +127,7 @@ func _process(_delta: float) -> void:
 		var head_screen := view.unproject_position(head_at)
 		if not Rect2(Vector2.ZERO, bounds).has_point(head_screen):
 			continue
-		var sight := PhysicsRayQueryParameters3D.create(view.global_position, head_at, 1)
+		var sight := PhysicsRayQueryParameters3D.create(view.global_position, head_at, 1 | 2)
 		if is_instance_valid(active_vehicle):
 			sight.exclude = [active_vehicle.get_rid()]
 		if not get_world_3d().direct_space_state.intersect_ray(sight).is_empty():
@@ -1009,10 +1009,7 @@ func _find_touching_vehicle(object: RigidBody3D) -> Node3D:
 		car = target.get_meta("welded_vehicle") as Node3D
 	if car == null or object == null:
 		return null
-	for body in object.get_colliding_bodies():
-		if body == car or body.get_meta("welded_vehicle", null) == car:
-			return car
-	return null
+	return car if car.can_weld_object(object) else null
 
 
 func _try_unweld_pointed_object() -> bool:
@@ -1070,6 +1067,7 @@ func _create_interaction_tip() -> void:
 	interaction_tip = PanelContainer.new()
 	interaction_tip.name = "InteractionTip"
 	interaction_tip.theme = Style.make_theme()
+	interaction_tip.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 8))
 	interaction_tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	interaction_label = Style.label("", 15)
 	interaction_tip.add_child(interaction_label)
@@ -1085,9 +1083,12 @@ func _update_interaction_tip() -> void:
 	interaction_label.text = tip
 	interaction_tip.size = interaction_tip.get_combined_minimum_size()
 	var viewport_size := get_viewport().get_visible_rect().size
-	var fit := clampf((viewport_size.x - 20.0) / interaction_tip.size.x, 0.01, GameSettings.ui_scale)
+	var fit := clampf((viewport_size.x - 32.0) / interaction_tip.size.x, 0.01, GameSettings.ui_scale)
 	interaction_tip.scale = Vector2.ONE * fit
-	interaction_tip.position = Vector2((viewport_size.x - interaction_tip.size.x * fit) * 0.5, viewport_size.y * 0.5 + 22.0 * fit)
+	var top := 16.0
+	if GameSettings.show_fps:
+		top += 30.0 * GameSettings.ui_scale
+	interaction_tip.position = Vector2(16.0, top)
 
 
 func _interaction_text() -> String:

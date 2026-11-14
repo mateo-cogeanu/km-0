@@ -3,6 +3,7 @@ extends Node
 @export var world_environment: WorldEnvironment
 @export var sun: DirectionalLight3D
 @export var day_length_seconds: float = 420.0
+@export_range(1.0, 4.0, 0.1) var daylight_duration_multiplier := 2.0
 @export_range(0.0, 1.0, 0.001) var time_of_day: float = 0.5
 @export var moonlight_energy: float = 0.045
 @export var midday_energy: float = 3.55
@@ -44,7 +45,7 @@ func _process(delta: float) -> void:
 		_update_sky_dome_position()
 		return
 
-	time_of_day = wrapf(time_of_day + delta / day_length_seconds, 0.0, 1.0)
+	_advance_clock(delta)
 	lighting_update_timer -= delta
 	if lighting_update_timer <= 0.0:
 		lighting_update_timer = lighting_update_interval
@@ -55,6 +56,17 @@ func _process(delta: float) -> void:
 	_update_sky_dome_position()
 	if cloud_layer:
 		_update_cloud_layer_position()
+
+
+func _advance_clock(delta: float) -> void:
+	# Dawn is phase 0.25 and dusk is 0.75. Keep the saved phase format.
+	var phase := wrapf(time_of_day - 0.25, 0.0, 1.0)
+	var daylight_seconds := day_length_seconds * 0.5 * daylight_duration_multiplier
+	var night_seconds := day_length_seconds * 0.5
+	var elapsed := phase * 2.0 * daylight_seconds if phase < 0.5 else daylight_seconds + (phase - 0.5) * 2.0 * night_seconds
+	elapsed = fposmod(elapsed + delta, daylight_seconds + night_seconds)
+	phase = elapsed / (2.0 * daylight_seconds) if elapsed < daylight_seconds else 0.5 + (elapsed - daylight_seconds) / (2.0 * night_seconds)
+	time_of_day = wrapf(phase + 0.25, 0.0, 1.0)
 
 
 func _setup_environment_quality() -> void:

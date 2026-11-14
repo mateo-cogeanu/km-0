@@ -120,6 +120,8 @@ func _configure_sedan_loadout(vehicle: RigidBody3D) -> void:
 
 func _spawn_part(parent: Node3D, title: String, model: PackedScene, at: Vector3, dimensions: Vector3, part_type: String) -> RigidBody3D:
 	var body := RigidBody3D.new()
+	body.collision_layer = 16
+	body.collision_mask = 17
 	body.name = title
 	body.mass = 5.0
 	body.contact_monitor = true

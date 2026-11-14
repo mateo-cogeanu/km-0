@@ -57,6 +57,8 @@ static func add_parts(finds: Node3D, garage_style: int, stop_index: int) -> void
 			visual.position = Vector3.ZERO
 		visual.scale *= 0.45
 		var body := RigidBody3D.new()
+		body.collision_layer = 16
+		body.collision_mask = 17
 		body.name = "Part_%d" % i
 		body.mass = 12.0 if slot == "engine" else 6.0
 		body.contact_monitor = true

@@ -409,7 +409,7 @@ func _work_on_object(action: String, object: RigidBody3D, value: Variant) -> voi
 		"weld":
 			var path := object.get_path()
 			var pose := object.global_transform
-			if weld_object(object):
+			if can_weld_object(object) and weld_object(object):
 				_sync_attachment.rpc(action, path, pose)
 		"unweld", "wire":
 			var path := object.get_path()
@@ -1005,6 +1005,29 @@ func get_gas_hole_position() -> Vector3:
 	return target.global_position if target else global_position
 
 
+func can_weld_object(object: RigidBody3D) -> bool:
+	if not is_instance_valid(object) or object == self or object.is_in_group("drivable") or object.has_meta("welded_vehicle"):
+		return false
+
+	# Loose objects do not collide with cars. Check contact with their actual shapes
+	# when the player deliberately attaches one.
+	var world := get_world_3d().direct_space_state
+	for child in object.get_children():
+		var shape := child as CollisionShape3D
+		if shape == null or shape.disabled or shape.shape == null:
+			continue
+		var query := PhysicsShapeQueryParameters3D.new()
+		query.shape = shape.shape
+		query.transform = shape.global_transform
+		query.collision_mask = 2 | 8
+		query.collide_with_areas = false
+		query.margin = 0.16
+		for hit in world.intersect_shape(query):
+			if hit.collider == self or hit.collider.get_meta("welded_vehicle", null) == self:
+				return true
+	return false
+
+
 func weld_object(object: RigidBody3D, restoring: bool = false) -> bool:
 	if object == null or object == self or welded_objects.has(object):
 		return false
@@ -1332,6 +1355,8 @@ func _detach_part(part_type: String) -> RigidBody3D:
 		return null
 
 	var body := RigidBody3D.new()
+	body.collision_layer = 16
+	body.collision_mask = 17
 	body.name = "%s_%sLoose" % [name, data.get("name", part_type)]
 	body.mass = _loose_part_mass(part_type)
 	body.contact_monitor = true
@@ -1975,6 +2000,8 @@ func _spawn_aux_battery(parent: Node, id: String, at: Vector3) -> void:
 
 func _create_loose_clone_body(source: Node3D, body_name: String, position: Vector3, mass_value: float) -> RigidBody3D:
 	var body := RigidBody3D.new()
+	body.collision_layer = 16
+	body.collision_mask = 17
 	body.name = body_name
 	body.mass = mass_value
 	body.contact_monitor = true
@@ -2555,7 +2582,7 @@ func _update_third_person_camera_collision() -> void:
 	var ray_from := camera_rig.global_position
 	var desired_position := driver_camera.global_position
 	var query := PhysicsRayQueryParameters3D.create(ray_from, desired_position)
-	query.collision_mask = 1
+	query.collision_mask = 1 | 2
 	query.exclude = [get_rid()]
 	query.hit_from_inside = true
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
