@@ -8,43 +8,45 @@ const THIGH := 0.69
 const SHIN := 0.65
 const SIDE := [-1.0, 1.0]
 
-var torso: Node3D
+const ARM_PROFILE: Array[Vector2] = [
+	Vector2(0.022, 0.025), Vector2(0.093, 0.088), Vector2(0.086, 0.072), Vector2(0.070, 0.061),
+	Vector2(0.054, 0.051), Vector2(0.052, 0.044), Vector2(0.061, 0.046), Vector2(0.048, 0.035),
+	Vector2(0.034, 0.027), Vector2(0.026, 0.021), Vector2(0.009, 0.009),
+]
+const LEG_PROFILE: Array[Vector2] = [
+	Vector2(0.024, 0.028), Vector2(0.104, 0.099), Vector2(0.091, 0.081), Vector2(0.072, 0.064),
+	Vector2(0.055, 0.052), Vector2(0.055, 0.046), Vector2(0.064, 0.053), Vector2(0.054, 0.046),
+	Vector2(0.038, 0.032), Vector2(0.028, 0.024), Vector2(0.011, 0.010),
+]
+const TORSO_PROFILE: Array[Vector2] = [
+	Vector2(0.033, 0.046), Vector2(0.138, 0.094), Vector2(0.163, 0.116), Vector2(0.135, 0.103),
+	Vector2(0.114, 0.086), Vector2(0.132, 0.102), Vector2(0.168, 0.125), Vector2(0.192, 0.129),
+	Vector2(0.206, 0.113), Vector2(0.151, 0.091), Vector2(0.083, 0.064), Vector2(0.057, 0.046),
+	Vector2(0.043, 0.033), Vector2(0.006, 0.006),
+]
+
+var torso: MeshInstance3D
 var head: Node3D
 var jaw: Node3D
 var arms: Array[MeshInstance3D] = []
-var forearms: Array[MeshInstance3D] = []
 var legs: Array[MeshInstance3D] = []
-var shins: Array[MeshInstance3D] = []
 var hands: Array[Node3D] = []
 var feet: Array[Node3D] = []
-var shoulders_skin: Array[MeshInstance3D] = []
-var neck: MeshInstance3D
 var skin_detail := Shapes.material(Color("#706066"), 0.0, 0.9)
+var body_skin := StandardMaterial3D.new()
 var skin := Shapes.material(Color("#b9aa9e"), 0.0, 0.91)
 var joints := Shapes.material(Color("#7c6e6a"), 0.0, 0.96)
 var bone := Shapes.material(Color("#d9ccb0"), 0.0, 0.8)
 
 
 func _ready() -> void:
-	torso = Node3D.new()
-	torso.name = "Torso"
-	add_child(torso)
-	_oval(torso, "Ribcage", Vector3(0, 0.34, 0.015), Vector3(0.46, 0.61, 0.242), skin)
-	_oval(torso, "Abdomen", Vector3(0, 0.05, -0.038), Vector3(0.275, 0.45, 0.191), joints)
-	_oval(torso, "Pelvis", Vector3(0, -0.19, -0.03), Vector3(0.36, 0.24, 0.23), skin)
+	body_skin.vertex_color_use_as_albedo = true
+	body_skin.vertex_color_is_srgb = true
+	body_skin.roughness = 0.89
+	torso = _skin_mesh(self, "TorsoSkin")
 	for side: float in SIDE:
-		for rib in range(5):
-			var y := 0.47 - rib * 0.074
-			Shapes.tube(torso, "Rib", Vector3(side * 0.06, y, 0.115),
-				Vector3(side * (0.191 - rib * 0.012), y + 0.031, 0.079), 0.009, skin_detail)
-		for vertebra in range(6):
-			var y := 0.01 + vertebra * 0.09
-			_oval(torso, "Spine", Vector3(side * 0.036, y, -0.097), Vector3(0.030, 0.041, 0.031), joints)
-		shoulders_skin.append(_oval(self, "Deltoid", Vector3.ZERO, Vector3(0.171, 0.217, 0.183), skin))
-		arms.append(_limb(0.073, 0.053, UPPER_ARM))
-		forearms.append(_limb(0.056, 0.033, FOREARM))
-		legs.append(_limb(0.085, 0.058, THIGH))
-		shins.append(_limb(0.058, 0.037, SHIN))
+		arms.append(_skin_mesh(self, "ArmSkin"))
+		legs.append(_skin_mesh(self, "LegSkin"))
 		var foot := Node3D.new()
 		add_child(foot)
 		feet.append(foot)
@@ -52,7 +54,6 @@ func _ready() -> void:
 		for toe in range(3):
 			_oval(foot, "Toe", Vector3((toe - 1) * 0.024, 0.015, 0.139), Vector3(0.021, 0.026, 0.069), skin)
 		_build_hand(side)
-	neck = _limb(0.076, 0.046, 0.33)
 	_build_head()
 
 
@@ -67,9 +68,11 @@ func _build_hand(side: float) -> void:
 		var spread := (finger - 1.5) * 0.034 if finger < 4 else side * 0.097
 		var middle := Vector3(spread, 0.017, 0.13 - absf(finger - 1) * 0.012)
 		var tip := middle + Vector3(spread * 0.41, -0.014, 0.059 if finger < 4 else 0.019)
-		Shapes.tube(hand, "FingerBase", root, middle, 0.011, skin)
-		Shapes.tube(hand, "FingerTip", middle, tip, 0.008, joints)
-		_oval(hand, "Knuckle", middle, Vector3(0.024, 0.028, 0.025), skin)
+		var finger_skin := _skin_mesh(hand, "Finger")
+		var sections: Array[Vector2] = [Vector2(0.004, 0.004), Vector2(0.012, 0.010),
+			Vector2(0.009, 0.008), Vector2(0.011, 0.010), Vector2(0.008, 0.007),
+			Vector2(0.006, 0.005), Vector2(0.002, 0.002)]
+		_skin_chain(finger_skin, root, middle, tip, sections)
 		Shapes.tube(hand, "Nail", tip, tip + Vector3(0, -0.009, 0.019), 0.005, bone)
 
 
@@ -210,9 +213,6 @@ func _build_teeth(parent: Node3D, at: Vector3, upper: bool) -> void:
 
 func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Array[Vector3], normals: Array[Vector3],
 		soles: Array[Vector3], elapsed: float, reveal: float = 0.0) -> void:
-	var spine := (shoulders - pelvis).normalized()
-	torso.position = shoulders.lerp(pelvis, 0.63)
-	torso.quaternion = Quaternion(Vector3.UP, spine)
 	for i in range(2):
 		var side: float = SIDE[i]
 		var normal := normals[i].normalized()
@@ -220,17 +220,14 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 		hands[i].basis = Basis(normal.cross(bearing).normalized(), normal, bearing)
 		hands[i].position = palms[i] + normal * 0.023
 		var wrist := hands[i].position - bearing * 0.057
-		var shoulder := shoulders + Vector3(side * 0.192, 0.0, 0.0)
-		shoulders_skin[i].position = shoulder
+		var shoulder := shoulders + Vector3(side * 0.135, 0.01, 0.0)
 		var elbow := _joint(shoulder, wrist, Vector3(side * 0.91, -0.20, -0.65), UPPER_ARM, FOREARM)
-		_place(arms[i], shoulder, elbow, UPPER_ARM)
-		_place(forearms[i], elbow, wrist, FOREARM)
+		_skin_chain(arms[i], shoulder, elbow, wrist + bearing * 0.033, ARM_PROFILE)
 		feet[i].position = soles[i]
 		var ankle := soles[i] + Vector3(0, 0.058, -0.04)
 		var hip := pelvis + Vector3(side * 0.116, 0.0, 0.0)
 		var knee := _joint(hip, ankle, Vector3(side * 0.83, 0.18, 0.74), THIGH, SHIN)
-		_place(legs[i], hip, knee, THIGH)
-		_place(shins[i], knee, ankle, SHIN)
+		_skin_chain(legs[i], hip, knee, ankle - Vector3.UP * 0.032, LEG_PROFILE)
 	head.position = shoulders + Vector3(0, 0.10, 0.28)
 	var forward := (gaze - head.position).normalized()
 	if absf(forward.dot(Vector3.UP)) < 0.98:
@@ -240,7 +237,16 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 	var tilt := 0.045 * sin(elapsed * 1.45) + inspect * 0.24 + jerk * (0.16 + reveal * 0.025)
 	head.rotate_object_local(Vector3.BACK, tilt)
 	head.rotate_object_local(Vector3.RIGHT, jerk * 0.061)
-	_place(neck, shoulders + Vector3(0, 0.03, -0.05), head.position + head.basis * Vector3(0, 0.12, -0.135), 0.33)
+	var spine := (shoulders - pelvis).normalized()
+	var neck_end := head.position + head.basis * Vector3(0, 0.102, -0.124)
+	var body_path: Array[Vector3] = []
+	for i in TORSO_PROFILE.size():
+		var t := float(i) / (TORSO_PROFILE.size() - 1)
+		var center := (pelvis - spine * 0.11).lerp(shoulders, minf(t / 0.69, 1.0))
+		if t > 0.69:
+			center = shoulders.lerp(neck_end, (t - 0.69) / 0.31)
+		body_path.append(center)
+	_sweep(torso, body_path, TORSO_PROFILE, true)
 
 
 func _twitch(elapsed: float) -> float:
@@ -255,16 +261,65 @@ func _joint(start: Vector3, end: Vector3, bend: Vector3, first: float, second: f
 	return start + direction * forward + bend.slide(direction).normalized() * sqrt(maxf(0, first * first - forward * forward))
 
 
-func _limb(radius_a: float, radius_b: float, length: float) -> MeshInstance3D:
-	var limb := Shapes.cylinder(self, "Limb", Vector3.ZERO, Vector3.UP, radius_a, length, skin, 12)
-	(limb.mesh as CylinderMesh).top_radius = radius_b
-	return limb
+# Each chain is one skin surface. The sections swell over muscle and taper into
+# the wrists and ankles, while the bend follows the same contacts as the animation.
+func _skin_mesh(parent: Node3D, title: String) -> MeshInstance3D:
+	var mesh := MeshInstance3D.new()
+	mesh.name = title
+	mesh.material_override = body_skin
+	parent.add_child(mesh)
+	return mesh
 
 
-func _place(limb: MeshInstance3D, start: Vector3, end: Vector3, rest: float) -> void:
-	limb.position = (start + end) * 0.5
-	limb.quaternion = Quaternion(Vector3.UP, (end - start).normalized())
-	limb.scale.y = start.distance_to(end) / rest
+func _skin_chain(mesh: MeshInstance3D, start: Vector3, joint: Vector3, end: Vector3, profile: Array[Vector2]) -> void:
+	var bend := minf(start.distance_to(joint), joint.distance_to(end)) * 0.23
+	var before := joint.move_toward(start, bend)
+	var after := joint.move_toward(end, bend)
+	var centers: Array[Vector3] = []
+	for i in profile.size():
+		var t := float(i) / (profile.size() - 1)
+		if t < 0.35:
+			centers.append(start.lerp(before, t / 0.35))
+		elif t > 0.65:
+			centers.append(after.lerp(end, (t - 0.65) / 0.35))
+		else:
+			var turn := (t - 0.35) / 0.30
+			centers.append(before.lerp(joint, turn).lerp(joint.lerp(after, turn), turn))
+	_sweep(mesh, centers, profile, false)
+
+
+func _sweep(mesh: MeshInstance3D, centers: Array[Vector3], profile: Array[Vector2], torso_surface: bool) -> void:
+	const SIDES := 16
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for ring in centers.size():
+		var tangent := (centers[mini(ring + 1, centers.size() - 1)] - centers[maxi(ring - 1, 0)]).normalized()
+		var across := Vector3.RIGHT.slide(tangent).normalized()
+		if across.length_squared() < 0.1:
+			across = Vector3.UP.slide(tangent).normalized()
+		var depth := tangent.cross(across)
+		for side in SIDES:
+			var angle := TAU * side / SIDES
+			var x := cos(angle)
+			var y := sin(angle)
+			var t := float(ring) / (centers.size() - 1)
+			var contour := 1.0 + 0.065 * cos(3.0 * angle + t * 2.4)
+			if torso_surface:
+				# The front of the chest carries the ribs as shallow ridges in the skin.
+				contour += 0.085 * pow(maxf(y, 0.0), 2.0) * cos(t * 34.0) * sin(PI * t)
+			var point := centers[ring] + (across * x * profile[ring].x + depth * y * profile[ring].y) * contour
+			var shade := 0.045 * (1.0 + cos(3.0 * angle - t * 8.0))
+			shade += (0.11 if not torso_surface else 0.045) * exp(-pow((t - 0.51) / 0.11, 2.0))
+			surface.set_color(Color("#baaca1").lerp(Color("#796671"), shade))
+			surface.add_vertex(point)
+	for ring in range(centers.size() - 1):
+		for side in SIDES:
+			var a := ring * SIDES + side
+			var b := ring * SIDES + (side + 1) % SIDES
+			for index in [a, b + SIDES, b, a, a + SIDES, b + SIDES]:
+				surface.add_index(index)
+	surface.generate_normals()
+	mesh.mesh = surface.commit()
 
 
 func _oval(parent: Node3D, title: String, at: Vector3, size: Vector3, finish: Material) -> MeshInstance3D:
