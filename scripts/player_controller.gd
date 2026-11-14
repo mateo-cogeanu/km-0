@@ -910,7 +910,7 @@ func _find_refuel_car() -> Node3D:
 	if car == null or not car.can_receive_fuel():
 		return null
 	var filler := car.get_gas_hole_position() as Vector3
-	if target != car.get_node_or_null("GasCapTarget"):
+	if target.name != "FuelFillerTarget" and target != car.get_node_or_null("GasCapTarget"):
 		# With the cap swung aside, aim at the filler on the car itself.
 		if (hit["position"] as Vector3).distance_to(filler) > 0.65:
 			return null
@@ -1107,8 +1107,15 @@ func _interaction_text() -> String:
 			if not _find_touching_vehicle(held_object):
 				return "%s   ·   E  Drop" % reason
 			return "%s   ·   E  Weld" % reason
-		if held_object.is_in_group("fuel_canister") and _find_refuel_car():
-			return "E  Refuel"
+		if held_object.is_in_group("fuel_canister") and car:
+			if _find_refuel_car():
+				return "E  Refuel"
+			if target.name == "GasCapTarget" and not car.is_gas_cap_open():
+				return "Hold left mouse and drag  Open fuel door"
+			if not car.is_gas_cap_open() and car.seat_capacity() == 4:
+				return "Open the fuel door on the right rear quarter panel   ·   E  Drop can"
+			if car.can_receive_fuel():
+				return "Aim the can at the open fuel filler   ·   E  Drop can"
 		if _is_spray_can(held_object) and car:
 			return "Hold left mouse  Paint   ·   R  Change color   ·   E  Drop"
 		if _find_touching_vehicle(held_object):
@@ -1125,7 +1132,9 @@ func _interaction_text() -> String:
 				return "All seats occupied"
 			return "E  Enter %s" % car.get_vehicle_title()
 		if target.name == "GasCapTarget":
-			return "Hold left mouse and drag  Move fuel cap"
+			return "Hold left mouse and drag  Move fuel door"
+		if target.name == "FuelFillerTarget":
+			return "Fuel filler   ·   Bring a gas can"
 		if car.can_target_part(target):
 			var slot := String(target.get_meta("part_type", ""))
 			if slot in ["hood", "trunk"] or door:

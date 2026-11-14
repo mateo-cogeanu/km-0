@@ -124,6 +124,7 @@ var rear_braking := false
 var reverse_lamps: Array[OmniLight3D] = []
 var rattle_cooldown := 0.0
 var camera_mount_position := Vector3.ZERO
+var dashboard_needles: Array[Node3D] = []
 var camera_bump := 0.0
 var camera_previous_travel := 0.0
 var camera_travel_ready := false
@@ -145,6 +146,8 @@ func _ready() -> void:
 	_setup_sound_effects()
 	if wheel_model_root:
 		CarModel.new().build(wheel_model_root, body_style)
+		for title in ["SpeedNeedle", "RpmNeedle", "FuelNeedle"]:
+			dashboard_needles.append(wheel_model_root.find_child(title, true, false) as Node3D)
 	_setup_interactables()
 	_setup_protected_parts()
 	_setup_headlights()
@@ -809,12 +812,10 @@ func _setup_rear_lights() -> void:
 	rear_reverse_material = PropShapes.material(Color("#b5ac97"), 0.1, 0.4)
 	rear_reverse_material.emission = Color("#fff0d0")
 	rear_reverse_material.emission_energy_multiplier = 1.9
-	var tail := to_local(mount.global_position)
-	for side in [-1.0, 1.0]:
-		var at := Vector3(side * (0.465 if body_style == CarModel.SEDAN else 0.565), tail.y - 0.026, tail.z + 0.026)
-		PropShapes.box(self, "ReverseLens", Vector3(0.17, 0.075, 0.028), at, rear_reverse_material)
+	for lens: MeshInstance3D in mount.find_children("ReverseLens*", "MeshInstance3D", false, false):
+		lens.material_override = rear_reverse_material
 		var lamp := OmniLight3D.new()
-		lamp.position = at + Vector3.BACK * 0.18
+		lamp.position = to_local(lens.global_position) + Vector3.BACK * 0.18
 		lamp.light_color = Color("#fff0d0")
 		lamp.light_energy = 0.25
 		lamp.omni_range = 2.1
@@ -823,7 +824,20 @@ func _setup_rear_lights() -> void:
 		reverse_lamps.append(lamp)
 
 
+func _update_dashboard(delta: float) -> void:
+	if not first_person_camera_enabled or not driver_camera or not driver_camera.current or dashboard_needles.is_empty():
+		return
+	var capacity := electric_capacity if current_engine_variant == "Electric" else max_fuel
+	var remaining := electric_charge if current_engine_variant == "Electric" else fuel_amount
+	var readings := Vector3(linear_velocity.length() * 3.6 / 160.0, motor_rpm / maxf(max_rpm, 1.0), remaining / maxf(capacity, 1.0))
+	for i in dashboard_needles.size():
+		var needle := dashboard_needles[i]
+		var angle := lerpf(2.32, -2.32, clampf(readings[i], 0, 1))
+		needle.rotation.z = lerpf(needle.rotation.z, angle, minf(delta * 12, 1))
+
+
 func _update_rolling_feedback(delta: float) -> void:
+	_update_dashboard(delta)
 	if rear_brake_material:
 		rear_brake_material.emission_enabled = rear_braking or headlights_enabled
 		rear_brake_material.emission_energy_multiplier = 1.8 if rear_braking else 0.28
@@ -865,7 +879,13 @@ func _update_camera_suspension(delta: float) -> void:
 	camera_travel_ready = true
 	camera_bump = clampf((camera_bump + impulse) * exp(-10.0 * delta), -0.075, 0.075)
 	var speed_gain := smoothstep(1.0, 9.0, linear_velocity.length())
-	camera_rig.position = camera_mount_position + Vector3.UP * camera_bump * speed_gain * GameSettings.camera_motion
+	camera_rig.position = _active_camera_mount() + Vector3.UP * camera_bump * speed_gain * GameSettings.camera_motion
+
+
+func _active_camera_mount() -> Vector3:
+	if first_person_camera_enabled and wheel_model_root and first_person_camera_marker:
+		return camera_mount_position + first_person_camera_marker.position
+	return camera_mount_position
 
 
 func _capture_base_body_physics() -> void:
@@ -1065,9 +1085,13 @@ func set_first_person_camera_enabled(enabled: bool) -> void:
 
 	if first_person_camera_enabled and first_person_camera_marker:
 		driver_camera.transform = first_person_camera_marker.transform
-
+		if wheel_model_root:
+			driver_camera.position = Vector3.ZERO
 	else:
 		driver_camera.transform = third_person_camera_transform
+	if wheel_model_root and camera_rig:
+		camera_rig.position = _active_camera_mount()
+		_update_camera_rotation()
 
 
 func _update_fuel(delta: float) -> void:
@@ -1245,6 +1269,9 @@ func _setup_interactables() -> void:
 	_register_interactable("HoodTarget", ["HoodTargetHinge"], 1.0, "x", 68.0)
 	_register_interactable("TrunkTarget", ["TrunkTargetHinge"], -1.0, "x", 72.0)
 	_register_interactable("GasCapTarget", ["GasCapTargetHinge"], 1.0, "y", 105.0)
+	var filler := _find_part_node("FuelFiller")
+	if filler:
+		_create_removable_part_area(filler, "FuelFillerTarget", Vector3(0.045, 0.175, 0.175))
 	_register_interactable("SeatTarget", ["Interior"], 0.0, "y", 0.0)
 
 	var seat := get_node_or_null("SeatTarget") as Area3D
@@ -2483,6 +2510,8 @@ func _update_panel_target(area: Area3D, visual: Node3D = null) -> void:
 
 
 func can_target_part(area: Area3D) -> bool:
+	if area.name == "FuelFillerTarget":
+		return is_gas_cap_open()
 	var slot := String(area.get_meta("part_type", ""))
 	return not _requires_hood_open(slot) or _has_hood_access()
 
@@ -2591,13 +2620,17 @@ func _find_pointed_interactable() -> Area3D:
 	if view == null:
 		return null
 	var player := get_tree().get_first_node_in_group("local_player")
-	if player and (player.gameplay_ui_open() or is_instance_valid(player.held_object)):
+	if player and player.gameplay_ui_open():
+		return null
+	var holding_can: bool = player and is_instance_valid(player.held_object) and player.held_object.is_in_group("fuel_canister")
+	if player and is_instance_valid(player.held_object) and not holding_can:
 		return null
 	var exclusions: Array = player._raycast_exclusions() if player else []
 	var hit := CrosshairTarget.cast(view, interact_distance, exclusions)
 	var area := hit.get("collider") as Area3D
 	if area and area.get_parent() == self and can_target_part(area):
-		return area
+		if not holding_can or area.name == "GasCapTarget":
+			return area
 	return null
 
 

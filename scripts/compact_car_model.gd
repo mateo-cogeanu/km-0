@@ -15,6 +15,8 @@ var headlamp := Shapes.material(Color("#d9d5bb"), 0.25, 0.29)
 var amber := Shapes.material(Color("#b86c2b"), 0.22, 0.37)
 var tail := Shapes.material(Color("#8f2824"), 0.16, 0.32)
 var fabric := Shapes.material(Color("#514f47"), 0.0, 0.94)
+var vinyl := Shapes.material(Color("#343637"), 0.0, 0.81)
+var dial_ink := Shapes.material(Color("#d7d6c5"), 0.0, 0.78)
 
 
 func _init(color := Color("#728b85")) -> void:
@@ -76,7 +78,7 @@ func build(root: Node3D, style: int, mechanical := true) -> void:
 		make_door(root, key, style)
 	make_hood(root)
 	make_tailgate(root, style)
-	_gas_cap(root)
+	_gas_cap(root, style)
 	var ids := ["FL_Wheel", "FR_Wheel", "RL_Wheel", "RR_Wheel"]
 	for i in ids.size():
 		var wheel := make_wheel(root, ids[i])
@@ -216,11 +218,21 @@ func _bumpers(body: Node3D, style: int) -> void:
 			Vector3(side * lamp_x, lamp_y, nose.y - 0.033), headlamp)
 		Shapes.box(body, "FrontIndicator", Vector3(0.093, lamp_height, 0.027),
 			Vector3(side * (lamp_x + lamp_width * 0.5 + 0.052), lamp_y, nose.y - 0.016), amber)
-		var brake_box := Vector3(0.246, 0.108, 0.034) if style == SEDAN else Vector3(0.147, 0.132, 0.034)
-		var brake_x := 0.617 if style == SEDAN else 0.705
-		Shapes.box(rear_lights, "BrakeLens", brake_box, Vector3(side * brake_x, 0.031, 0.024), tail)
-		Shapes.box(rear_lights, "RearIndicator", Vector3(brake_box.x, 0.041, 0.031),
-			Vector3(side * brake_x, -0.049, 0.022), amber)
+		var wide := style == SEDAN
+		var lamp_center: float = side * (0.605 if wide else 0.69)
+		var housing := Vector3(0.319 if wide else 0.156, 0.153, 0.032)
+		Shapes.box(rear_lights, "TailHousing", housing, Vector3(lamp_center, 0, 0.018), trim)
+		var brake_width := 0.205 if wide else 0.128
+		Shapes.box(rear_lights, "BrakeLensLeft" if side < 0.0 else "BrakeLensRight", Vector3(brake_width, 0.069, 0.009),
+			Vector3(lamp_center + (side * 0.045 if wide else 0.0), 0.030, 0.037), tail)
+		Shapes.box(rear_lights, "RearIndicator", Vector3(brake_width, 0.041, 0.009),
+			Vector3(lamp_center + (side * 0.045 if wide else 0.0), -0.036, 0.037), amber)
+		var reverse_x: float = lamp_center - side * (0.109 if wide else 0.132)
+		if not wide:
+			Shapes.box(rear_lights, "ReverseHousing", Vector3(0.088, 0.062, 0.032),
+				Vector3(reverse_x, -0.032, 0.018), trim)
+		Shapes.box(rear_lights, "ReverseLensLeft" if side < 0.0 else "ReverseLensRight", Vector3(0.063, 0.041, 0.009),
+			Vector3(reverse_x, -0.032, 0.037), headlamp)
 	Shapes.box(body, "RearPlate", Vector3(0.32, 0.09, 0.015), Vector3(0, 0.636, rear.y + 0.014), alloy)
 	Shapes.cylinder(body, "ExhaustTip", Vector3(0.60, 0.236, rear.y + 0.06), Vector3.BACK, 0.034, 0.13, alloy, 16)
 
@@ -318,14 +330,22 @@ func make_door(parent: Node3D, title: String, style := SEDAN) -> Node3D:
 	var bottom_back := belt_b + Vector3(0, 0.006, -0.021)
 	var top_front: Vector3 = BODIES[style]["roof"][0] if front else _roof_at(0.082, style)
 	var top_back := _roof_at(0.011, style) if front else _rear_door_top(style)
-	top_front += Vector3(0.016, -0.027, 0.006)
-	top_back += Vector3(0.016, -0.027, -0.012)
+	top_front += Vector3(0.009, -0.044, 0.014)
+	top_back += Vector3(0.009, -0.044, -0.015)
 	_glazing(door, "DoorGlass", [_side(bottom_front, side) - door.position, _side(bottom_back, side) - door.position,
 		_side(top_back, side) - door.position, _side(top_front, side) - door.position])
 	var inner_start := _side(Vector3(0.818, bottom_a.y, start + 0.009), side) - door.position
 	var inner_end := _side(Vector3(0.818, bottom_b.y, end - 0.009), side) - door.position
 	_plate(door, "DoorCard", [inner_start, inner_end, _side(belt_b, side) - door.position,
 		_side(belt_a, side) - door.position], Vector3(-side * 0.032, 0, 0), fabric, false)
+	var midpoint := (start + end) * 0.5 - door.position.z
+	Shapes.box(door, "Armrest", Vector3(0.054, 0.051, 0.35), Vector3(-side * 0.063, 0.046, midpoint), vinyl)
+	Shapes.box(door, "DoorPocket", Vector3(0.037, 0.113, 0.34), Vector3(-side * 0.053, -0.242, midpoint), vinyl)
+	Shapes.box(door, "InsideHandleBezel", Vector3(0.025, 0.057, 0.104),
+		Vector3(-side * 0.049, 0.123, midpoint - 0.187), vinyl)
+	Shapes.box(door, "InsideRelease", Vector3(0.013, 0.014, 0.066),
+		Vector3(-side * 0.066, 0.123, midpoint - 0.187), alloy)
+	Shapes.cylinder(door, "WindowCrank", Vector3(-side * 0.054, 0.073, midpoint - 0.052), Vector3.RIGHT, 0.021, 0.021, trim, 12)
 	Shapes.box(door, "ExteriorHandle", Vector3(0.029, 0.041, 0.117),
 		Vector3(side * (b.x - 0.815), 0.13, end - door.position.z - 0.12), trim)
 	Shapes.tube(door, "BeltSeal", _side(belt_a, side) - door.position, _side(belt_b, side) - door.position, 0.009, rubber)
@@ -363,9 +383,11 @@ func make_tailgate(parent: Node3D, style: int) -> Node3D:
 		hinge.position = Vector3(0, back.y, back.z + 0.012)
 		var gate := _node(hinge, "Trunk")
 		var top := back - hinge.position + Vector3(-0.016, -0.021, 0.018)
-		var bottom := rear - hinge.position + Vector3(-0.014, -0.007, 0.011)
+		var bottom := rear - hinge.position + Vector3(-0.018, 0.004, 0.025)
 		var belt := top.lerp(bottom, 0.69 if style == HATCHBACK else 0.74)
 		_glazing(gate, "TailgateGlass", [_side(top, -1), top, belt, _side(belt, -1)])
+		for side in [-1.0, 1.0]:
+			_frame(gate, "LiftgateFrame", side, top, belt, 0.036)
 		_plate(gate, "TailgatePaint", [_side(belt, -1), belt, bottom, _side(bottom, -1)], Vector3(0, -0.014, -0.028), paint, true)
 		var handle := belt.lerp(bottom, 0.67)
 		Shapes.box(gate, "TailgateHandle", Vector3(0.225, 0.032, 0.028), Vector3(0, handle.y, handle.z + 0.018), trim)
@@ -390,13 +412,16 @@ static func _surface() -> SurfaceTool:
 	return surface
 
 
-func _gas_cap(root: Node3D) -> void:
+func _gas_cap(root: Node3D, style: int) -> void:
+	var panel_z := 1.307
+	var panel_x := _station(panel_z, style).x + 0.001
 	var hinge := _node(root, "GasCapTargetHinge")
-	hinge.position = Vector3(0.892, 0.801, 1.23)
+	hinge.position = Vector3(panel_x, 0.823, panel_z - 0.064)
 	var filler := _node(root, "FuelFiller")
-	filler.position = Vector3(0.883, 0.801, 1.307)
-	Shapes.cylinder(root, "FillerRecess", filler.position, Vector3.RIGHT, 0.058, 0.016, trim, 20)
-	var lid := Shapes.box(hinge, "gascap", Vector3(0.019, 0.122, 0.146), Vector3(0.012, 0, 0.077), paint)
+	filler.position = Vector3(panel_x, hinge.position.y, panel_z)
+	Shapes.cylinder(root, "FillerSurround", filler.position, Vector3.RIGHT, 0.064, 0.019, trim, 24)
+	Shapes.cylinder(root, "FillerNeck", filler.position + Vector3.RIGHT * 0.011, Vector3.RIGHT, 0.034, 0.016, alloy, 20)
+	var lid := Shapes.cylinder(hinge, "gascap", Vector3(0.022, 0, 0.064), Vector3.RIGHT, 0.061, 0.013, paint, 24)
 	lid.set_meta("body_paint", true)
 
 
@@ -419,26 +444,95 @@ func _interior(root: Node3D, style: int) -> void:
 	var cargo_end := rear_bumper(style) - 0.065
 	Shapes.box(cabin, "CargoMat", Vector3(1.31, 0.043, cargo_end - cargo_start),
 		Vector3(0, 0.50, (cargo_start + cargo_end) / 2), rubber)
+	_cockpit(cabin, style)
+	var roof: Array = BODIES[style]["roof"]
+	var headliner_start: Vector3 = roof[0]
+	var headliner_end: Vector3 = roof[1]
+	var liner := Shapes.material(Color("#a29b89"), 0.0, 0.96)
+	_skin(cabin, "Headliner", [[headliner_start.z + 0.035, 0.57, 0.61, headliner_start.y - 0.019, headliner_start.y + 0.004],
+		[headliner_end.z - 0.042, 0.57, 0.61, headliner_end.y - 0.019, headliner_end.y + 0.004]], liner)
+	for side in [-1.0, 1.0]:
+		Shapes.box(cabin, "SunVisor", Vector3(0.40, 0.022, 0.13),
+			Vector3(side * 0.32, headliner_start.y - 0.041, headliner_start.z + 0.065), liner)
+	var mirror := Shapes.box(cabin, "RearviewMirror", Vector3(0.212, 0.071, 0.04),
+		Vector3(0, headliner_start.y - 0.162, headliner_start.z - 0.13), vinyl)
+	Shapes.box(mirror, "MirrorGlass", Vector3(0.184, 0.05, 0.003), Vector3(0, 0, 0.022), alloy)
+	Shapes.tube(cabin, "MirrorStem", mirror.position + Vector3(0, 0.019, -0.012),
+		Vector3(0, headliner_start.y - 0.04, headliner_start.z + 0.054), 0.014, trim)
+	if style == SEDAN:
+		Shapes.box(cabin, "ParcelShelf", Vector3(1.31, 0.04, 0.17), Vector3(0, 0.86, 1.25), fabric)
+	else:
+		for side in [-1.0, 1.0]:
+			Shapes.box(cabin, "CargoWheelTub", Vector3(0.155, 0.248, 0.62),
+				Vector3(side * 0.681, 0.631, 1.45), vinyl)
+
+
+func _cockpit(cabin: Node3D, style: int) -> void:
+	var cluster := Shapes.box(cabin, "InstrumentBinnacle", Vector3(0.343, 0.151, 0.188),
+		Vector3(-0.411, 0.939, -0.655), vinyl)
+	cluster.rotation.x = -0.17
+	_dial(cluster, "SpeedNeedle", Vector3(-0.084, 0.0, 0.099), 0.055)
+	_dial(cluster, "RpmNeedle", Vector3(0.050, 0.0, 0.099), 0.046)
+	_dial(cluster, "FuelNeedle", Vector3(0.135, -0.002, 0.099), 0.024)
 	var wheel := _node(cabin, "Steerwheel")
-	wheel.position = Vector3(-0.42, 0.94, -0.44)
-	wheel.rotation.x = 0.76
+	wheel.position = Vector3(-0.416, 0.906, -0.393)
+	wheel.rotation.x = 1.12
 	var ring := TorusMesh.new()
-	ring.inner_radius = 0.149
-	ring.outer_radius = 0.17
-	ring.rings = 26
+	ring.inner_radius = 0.151
+	ring.outer_radius = 0.176
+	ring.rings = 28
 	ring.ring_segments = 10
 	_mesh(wheel, "SteeringRim", ring, rubber)
-	Shapes.box(wheel, "SteeringHorn", Vector3(0.15, 0.039, 0.084), Vector3.ZERO, trim)
-	for x in [-0.12, 0.12]:
-		Shapes.box(wheel, "SteeringSpoke", Vector3(0.09, 0.025, 0.037), Vector3(x, 0, 0), trim)
-	for x in [-0.48, -0.36]:
-		Shapes.cylinder(cabin, "InstrumentDial", Vector3(x, 0.898, -0.570), Vector3.BACK, 0.044, 0.012, rubber, 20)
-		Shapes.box(cabin, "InstrumentNeedle", Vector3(0.0025, 0.029, 0.004), Vector3(x, 0.898, -0.560), amber).rotation.z = 0.64
-	Shapes.box(cabin, "Radio", Vector3(0.20, 0.071, 0.03), Vector3(0, 0.795, -0.555), rubber)
-	for x in [-0.067, 0.067]:
-		Shapes.cylinder(cabin, "RadioKnob", Vector3(x, 0.795, -0.531), Vector3.BACK, 0.011, 0.021, alloy, 12)
-	Shapes.tube(cabin, "GearLever", Vector3(0, 0.489, -0.25), Vector3(0, 0.68, -0.31), 0.013, alloy)
-	Shapes.box(cabin, "GearKnob", Vector3(0.047, 0.039, 0.044), Vector3(0, 0.684, -0.31), rubber)
+	Shapes.box(wheel, "SteeringHorn", Vector3(0.133, 0.045, 0.093), Vector3.ZERO, vinyl)
+	for side in [-1.0, 1.0]:
+		Shapes.box(wheel, "SteeringSpoke", Vector3(0.107, 0.024, 0.035), Vector3(side * 0.103, 0, 0), trim)
+	Shapes.box(wheel, "LowerSpoke", Vector3(0.037, 0.024, 0.096), Vector3(0, 0, 0.103), trim)
+	Shapes.tube(cabin, "SteeringColumn", wheel.position - Vector3(0, 0.015, 0.018),
+		Vector3(-0.416, 0.809, -0.585), 0.047, vinyl)
+	for x in [-0.68, -0.11, 0.051, 0.655]:
+		_vent(cabin, x)
+	var radio := Shapes.box(cabin, "Radio", Vector3(0.252, 0.076, 0.036), Vector3(-0.021, 0.796, -0.552), vinyl)
+	Shapes.box(radio, "CassetteSlot", Vector3(0.112, 0.013, 0.006), Vector3(0, 0.012, 0.021), rubber)
+	for x in [-0.095, 0.095]:
+		Shapes.cylinder(radio, "RadioKnob", Vector3(x, 0, 0.024), Vector3.BACK, 0.012, 0.015, alloy, 12)
+	Shapes.box(cabin, "GloveBox", Vector3(0.389, 0.128, 0.028), Vector3(0.39, 0.77, -0.547), vinyl)
+	Shapes.box(cabin, "GloveBoxLatch", Vector3(0.065, 0.017, 0.012), Vector3(0.39, 0.801, -0.526), trim)
+	Shapes.box(cabin, "TransmissionTunnel", Vector3(0.233, 0.112, 1.16), Vector3(0, 0.454, -0.008), vinyl)
+	Shapes.box(cabin, "ShiftBoot", Vector3(0.113, 0.059, 0.119), Vector3(0.005, 0.523, -0.254), rubber)
+	Shapes.tube(cabin, "GearLever", Vector3(0.005, 0.545, -0.25), Vector3(0.018, 0.671, -0.22), 0.012, alloy)
+	Shapes.box(cabin, "GearKnob", Vector3(0.047, 0.039, 0.045), Vector3(0.018, 0.679, -0.22), vinyl)
+	Shapes.tube(cabin, "Handbrake", Vector3(0.038, 0.505, 0.25), Vector3(0.038, 0.553, -0.011), 0.024, rubber)
+	for x in [-0.54, -0.43, -0.31]:
+		var width := 0.032 if x > -0.4 else 0.062
+		Shapes.box(cabin, "Pedal", Vector3(width, 0.074, 0.019), Vector3(x, 0.491, -0.629), rubber).rotation.x = -0.21
+	var inlay := Shapes.material([Color("#514f47"), Color("#3e474b"), Color("#655748")][style], 0.0, 0.75)
+	Shapes.box(cabin, "DashTrim", Vector3(0.412, 0.016, 0.013), Vector3(0.39, 0.846, -0.563), inlay)
+
+
+func _dial(cluster: Node3D, title: String, center: Vector3, radius: float) -> void:
+	Shapes.cylinder(cluster, "DialBezel", center, Vector3.BACK, radius, 0.016, alloy, 28)
+	Shapes.cylinder(cluster, "DialFace", center + Vector3.BACK * 0.009, Vector3.BACK, radius * 0.91, 0.008, rubber, 28)
+	var markings := _surface()
+	for i in range(11):
+		var angle := lerpf(-2.32, 2.32, i / 10.0)
+		var direction := Vector3(-sin(angle), cos(angle), 0)
+		var across := Vector3(direction.y, -direction.x, 0) * radius * 0.023
+		var outside := center + direction * radius * 0.81 + Vector3.BACK * 0.016
+		var inside := outside - direction * radius * (0.16 if i % 5 == 0 else 0.088)
+		_quad(markings, outside - across, inside - across, inside + across, outside + across)
+	_finish(markings, cluster, "DialMarkings", dial_ink)
+	var pivot := _node(cluster, title)
+	pivot.position = center + Vector3.BACK * 0.020
+	pivot.rotation.z = 2.32
+	Shapes.box(pivot, "Needle", Vector3(radius * 0.051, radius * 0.73, 0.003),
+		Vector3(0, radius * 0.30, 0), amber)
+	Shapes.cylinder(pivot, "NeedleHub", Vector3.ZERO, Vector3.BACK, radius * 0.09, 0.006, vinyl, 12)
+
+
+func _vent(cabin: Node3D, x: float) -> void:
+	var vent := Shapes.box(cabin, "AirVent", Vector3(0.104, 0.054, 0.021), Vector3(x, 0.85, -0.565), rubber)
+	for y in [-0.014, 0.0, 0.014]:
+		Shapes.box(vent, "VentSlat", Vector3(0.086, 0.004, 0.01), Vector3(0, y, 0.012), vinyl)
 
 
 func _engine_mounts(root: Node3D) -> void:
