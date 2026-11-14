@@ -203,8 +203,12 @@ func _build_teeth(parent: Node3D, at: Vector3, upper: bool) -> void:
 			var y := at.y + direction * (x * x * 3.0 + row * 0.003) + rng.randf_range(-0.0018, 0.0018)
 			var z := at.z + cos(angle) * 0.013 - row * 0.015
 			var axis := Vector3(x * -1.4, direction, rng.randf_range(-0.09, 0.12)).normalized()
-			var basis := Basis(Quaternion(Vector3.UP, axis)).scaled_local(Vector3(1.0, rng.randf_range(0.54, 1.28), 1.0))
-			rows.set_instance_transform(row * 22 + tooth, Transform3D(basis, Vector3(x, y, z)))
+			var original_length := rng.randf_range(0.54, 1.28)
+			var extension := lerpf(1.73, 1.40, row / 5.0)
+			var basis := Basis(Quaternion(Vector3.UP, axis)).scaled_local(Vector3(1.0, original_length * extension, 1.0))
+			# Extend toward the tip to leave the root seated at the same depth.
+			var center := Vector3(x, y, z) + axis * (spike.height * original_length * (extension - 1.0) * 0.5)
+			rows.set_instance_transform(row * 22 + tooth, Transform3D(basis, center))
 	var teeth := MultiMeshInstance3D.new()
 	teeth.name = "Teeth"
 	teeth.multimesh = rows
