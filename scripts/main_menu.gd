@@ -4,6 +4,7 @@ const Style := preload("res://scripts/menu_style.gd")
 const SettingsPanel := preload("res://scripts/settings_panel.gd")
 
 var settings_panel: PanelContainer
+var name_panel: PanelContainer
 
 
 func _ready() -> void:
@@ -69,36 +70,53 @@ func _close_settings() -> void:
 
 func _apply_menu_scale() -> void:
 	Style.fit_panel($Menu, size, true)
+	if is_instance_valid(name_panel):
+		Style.fit_panel(name_panel, size, true)
 
 
 func _prompt_for_name() -> void:
-	var prompt := AcceptDialog.new()
-	prompt.title = "Your name"
-	prompt.dialog_text = "Choose the name other players will see."
-	prompt.ok_button_text = "Continue"
-	prompt.unresizable = true
-	add_child(prompt)
+	$Menu.hide()
+	name_panel = PanelContainer.new()
+	name_panel.name = "NamePrompt"
+	name_panel.theme = Style.make_theme()
+	name_panel.custom_minimum_size.x = $Menu.custom_minimum_size.x
+	add_child(name_panel)
+
+	var content := Style.vbox(12)
+	name_panel.add_child(content)
+	content.add_child(Style.heading("Your name", 34))
+	content.add_child(Style.label("This is the name other players will see."))
+
 	var field := LineEdit.new()
+	field.name = "PlayerName"
 	field.max_length = 24
 	field.placeholder_text = "Player name"
-	field.custom_minimum_size.x = 280
-	prompt.add_child(field)
-	prompt.get_ok_button().disabled = true
+	field.custom_minimum_size.y = 42
+	content.add_child(field)
+
+	var next := Style.button("Continue")
+	next.disabled = true
+	content.add_child(next)
 	field.text_changed.connect(func(value: String) -> void:
-		prompt.get_ok_button().disabled = value.strip_edges().is_empty()
+		next.disabled = value.strip_edges().is_empty()
 	)
-	field.text_submitted.connect(func(value: String) -> void:
-		if not value.strip_edges().is_empty():
-			prompt.get_ok_button().pressed.emit()
+	field.text_submitted.connect(_save_first_name)
+	next.pressed.connect(func() -> void:
+		_save_first_name(field.text)
 	)
-	prompt.confirmed.connect(func() -> void:
-		GameSettings.set_player_name(field.text)
-		prompt.queue_free()
-	)
-	prompt.canceled.connect(func() -> void: _show_name_prompt.call_deferred(prompt, field))
-	_show_name_prompt(prompt, field)
-
-
-func _show_name_prompt(prompt: AcceptDialog, field: LineEdit) -> void:
-	prompt.popup_centered()
+	name_panel.minimum_size_changed.connect(_apply_menu_scale)
+	_apply_menu_scale()
 	field.grab_focus()
+
+
+func _save_first_name(value: String) -> void:
+	if value.strip_edges().is_empty() or not is_instance_valid(name_panel):
+		return
+	GameSettings.set_player_name(value)
+	name_panel.queue_free()
+	name_panel = null
+	$Menu.show()
+	if $Menu/ContinueButton.visible:
+		$Menu/ContinueButton.grab_focus()
+	else:
+		$Menu/StartButton.grab_focus()
