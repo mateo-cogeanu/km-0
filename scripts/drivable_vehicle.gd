@@ -811,7 +811,7 @@ func _setup_rear_lights() -> void:
 	rear_reverse_material.emission_energy_multiplier = 1.9
 	var tail := to_local(mount.global_position)
 	for side in [-1.0, 1.0]:
-		var at := Vector3(side * 0.426, tail.y, tail.z + 0.043)
+		var at := Vector3(side * (0.465 if body_style == CarModel.SEDAN else 0.565), tail.y - 0.026, tail.z + 0.026)
 		PropShapes.box(self, "ReverseLens", Vector3(0.17, 0.075, 0.028), at, rear_reverse_material)
 		var lamp := OmniLight3D.new()
 		lamp.position = at + Vector3.BACK * 0.18
@@ -1050,13 +1050,11 @@ func _apply_graphics_quality() -> void:
 
 
 func _configure_headlight_transform(light: Light3D) -> void:
-	match light.name:
-		"LeftHeadlight":
-			light.position = Vector3(-0.52, 0.654, -2.19)
-		"RightHeadlight":
-			light.position = Vector3(0.52, 0.654, -2.19)
-		_:
-			pass
+	if wheel_model_root and light.name in ["LeftHeadlight", "RightHeadlight"]:
+		var lenses := wheel_model_root.find_children("HeadlightLens*", "MeshInstance3D", true, false)
+		if lenses.size() == 2:
+			var lens := lenses[0 if light.name == "LeftHeadlight" else 1] as Node3D
+			light.position = to_local(lens.global_position) + Vector3.FORWARD * 0.024
 	light.rotation_degrees = Vector3(-4.0, 0.0, 0.0)
 
 
@@ -1282,7 +1280,7 @@ func _setup_engine_bay_models() -> void:
 		model_root.add_child(air_filter)
 		var reservoir := COOLANT_RESERVOIR_MODEL.instantiate() as Node3D
 		reservoir.name = "CoolantReservoir"
-		reservoir.position = engine.position + Vector3(0.56, 0.02, 0.24)
+		reservoir.position = engine.position + Vector3(0.56, 0.04, 0.24)
 		reservoir.scale = Vector3.ONE * 0.38
 		model_root.add_child(reservoir)
 
@@ -1302,6 +1300,9 @@ func _replace_part_mesh(part: MeshInstance3D, model: PackedScene) -> void:
 		if not part.has_meta("original_collision_size"):
 			part.set_meta("original_collision_size", _safe_collision_size(part))
 		part.mesh = geometry.mesh
+		part.material_override = geometry.material_override
+		for surface in geometry.mesh.get_surface_count():
+			part.set_surface_override_material(surface, geometry.get_surface_override_material(surface))
 	instance.free()
 
 
@@ -1593,7 +1594,20 @@ func install_part(body: RigidBody3D, restore_slot: String = "") -> bool:
 	if is_instance_valid(previous) and previous != part and previous.get_parent() == parent:
 		parent.remove_child(previous)
 		previous.queue_free()
-	part.reparent(parent, true)
+	if wheel_model_root and part_type.begins_with("door_") and int(part.get_meta("body_style", -1)) != body_style:
+		var color := (part.get_node("DoorSkin") as MeshInstance3D).get_active_material(0) as StandardMaterial3D
+		var door_name := _paint_target_name(str(data["area"].name))
+		var replacement := CarModel.new(color.albedo_color).make_door(parent, door_name, body_style)
+		replacement.set_meta("trip_part_id", part.get_meta("trip_part_id"))
+		painted_materials.erase(replacement.get_node("DoorSkin").get_path())
+		part = replacement
+		_get_or_create_paint_material(replacement.get_node("DoorSkin")).albedo_color = color.albedo_color
+	else:
+		part.reparent(parent, true)
+		if part_type.begins_with("door_"):
+			var skin := part.get_node_or_null("DoorSkin") as MeshInstance3D
+			if skin and skin.material_override is StandardMaterial3D:
+				painted_materials[skin.get_path()] = skin.material_override
 	part.transform = data["closed_transform"] as Transform3D
 	body.queue_free()
 	data["installed"] = true
@@ -1932,22 +1946,14 @@ func _apply_sedan_trim() -> void:
 	paint_named_part("Chassis", tint, 1.0)
 	for door in ["FL_Door", "FR_Door", "RL_Door", "RR_Door"]:
 		paint_named_part(door, tint, 1.0)
-	var rubber := PropShapes.material(Color("#242829"), 0.12)
 	var accessories := Node3D.new()
 	accessories.name = "TrimAccessories"
 	add_child(accessories)
-	match sedan_trim:
-		1:
-			for z in [-0.17, 0.47]:
-				for side in [-1.0, 1.0]:
-					PropShapes.box(accessories, "CrossbarFoot", Vector3(0.092, 0.057, 0.10), Vector3(side * 0.53, 1.707, z), rubber)
-				PropShapes.box(accessories, "Crossbar", Vector3(1.20, 0.033, 0.073), Vector3(0, 1.752, z), rubber)
-		2:
-			for side in [-1.0, 1.0]:
-				PropShapes.box(accessories, "BumperOverrider", Vector3(0.087, 0.13, 0.053), Vector3(side * 0.52, 0.39, -2.226), rubber)
-		3:
-			for side in [-1.0, 1.0]:
-				PropShapes.box(accessories, "SillGuard", Vector3(0.022, 0.071, 1.90), Vector3(side * 0.900, 0.27, 0.038), rubber)
+	var rubber := PropShapes.material(Color("#242829"), 0.12)
+	if sedan_trim == 3:
+		for side in [-1.0, 1.0]:
+			PropShapes.box(accessories, "SillGuard", Vector3(0.023, 0.048, 1.72),
+				Vector3(side * 0.874, 0.257, 0.038), rubber)
 
 
 func _apply_automotive_finish() -> void:
@@ -1962,11 +1968,11 @@ func _apply_automotive_finish_recursive(node: Node, target_name: String) -> void
 		var mesh_instance := node as MeshInstance3D
 		if _is_paintable_mesh(mesh_instance, target_name):
 			var material := _get_or_create_paint_material(mesh_instance)
-			material.metallic = 0.38
-			material.roughness = 0.26
-			material.metallic_specular = 0.62
+			material.metallic = 0.24
+			material.roughness = 0.43
+			material.metallic_specular = 0.38
 			material.clearcoat_enabled = true
-			material.clearcoat_roughness = 0.14
+			material.clearcoat_roughness = 0.38
 
 	for child in node.get_children():
 		_apply_automotive_finish_recursive(child, target_name)
