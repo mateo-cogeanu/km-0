@@ -17,9 +17,7 @@ var environment: Environment
 var fill_light: DirectionalLight3D
 var sky_dome: MeshInstance3D
 var sky_dome_material: ShaderMaterial
-var cloud_layer: MeshInstance3D
-var cloud_material: ShaderMaterial
-var cloud_offset: Vector2 = Vector2.ZERO
+var cloud_time := 0.0
 var lighting_update_timer: float = 0.0
 var shadow_distance: float = 220.0
 var sun_shadow_enabled: bool = true
@@ -31,8 +29,6 @@ func _ready() -> void:
 		_setup_environment_quality()
 		_setup_fill_light()
 		_setup_sky_dome()
-		if enable_clouds:
-			_setup_cloud_layer()
 
 	if GameSettings and not GameSettings.settings_changed.is_connected(_apply_graphics_quality):
 		GameSettings.settings_changed.connect(_apply_graphics_quality)
@@ -51,11 +47,10 @@ func _process(delta: float) -> void:
 		lighting_update_timer = lighting_update_interval
 		_update_world_lighting()
 
-	if cloud_layer:
-		cloud_offset += Vector2(0.0025, 0.0008) * delta
+	if enable_clouds and sky_dome_material:
+		cloud_time += delta
+		sky_dome_material.set_shader_parameter("cloud_time", cloud_time)
 	_update_sky_dome_position()
-	if cloud_layer:
-		_update_cloud_layer_position()
 
 
 func _advance_clock(delta: float) -> void:
@@ -155,6 +150,9 @@ uniform float daylight = 1.0;
 uniform float sun_height = 1.0;
 uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
 uniform vec3 moon_direction = vec3(0.0, 1.0, 0.0);
+uniform bool clouds_enabled = false;
+uniform float cloud_time = 0.0;
+uniform sampler2D cloud_noise : filter_linear_mipmap, repeat_enable;
 
 varying vec3 world_dir;
 
@@ -207,73 +205,48 @@ void fragment() {
 	float bright_stars = step(0.9992, star_noise) * smoothstep(0.22, 0.9, y) * night;
 	color += vec3(0.78, 0.86, 1.0) * stars * 0.65;
 	color += vec3(1.0, 0.96, 0.82) * bright_stars * 1.4;
+	if (clouds_enabled && dir.y > 0.055) {
+		// Project the view ray onto two horizontal layers at fixed world altitudes.
+		// Their positions follow the wind and stay anchored as the camera moves.
+		vec3 eye = CAMERA_POSITION_WORLD;
+		vec2 low = eye.xz + dir.xz * max(120.0 - eye.y, 20.0) / dir.y;
+		vec2 high = eye.xz + dir.xz * max(240.0 - eye.y, 20.0) / dir.y;
+		vec2 lower_uv = (low - vec2(3.0, 1.1) * cloud_time) / 1100.0;
+		vec2 upper_uv = (high - vec2(5.0, -1.2) * cloud_time) / 2200.0 + vec2(0.39, 0.12);
+		float high_density = texture(cloud_noise, upper_uv * vec2(0.95, 1.8)).r;
+		float density = texture(cloud_noise, lower_uv).r * 0.82
+			+ texture(cloud_noise, lower_uv * 3.11 + vec2(0.24, 0.6)).r * 0.18;
+		float horizon_fade = smoothstep(0.055, 0.21, dir.y);
+		float wisps = smoothstep(0.56, 0.76, high_density) * horizon_fade * 0.42;
+		float coverage = smoothstep(0.53, 0.68, density) * horizon_fade * 0.91;
+		vec3 light_cloud = mix(vec3(0.84, 0.89, 0.96), vec3(1.0, 0.77, 0.60), sunset * 0.65);
+		light_cloud += vec3(0.28, 0.16, 0.08) * pow(sun_amount, 9.0) * daylight;
+		vec3 night_cloud = vec3(0.027, 0.034, 0.066)
+			+ vec3(0.065, 0.075, 0.11) * pow(moon_amount, 9.0);
+		vec3 cloud_tint = mix(night_cloud, light_cloud, daylight);
+		color = mix(color, cloud_tint, wisps);
+		color = mix(color, cloud_tint * mix(0.66, 1.0, smoothstep(0.56, 0.75, density)), coverage);
+	}
 	ALBEDO = color;
 }
 """
 	sky_dome_material = ShaderMaterial.new()
 	sky_dome_material.shader = shader
+	if enable_clouds:
+		var noise := FastNoiseLite.new()
+		noise.seed = 713
+		noise.frequency = 0.012
+		noise.fractal_octaves = 5
+		var texture := NoiseTexture2D.new()
+		texture.width = 512
+		texture.height = 512
+		texture.seamless = true
+		texture.noise = noise
+		sky_dome_material.set_shader_parameter("cloud_noise", texture)
+		sky_dome_material.set_shader_parameter("clouds_enabled", true)
 	sky_dome.material_override = sky_dome_material
 	add_child(sky_dome)
 	_update_sky_dome_position()
-
-
-func _setup_cloud_layer() -> void:
-	cloud_layer = MeshInstance3D.new()
-	cloud_layer.name = "ProceduralCloudLayer"
-	var mesh := PlaneMesh.new()
-	mesh.size = Vector2(900.0, 900.0)
-	cloud_layer.mesh = mesh
-	cloud_layer.rotation_degrees.x = -90.0
-	cloud_layer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
-	var shader := Shader.new()
-	shader.code = """
-shader_type spatial;
-render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
-
-uniform vec2 cloud_offset = vec2(0.0);
-uniform float daylight = 1.0;
-
-float hash(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-float noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
-	float a = hash(i);
-	float b = hash(i + vec2(1.0, 0.0));
-	float c = hash(i + vec2(0.0, 1.0));
-	float d = hash(i + vec2(1.0, 1.0));
-	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-float fbm(vec2 p) {
-	float value = 0.0;
-	float amplitude = 0.55;
-	for (int i = 0; i < 5; i++) {
-		value += noise(p) * amplitude;
-		p *= 2.02;
-		amplitude *= 0.5;
-	}
-	return value;
-}
-
-void fragment() {
-	vec2 p = (UV - vec2(0.5)) * 6.5 + cloud_offset;
-	float n = fbm(p) * 0.75 + fbm(p * 2.8 + 13.0) * 0.25;
-	float alpha = smoothstep(0.55, 0.78, n) * 0.58 * daylight;
-	vec3 cloud_color = mix(vec3(0.72, 0.74, 0.78), vec3(1.0), daylight);
-	ALBEDO = cloud_color;
-	ALPHA = alpha;
-}
-"""
-	cloud_material = ShaderMaterial.new()
-	cloud_material.shader = shader
-	cloud_layer.material_override = cloud_material
-	add_child(cloud_layer)
-	_update_cloud_layer_position()
 
 
 func _update_sky_dome_position() -> void:
@@ -283,17 +256,6 @@ func _update_sky_dome_position() -> void:
 	var camera := get_viewport().get_camera_3d()
 	if camera:
 		sky_dome.global_position = camera.global_position
-
-
-func _update_cloud_layer_position() -> void:
-	if cloud_layer == null:
-		return
-
-	var camera := get_viewport().get_camera_3d()
-	var center := Vector3.ZERO
-	if camera:
-		center = camera.global_position
-	cloud_layer.global_position = Vector3(center.x, center.y + 120.0, center.z)
 
 
 func _update_world_lighting() -> void:
@@ -340,7 +302,3 @@ func _update_world_lighting() -> void:
 		sky_dome_material.set_shader_parameter("sun_height", sun_height)
 		sky_dome_material.set_shader_parameter("sun_direction", sun_direction)
 		sky_dome_material.set_shader_parameter("moon_direction", sun_direction)
-
-	if cloud_material:
-		cloud_material.set_shader_parameter("daylight", clampf(daylight + 0.18, 0.0, 1.0))
-		cloud_material.set_shader_parameter("cloud_offset", cloud_offset)

@@ -57,6 +57,7 @@ directional_shadow_max_distance = 140.0
 script = ExtResource("9_day_night")
 world_environment = NodePath("../WorldEnvironment")
 sun = NodePath("../Sun")
+enable_clouds = true
 
 [node name="InfiniteRoad" type="Node3D" parent="." unique_id=1722768952 node_paths=PackedStringArray("target")]
 script = ExtResource("8_infinite_road")
