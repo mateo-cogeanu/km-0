@@ -22,6 +22,10 @@ var caption: Label
 var looked := false
 var previous_step := -1
 var walk_start := Vector3.ZERO
+var last_palms: Array[Vector3] = []
+var last_feet: Array[Vector3] = []
+var last_shoulders := Vector3.ZERO
+var last_pelvis := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -76,9 +80,9 @@ func _build_house() -> void:
 		Shapes.box(self, "Stair", Vector3(1.41, height, 0.282), Vector3(1.80, height * 0.5, -0.10 - i * 0.27), stair_mat, true)
 	Shapes.box(self, "Landing", Vector3(2.04, 0.18, 0.42), Vector3(1.67, 2.61, -3.43), floorboards, true)
 	Shapes.box(self, "UpperFloor", Vector3(4.13, 0.16, 7.27), Vector3(-1.42, 2.61, 0), floorboards, true)
-	Shapes.tube(self, "Banister", Vector3(1.04, 0.99, 0.02), Vector3(1.04, 3.55, -3.42), 0.043, floorboards)
-	for i in range(5):
-		Shapes.box(self, "Baluster", Vector3(0.07, 0.9, 0.07), Vector3(1.04, 0.66 + i * 0.59, -0.10 - i * 0.80), floorboards)
+	_wall(Vector3(0.97, 1.5, -1.81), Vector3(0.14, 3.0, 3.55))
+	_wall(Vector3(2.62, 2.4, -1.81), Vector3(0.14, 4.8, 3.55))
+	Shapes.box(self, "StairTrim", Vector3(0.16, 0.14, 3.57), Vector3(0.97, 3.04, -1.81), boards)
 	Shapes.box(self, "BareTable", Vector3(1.24, 0.078, 0.72), Vector3(-2.23, 0.79, -1.35), floorboards, true)
 	for x in [-2.75, -1.71]:
 		for z in [-1.61, -1.09]:
@@ -128,77 +132,152 @@ func _on_entry(body: Node3D) -> void:
 
 
 func _begin_descent() -> void:
-	_speak(ANYBODY, "Anybody there?", creature.global_position + Vector3.UP * 2.4)
+	_speak(ANYBODY, "Anybody there?", creature.global_position + Vector3.UP * 1.15)
 	sequence = create_tween()
 	sequence.tween_interval(0.92)
 	sequence.tween_callback(creature.show)
-	_walk_to(Vector3(1.80, 0.0, 0.17), 3.65, 13)
-	_walk_to(Vector3(0.92, 0.0, 0.94), 0.72, 2)
-	var eye := to_local(player.camera.global_position)
-	var near := Vector3(eye.x, 0, eye.z) + Vector3(0.07, 0, -0.43)
-	_walk_to(near, 1.22, 3)
-	sequence.tween_method(_lean, 0.0, 1.0, 0.46)
-	sequence.tween_interval(0.46)
+	sequence.tween_method(_descend, 0.0, 1.0, 4.25)
+	sequence.tween_callback(_start_crawl)
+	sequence.tween_method(_crawl, 0.0, 1.0, 2.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	sequence.tween_method(_lean, 0.0, 1.0, 0.65).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	sequence.tween_method(_hold_face.bind(false), 0.0, 0.45, 0.45)
 	sequence.tween_callback(_deliver_line)
-	sequence.tween_interval(1.36)
+	sequence.tween_method(_hold_face.bind(true), 0.0, 1.36, 1.36)
 	sequence.tween_callback(_show_end)
 
 
-func _walk_to(destination: Vector3, duration: float, steps: int) -> void:
-	sequence.tween_callback(_start_walk)
-	sequence.tween_method(_advance_walk.bind(destination, steps), 0.0, 1.0, duration)
+func _descend(progress: float) -> void:
+	var stride := progress * 7.0
+	var center_z := lerpf(-3.04, -0.14, progress)
+	var floor_y := maxf(0.0, (0.042 - center_z) / 0.27 * 0.207)
+	creature.position = Vector3(1.80, floor_y, center_z)
+	var palms: Array[Vector3] = []
+	var normals: Array[Vector3] = [Vector3.RIGHT, Vector3.LEFT]
+	var feet: Array[Vector3] = []
+	for i in range(2):
+		var side := -1.0 if i == 0 else 1.0
+		var phase := stride + i * 0.5
+		var reach := _contact(phase)
+		var point_z := clampf(-3.02 + (reach + 0.84) * 0.42, -3.3, -0.05)
+		var plant_height := _stair_height(point_z) + 0.91
+		var wall_x := 1.04 if i == 0 else 2.55
+		var lift := _swing(phase)
+		palms.append(Vector3(wall_x - side * lift * 0.16, plant_height + lift * 0.20, point_z))
+		var foot_z := clampf(-3.38 + (_contact(phase + 0.5) + 0.38) * 0.42, -3.42, 0.12)
+		feet.append(Vector3(1.80 + side * 0.26, _stair_height(foot_z) + _swing(phase + 0.5) * 0.11, foot_z))
+	var shoulders := Vector3(1.80, floor_y + 0.98 + sin(stride * TAU) * 0.043, center_z + 0.26)
+	var pelvis := Vector3(1.80, floor_y + 0.71, center_z - 0.48)
+	_pose(shoulders, pelvis, palms, normals, feet, progress * 3.65)
+	_play_contact(stride * 2.0, palms[mini(1, floori(stride * 2.0) % 2)], 0.76)
 
 
-func _start_walk() -> void:
+func _stair_height(z: float) -> float:
+	return 0.0 if z > 0.042 else clampf(floorf((0.041 - z) / 0.27) + 1.0, 1.0, 13.0) * 0.207
+
+
+func _start_crawl() -> void:
 	walk_start = creature.position
 	previous_step = -1
 
 
-func _advance_walk(progress: float, destination: Vector3, steps: int) -> void:
-	var index := mini(steps - 1, floori(progress * steps))
-	creature.position = walk_start.lerp(destination, progress)
-	if steps == 13:
-		creature.position.y = floorf((1.0 - progress) * 13.0) * 0.207
-	var direction := destination - walk_start
-	if direction.length_squared() > 0.01:
-		creature.rotation.y = atan2(direction.x, direction.z)
-	creature.pose(progress * PI * steps, 0.8)
-	var under_ceiling := smoothstep(1.69, 0.78, creature.position.x)
-	creature.head.position.y = 2.12 - under_ceiling * 0.22
-	if index != previous_step:
-		previous_step = index
-		footfall.global_position = creature.global_position
-		footfall.pitch_scale = 0.89 + (index % 4) * 0.045
-		footfall.stream = STEP
-		footfall.play()
-	var focus := creature.global_position + Vector3.UP * 2.14
-	player.aim_ending_camera(focus, 0.17 if progress < 0.5 else 0.23)
+func _crawl(progress: float) -> void:
+	var eye := to_local(player.camera.global_position)
+	var end := Vector3(eye.x, 0, eye.z - 1.03)
+	var bend := Vector3(1.42, 0, 0.66)
+	var start := Vector3(walk_start.x, 0, walk_start.z)
+	var at := start.lerp(bend, progress).lerp(bend.lerp(end, progress), progress)
+	var forward := (bend - start).lerp(end - bend, progress).normalized()
+	var strides := progress * 4.0
+	creature.position = at
+	var palms: Array[Vector3] = []
+	var normals: Array[Vector3] = [Vector3.UP, Vector3.UP]
+	var feet: Array[Vector3] = []
+	for i in range(2):
+		var side := -1.0 if i == 0 else 1.0
+		var phase := strides + i * 0.5
+		var hand_progress := clampf((_contact(phase) + 0.12) / 4.0, 0, 1)
+		var hand_path := start.lerp(bend, hand_progress).lerp(bend.lerp(end, hand_progress), hand_progress)
+		var foot_progress := clampf((_contact(phase + 0.5) - 0.42) / 4.0, 0, 1)
+		var foot_path := start.lerp(bend, foot_progress).lerp(bend.lerp(end, foot_progress), foot_progress)
+		var hand_forward := ((bend - start).lerp(end - bend, hand_progress)).normalized()
+		var hand_right := Vector3.UP.cross(hand_forward)
+		var palm := hand_path + hand_forward * 0.37 + hand_right * side * 0.39 + Vector3.UP * (_swing(phase) * 0.18)
+		var stair_palm := Vector3(1.04 if i == 0 else 2.55, 1.06, -0.05)
+		var settle := smoothstep(0.0, 0.24, progress + float(i) * 0.03)
+		palms.append(stair_palm.lerp(palm, settle))
+		normals[i] = Vector3(-side, 0, 0).lerp(Vector3.UP, settle)
+		var foot_forward := ((bend - start).lerp(end - bend, foot_progress)).normalized()
+		var foot := foot_path - foot_forward * 0.51 + Vector3.UP.cross(foot_forward) * side * 0.32
+		foot.y = (_stair_height(foot.z) if foot.x > 1.07 and foot.x < 2.52 else 0.0) + _swing(phase + 0.5) * 0.13
+		feet.append(foot)
+	var shoulders := at + forward * 0.16 + Vector3.UP * (0.70 + sin(strides * TAU) * 0.026)
+	var pelvis := at - forward * 0.58 + Vector3.UP * 0.62
+	last_palms = palms
+	last_feet = feet
+	last_shoulders = shoulders
+	last_pelvis = pelvis
+	_pose(shoulders, pelvis, palms, normals, feet, 3.65 + progress * 2.10)
+	_play_contact(strides * 2.0, palms[floori(strides * 2.0) % 2], 0.96)
+
+
+func _contact(phase: float) -> float:
+	return floorf(phase) + smoothstep(0.58, 1.0, fposmod(phase, 1.0))
+
+
+func _swing(phase: float) -> float:
+	return sin(clampf((fposmod(phase, 1.0) - 0.58) / 0.42, 0.0, 1.0) * PI)
+
+
+func _play_contact(phase: float, point: Vector3, pitch: float) -> void:
+	var index := floori(phase)
+	if index == previous_step:
+		return
+	previous_step = index
+	footfall.global_position = to_global(point)
+	footfall.pitch_scale = pitch + index % 4 * 0.055
+	footfall.stream = STEP
+	footfall.play()
+
+
+func _pose(shoulders: Vector3, pelvis: Vector3, palms: Array[Vector3], normals: Array[Vector3], feet: Array[Vector3],
+		elapsed: float, reveal: float = 0.0) -> void:
+	var eye := to_local(player.camera.global_position)
+	var local_palms: Array[Vector3] = [palms[0] - creature.position, palms[1] - creature.position]
+	var local_feet: Array[Vector3] = [feet[0] - creature.position, feet[1] - creature.position]
+	creature.pose_contacts(shoulders - creature.position, pelvis - creature.position, eye - creature.position,
+		local_palms, normals, local_feet, elapsed, reveal)
+	player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.22, 0.2)
 
 
 func _lean(amount: float) -> void:
-	var marker: Vector3 = player.camera.global_position
-	var origin := creature.global_position
-	creature.rotation.y = atan2(marker.x - origin.x, marker.z - origin.z) - global_rotation.y
-	creature.pose(0, 0)
-	creature.head.position.y = lerpf(1.90, to_local(marker).y - 0.24, amount)
-	creature.head.rotation.x = -0.17 * amount
-	creature.jaw.rotation.x = 0.48 * amount
-	player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.24, amount)
+	_final_pose(amount, amount * 0.52)
+	creature.jaw.position.y = -0.006 * amount
 	if amount > 0.35 and not creature.has_node("FaceFill"):
 		var fill := OmniLight3D.new()
 		fill.name = "FaceFill"
 		fill.light_color = Color("#e1d1cd")
-		fill.light_energy = 0.83
+		fill.light_energy = 0.64
 		fill.omni_range = 1.6
 		creature.add_child(fill)
-		fill.global_position = marker
+		fill.global_position = player.camera.global_position
+
+
+func _final_pose(amount: float, elapsed: float) -> void:
+	var eye := to_local(player.camera.global_position)
+	var shoulders := last_shoulders.lerp(eye + Vector3(0, -0.40, -0.82), amount)
+	var pelvis := last_pelvis.lerp(last_pelvis + Vector3.UP * 0.12, amount)
+	var normals: Array[Vector3] = [Vector3.UP, Vector3.UP]
+	_pose(shoulders, pelvis, last_palms, normals, last_feet, 5.75 + elapsed, amount)
+
+
+func _hold_face(elapsed: float, speaking: bool) -> void:
+	_final_pose(1.0, elapsed + (0.97 if speaking else 0.52))
+	var opening := maxf(0.0, sin(elapsed * 19.0)) * exp(-elapsed * 0.82)
+	creature.jaw.position.y = -0.003 - 0.007 * opening if speaking else -0.006
 
 
 func _deliver_line() -> void:
 	_speak(TRICKED, "Tricked you too.", creature.jaw.global_position)
-	var speech := create_tween()
-	speech.tween_method(func(at: float) -> void:
-		creature.jaw.rotation.x = 0.39 + 0.19 * absf(sin(at * 17.0)), 0.0, 1.08, 1.08)
 
 
 func _speaker(distance: float) -> AudioStreamPlayer3D:
