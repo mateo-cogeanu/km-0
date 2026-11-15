@@ -26,6 +26,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		var player := get_tree().get_first_node_in_group("local_player")
 		if player and player.ending_locked:
 			return
+		if player and player.has_method("inventory_open") and player.inventory_open():
+			player.close_inventory()
+			get_viewport().set_input_as_handled()
+			return
 		if tutorial.visible:
 			_close_tutorial()
 		elif settings_panel.visible:
@@ -162,6 +166,8 @@ func _build_tutorial() -> void:
 		"Carry each part to its empty mount. Keep the hood open for engine bay parts. When the tooltip says Install, fit the part before moving on.")
 	_add_tutorial_step(items, "3. Fuel up and head out",
 		"Take the fuel can from the shack and open the car’s fuel cap. Aim at the filler to refuel. Open the shutter, get in, and follow the road. Check abandoned buildings for supplies along the way.")
+	_add_tutorial_step(items, "4. Look after yourself",
+		"Eat what you find to keep your hunger up: hold food and press R. Sprinting uses stamina. Q puts away what you’re holding, or opens your pack when your hands are empty. F switches your flashlight on and off.")
 	var actions := HBoxContainer.new()
 	items.add_child(actions)
 	var start := Style.button("Start repairs", 17)

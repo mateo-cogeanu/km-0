@@ -21,6 +21,8 @@ var cloud_time := 0.0
 var lighting_update_timer: float = 0.0
 var shadow_distance: float = 220.0
 var sun_shadow_enabled: bool = true
+## 0 at night, 1 in full day. Read by the player for the night vignette.
+var daylight := 1.0
 
 
 func _ready() -> void:
@@ -260,7 +262,7 @@ func _update_sky_dome_position() -> void:
 
 func _update_world_lighting() -> void:
 	var sun_height := sin((time_of_day - 0.25) * TAU)
-	var daylight := smoothstep(-0.18, 0.16, sun_height)
+	daylight = smoothstep(-0.18, 0.16, sun_height)
 	var warm_edge := 1.0 - absf(sun_height)
 	warm_edge = clampf(warm_edge * 1.45, 0.0, 1.0)
 

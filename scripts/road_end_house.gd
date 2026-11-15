@@ -83,6 +83,9 @@ var fake_tilt: Control
 var fake_black: ColorRect
 var fake_card: Control
 var fake_twisted := false
+var roaming := false
+var roam_time := 0.0
+var roam_inside := false
 var breather: AudioStreamPlayer3D
 ## How open its pupils are in the light; they narrow to slits when it is close.
 var eye_open := 0.35
@@ -100,6 +103,10 @@ var door_reach := Vector3.ZERO
 var door_angle := DOOR_OPEN_ANGLE
 
 const STAIR_TIME := 7.7
+## How long you can look around inside before it starts, and how close to the
+## door counts as trying to leave.
+const ROAM_TIME := 10.0
+const LEAVE_Z := 3.05
 const HOUSE_LAYER := 1 << 19
 const DOOR_OPEN_ANGLE := 103.0
 ## Where it stops beside the open door to shut it, and where you end up standing,
@@ -522,15 +529,13 @@ func _lamp(at: Vector3, energy: float, reach: float) -> void:
 
 
 func _on_entry(body: Node3D) -> void:
-	if not door_open or looked or not body.is_in_group("local_player") or body.active_vehicle:
+	## Inside, and free to look around. It begins after a while, or as soon as
+	## you head back out or start up the stairs.
+	if not door_open or looked or roaming or not body.is_in_group("local_player") or body.active_vehicle:
 		return
-	looked = true
+	roaming = true
+	roam_time = 0.0
 	player = body
-	player.lock_for_ending(to_global(Vector3(0, 1.03, 5.62)))
-	# A step further inside, out of the door's way.
-	var inside := to_local(player.global_position)
-	var step_in := create_tween()
-	step_in.tween_property(player, "global_position", to_global(Vector3(STAND_AT.x, inside.y, STAND_AT.z)), 1.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	var world_environment := get_tree().current_scene.get_node("WorldEnvironment") as WorldEnvironment
 	interior = world_environment.environment.duplicate() as Environment
 	interior.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -538,12 +543,41 @@ func _on_entry(body: Node3D) -> void:
 	interior.ambient_light_energy = 0.19
 	interior.ambient_light_sky_contribution = 0.0
 	player.camera.environment = interior
-	_build_overlay()
 	var sun := get_tree().current_scene.get_node("Sun") as DirectionalLight3D
 	sun.light_cull_mask &= ~(Creature.LIGHT_LAYER | HOUSE_LAYER)
 	var sky_fill := get_tree().current_scene.get_node_or_null("DayNightCycle/SkyFillLight") as DirectionalLight3D
 	if sky_fill:
 		sky_fill.light_cull_mask &= ~(Creature.LIGHT_LAYER | HOUSE_LAYER)
+	# An ordinary, quiet house first: a clock and the hum of the wiring.
+	ambience.append(_loop(CLOCK_TICK, Vector3(-3.3, 2.05, -1.3), -15.0))
+	ambience.append(_loop(HOUSE_HUM, Vector3(-2.4, 1.0, -3.2), -21.0))
+
+
+func _roam(delta: float) -> void:
+	if not is_instance_valid(player):
+		roaming = false
+		return
+	roam_time += delta
+	var at := to_local(player.global_position)
+	# Only once you are properly in does turning back count as leaving.
+	if at.z < LEAVE_Z - 0.45:
+		roam_inside = true
+	var leaving := roam_inside and at.z > LEAVE_Z
+	var climbing := at.x > STAIR_LEFT - 0.2 and at.x < STAIR_RIGHT + 0.2 and at.z < 0.15
+	if roam_time >= ROAM_TIME or leaving or climbing:
+		_begin_ending()
+
+
+func _begin_ending() -> void:
+	roaming = false
+	looked = true
+	player.lock_for_ending(to_global(Vector3(0, 1.03, 5.62)))
+	# Back to just inside the door, out of the door's way, wherever you were.
+	var inside := to_local(player.global_position)
+	var target := Vector3(STAND_AT.x, 1.03, STAND_AT.z)
+	var step_in := create_tween()
+	step_in.tween_property(player, "global_position", to_global(target), clampf(inside.distance_to(target) / 1.5, 1.3, 3.2)).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_build_overlay()
 	creature = Creature.new()
 	add_child(creature)
 	creature.keep_clear = _clear_of_walls
@@ -559,9 +593,6 @@ func _on_entry(body: Node3D) -> void:
 	sting = AudioStreamPlayer.new()
 	sting.volume_db = -3.0
 	add_child(sting)
-	# An ordinary, quiet house first: a clock and the hum of the wiring.
-	ambience.append(_loop(CLOCK_TICK, Vector3(-3.3, 2.05, -1.3), -15.0))
-	ambience.append(_loop(HOUSE_HUM, Vector3(-2.4, 1.0, -3.2), -21.0))
 	sequence = create_tween()
 	sequence.tween_interval(0.95)
 	sequence.tween_callback(_speak.bind(HELLO, "You: Hello?", player.camera.global_position + player.camera.global_basis.z * 0.15))
@@ -1181,6 +1212,8 @@ func _process(delta: float) -> void:
 		if light:
 			light.light_energy = light.get_meta("energy", light.light_energy) * light_level
 	interior.ambient_light_energy = 0.19 * lerpf(0.06, 1.0, light_level)
+	if roaming:
+		_roam(delta)
 	if stalking:
 		_stalk(delta)
 	if creature:

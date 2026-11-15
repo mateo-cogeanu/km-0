@@ -84,6 +84,20 @@ func _ready() -> void:
 		spare.position = Vector3(2.47, 0.16, -1.52)
 		finds.add_child(spare)
 
+	# A little food left behind. Its own random sequence, so stops that were
+	# already saved keep the rest of their layout.
+	var pantry := RandomNumberGenerator.new()
+	pantry.seed = hash("km0:food:%d" % stop_index)
+	var spots := [Vector3(2.2, 0.05, -1.3), Vector3(1.85, 0.05, -0.7), Vector3(2.6, 0.05, -0.25), Vector3(-2.3, 0.05, -1.55), Vector3(-1.9, 0.05, -2.0)]
+	var kinds := FoodItem.KINDS.keys()
+	for i in pantry.randi_range(1, 3):
+		var food := FoodItem.new()
+		food.kind = kinds[pantry.randi_range(0, kinds.size() - 1)]
+		food.name = "Food_%d" % i
+		food.position = spots.pop_at(pantry.randi_range(0, spots.size() - 1))
+		food.rotation.y = pantry.randf_range(0.0, TAU)
+		finds.add_child(food)
+
 	if vehicle_kind == 2 or rng.randf() < 0.73:
 		_spawn_part(finds, "SpareBattery", BATTERY, Vector3(2.76, 0.56, 0.35), Vector3(0.13, 0.073, 0.094), "aux_battery")
 	if vehicle_kind < 0 and not legacy_layout:

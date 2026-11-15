@@ -96,6 +96,7 @@ func save_trip() -> bool:
 	var bodies := get_tree().get_nodes_in_group("vehicle_loose_part")
 	bodies.append_array(get_tree().get_nodes_in_group("fuel_canister"))
 	bodies.append_array(get_tree().get_nodes_in_group("spray_can"))
+	bodies.append_array(get_tree().get_nodes_in_group("food"))
 	for body in bodies:
 		if body.is_queued_for_deletion():
 			continue
@@ -109,6 +110,8 @@ func save_trip() -> bool:
 			data["fuel"] = body.fuel_amount
 		if body.is_in_group("spray_can"):
 			data["color"] = body.spray_color
+		if body.get_meta("stowed", false):
+			data["stowed"] = true
 		objects[part_id] = data
 
 	var driving := ""
@@ -137,6 +140,8 @@ func save_trip() -> bool:
 		"version": SAVE_VERSION,
 		"player": player_pose,
 		"look": player.look_rotation_x,
+		"vitals": player.vitals.to_save() if player.vitals else {},
+		"has_food": true,
 		"driving": driving,
 		"first_person": player.active_vehicle.first_person_camera_enabled if not driving.is_empty() else false,
 		"vehicle_look": Vector2(player.active_vehicle.camera_yaw, player.active_vehicle.camera_pitch) if not driving.is_empty() else Vector2.ZERO,
@@ -189,6 +194,8 @@ func restore_trip(world: Node) -> void:
 	player.global_transform = data["player"]
 	player.last_safe_position = player.global_position
 	player.look_rotation_x = data["look"]
+	if player.vitals and data.get("vitals") is Dictionary:
+		player.vitals.from_save(data["vitals"])
 	player.head.rotation.x = player.look_rotation_x
 	world.get_node("DayNightCycle").time_of_day = data["time"]
 	world.get_node("Shack").restore_door_state(data.get("garage_doors", {}))
@@ -247,11 +254,15 @@ func restore_trip(world: Node) -> void:
 	var bodies := get_tree().get_nodes_in_group("vehicle_loose_part")
 	bodies.append_array(get_tree().get_nodes_in_group("fuel_canister"))
 	bodies.append_array(get_tree().get_nodes_in_group("spray_can"))
+	bodies.append_array(get_tree().get_nodes_in_group("food"))
 	for body in bodies:
 		if body.is_queued_for_deletion():
 			continue
 		var part_id := _object_id(world, body)
 		if not objects.has(part_id):
+			# Food came after older saves; leave it where it lies for them.
+			if body.is_in_group("food") and not data.has("has_food"):
+				continue
 			body.queue_free()
 			continue
 		var saved: Dictionary = objects[part_id]
@@ -260,6 +271,8 @@ func restore_trip(world: Node) -> void:
 			body.fuel_amount = saved["fuel"]
 		if saved.has("color"):
 			body.set_spray_color(saved["color"])
+		if saved.get("stowed", false):
+			player.restore_stowed(body)
 		if saved.has("welded"):
 			var host: Node3D = world.get_node_or_null(saved["welded"])
 			if host and host.weld_object(body, true) and saved.get("wired", false):

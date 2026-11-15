@@ -14,6 +14,7 @@ var side_door: Area3D
 
 
 const RoadRadio := preload("res://scripts/road_radio.gd")
+const FoodItem := preload("res://scripts/food_item.gd")
 
 
 func _ready() -> void:
@@ -30,6 +31,13 @@ func _ready() -> void:
 		radio.position = Vector3(1.45, 1.053, -2.29)
 		var bench := garage.get_node("Workbench")
 		bench.add_child(radio)
+		# Something to eat before setting off.
+		for food: Array in [["beans", Vector3(2.15, 0.98, -2.2)], ["crackers", Vector3(2.4, 0.98, -2.42)], ["soda", Vector3(2.62, 0.98, -2.18)]]:
+			var item := FoodItem.new()
+			item.kind = food[0]
+			item.name = "Food_" + food[0]
+			item.position = food[1]
+			bench.add_child(item)
 
 
 func get_door_state() -> Dictionary:

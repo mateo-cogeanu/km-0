@@ -3,12 +3,23 @@ extends CharacterBody3D
 const CrosshairTarget := preload("res://scripts/crosshair_target.gd")
 const Style := preload("res://scripts/menu_style.gd")
 const CabinWind := preload("res://scripts/cabin_wind.gd")
+const PlayerBody := preload("res://scripts/player_body.gd")
+const Vitals := preload("res://scripts/player_vitals.gd")
+const Inventory := preload("res://scripts/player_inventory.gd")
+const STEPS := [
+	preload("res://assets/audio/player/step_1.wav"), preload("res://assets/audio/player/step_2.wav"),
+	preload("res://assets/audio/player/step_3.wav"), preload("res://assets/audio/player/step_4.wav"),
+]
+const LAND := preload("res://assets/audio/player/land.wav")
+const TORCH_CLICK := preload("res://assets/audio/player/flashlight_click.wav")
+## Falling faster than this hurts when you land.
+const SAFE_FALL_SPEED := 9.5
 
 @export var player_name: String = "Player"
 
-@export var move_speed: float = 6.0
+@export var move_speed: float = 3.4
 @export var sprint_speed: float = 10.0
-@export var crouch_speed: float = 3.0
+@export var crouch_speed: float = 1.8
 @export var jump_velocity: float = 5.5
 @export var ground_acceleration: float = 35.0
 @export var ground_friction: float = 45.0
@@ -76,6 +87,25 @@ var remote_position: Vector3
 var remote_rotation_y: float
 var _network_send_elapsed := 0.0
 var _held_network_send_elapsed := 0.0
+var body: Node3D
+var vitals: Node
+var inventory: Node
+var flashlight: SpotLight3D
+var flashlight_on := false
+var footstep: AudioStreamPlayer3D
+var ui_sound: AudioStreamPlayer
+var step_travel := 0.0
+var last_step := 0
+var land_dip := 0.0
+var fall_speed := 0.0
+var was_on_floor := true
+var hand_push := 0.0
+var stowing: RigidBody3D
+var stow_time := 0.0
+var tip_override := ""
+var tip_time := 0.0
+var remote_velocity := Vector3.ZERO
+var remote_last := Vector3.ZERO
 
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
@@ -94,14 +124,54 @@ func _ready() -> void:
 	if locally_controlled:
 		camera.make_current()
 	$HUD.visible = locally_controlled
-	$Model.visible = not locally_controlled or not NetworkManager.is_online()
+	$Model.visible = false
+	body = PlayerBody.new()
+	body.name = "Body"
+	add_child(body)
+	body.build(locally_controlled)
+	footstep = AudioStreamPlayer3D.new()
+	footstep.unit_size = 2.2
+	footstep.max_distance = 22.0
+	add_child(footstep)
+	footstep.position.y = -0.95
+	flashlight = SpotLight3D.new()
+	flashlight.name = "Flashlight"
+	flashlight.light_color = Color("#fff1d6")
+	flashlight.light_energy = 2.4
+	flashlight.spot_range = 20.0
+	flashlight.spot_angle = 27.0
+	flashlight.spot_angle_attenuation = 0.8
+	flashlight.shadow_enabled = true
+	flashlight.visible = false
+	# Your own body neither blocks nor catches its own beam.
+	flashlight.light_cull_mask &= ~PlayerBody.BODY_LAYER
+	if locally_controlled:
+		camera.add_child(flashlight)
+		flashlight.position = Vector3(-0.12, -0.12, -0.1)
+	else:
+		head.add_child(flashlight)
+		flashlight.position = Vector3(-0.15, -0.2, -0.3)
 	if not locally_controlled:
 		remote_position = global_position
+		remote_last = global_position
 		remote_rotation_y = rotation.y
 		return
 	add_to_group("local_player")
 	GameSettings.player_name_changed.connect(_update_player_name)
 	_create_interaction_tip()
+	vitals = Vitals.new()
+	vitals.name = "Vitals"
+	add_child(vitals)
+	vitals.setup(self, $HUD)
+	inventory = Inventory.new()
+	inventory.name = "Inventory"
+	add_child(inventory)
+	inventory.setup($HUD, _object_title)
+	inventory.take_requested.connect(_take_from_inventory)
+	inventory.eat_requested.connect(_eat_from_inventory)
+	ui_sound = AudioStreamPlayer.new()
+	ui_sound.volume_db = -8.0
+	add_child(ui_sound)
 	var wind := CabinWind.new()
 	wind.name = "CabinWind"
 	add_child(wind)
@@ -117,7 +187,8 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if gameplay_ui_open() else Input.MOUSE_MODE_CAPTURED
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_animate_body(delta)
 	if not NetworkManager.is_online() or not is_multiplayer_authority():
 		return
 	var view := get_viewport().get_camera_3d()
@@ -175,6 +246,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if ending_locked and ending_look and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		_turn_head(event.relative)
 		return
+	if inventory_open() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
+		close_inventory()
+		get_viewport().set_input_as_handled()
+		return
 	if ending_locked or not is_multiplayer_authority() or gameplay_ui_open():
 		return
 	if is_instance_valid(active_vehicle):
@@ -200,7 +275,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
 		_handle_interaction()
 
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
+		if held_object:
+			_stow_held_object()
+		else:
+			open_inventory()
+
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F:
+		set_flashlight(not flashlight_on)
+
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
+		if held_object and held_object.is_in_group("food"):
+			_eat_held_object()
+			return
 		if _try_wire_pointed_battery():
 			return
 		_cycle_spray_color()
@@ -219,6 +306,9 @@ func _physics_process(delta: float) -> void:
 			return
 		global_position = global_position.lerp(remote_position, minf(delta * 14.0, 1.0))
 		rotation.y = lerp_angle(rotation.y, remote_rotation_y, minf(delta * 14.0, 1.0))
+		remote_velocity = remote_velocity.lerp((global_position - remote_last) / maxf(delta, 0.001), minf(delta * 10.0, 1.0))
+		remote_last = global_position
+		_update_steps(delta, false, remote_velocity.length() > move_speed * 1.2)
 		return
 	if active_vehicle:
 		_set_hovered_grab_object(null)
@@ -233,8 +323,14 @@ func _physics_process(delta: float) -> void:
 	var input_direction := _get_input_direction() if controls_active else Vector3.ZERO
 	var world_direction := (global_transform.basis * input_direction).normalized()
 	var is_crouching := controls_active and Input.is_key_pressed(KEY_C)
-	var is_sprinting := Input.is_key_pressed(KEY_SHIFT) and not is_crouching
+	# Sprinting is forward running, and only while there is stamina for it.
+	var is_sprinting: bool = Input.is_key_pressed(KEY_SHIFT) and not is_crouching and input_direction.z < -0.1 \
+		and vitals.can_sprint() and not is_instance_valid(held_object)
 	var target_speed := crouch_speed if is_crouching else (sprint_speed if is_sprinting else move_speed)
+	if is_instance_valid(held_object) and not is_crouching:
+		target_speed = minf(target_speed, move_speed * 0.85)
+	if is_sprinting and Vector3(velocity.x, 0, velocity.z).length() > move_speed * 0.6:
+		vitals.sprinting(delta)
 
 	_update_crouch(is_crouching, delta)
 
@@ -245,11 +341,14 @@ func _physics_process(delta: float) -> void:
 
 	if not is_on_floor():
 		velocity.y -= gravity * delta
-	elif controls_active and Input.is_key_pressed(KEY_SPACE) and not is_crouching:
+		fall_speed = maxf(fall_speed, -velocity.y)
+	elif controls_active and Input.is_key_pressed(KEY_SPACE) and not is_crouching and vitals.can_jump():
 		velocity.y = jump_velocity
+		vitals.jumped()
 
 	var walking_velocity := velocity.slide(Vector3.UP)
 	move_and_slide()
+	_update_steps(delta, is_crouching, is_sprinting)
 	_push_colliding_bodies(walking_velocity, delta)
 	if is_on_floor() and global_position.y > -2.0:
 		last_safe_position = global_position
@@ -272,6 +371,17 @@ func lock_for_ending(return_position: Vector3) -> void:
 	ending_locked = true
 	ending_return_position = return_position
 	velocity = Vector3.ZERO
+	camera.position = Vector3.ZERO
+	camera.rotation.z = 0.0
+	if inventory_open():
+		close_inventory()
+	if flashlight_on:
+		# The flashlight sputters and dies.
+		var sputter := create_tween()
+		for beat: Array in [[false, 0.08], [true, 0.06], [false, 0.12], [true, 0.05]]:
+			sputter.tween_callback(func() -> void: flashlight.visible = beat[0])
+			sputter.tween_interval(beat[1])
+		sputter.tween_callback(set_flashlight.bind(false, true))
 	if is_instance_valid(listening_radio):
 		listening_radio.stop_listening()
 	if is_instance_valid(held_object):
@@ -340,14 +450,16 @@ func _get_input_direction() -> Vector3:
 
 
 func _apply_ground_movement(direction: Vector3, target_speed: float, delta: float) -> void:
-	if direction.length_squared() < 0.001:
-		velocity.x = move_toward(velocity.x, 0.0, ground_friction * delta)
-		velocity.z = move_toward(velocity.z, 0.0, ground_friction * delta)
-		return
-
+	# Weight: a short build-up into a walk and a quick, soft stop, instead of
+	# snapping to full speed.
 	var target_velocity := direction * target_speed
-	velocity.x = move_toward(velocity.x, target_velocity.x, ground_acceleration * delta)
-	velocity.z = move_toward(velocity.z, target_velocity.z, ground_acceleration * delta)
+	var rate := 9.0 if direction.length_squared() > 0.001 else 12.0
+	var blend := 1.0 - exp(-rate * delta)
+	velocity.x = lerpf(velocity.x, target_velocity.x, blend)
+	velocity.z = lerpf(velocity.z, target_velocity.z, blend)
+	if direction.length_squared() < 0.001 and Vector2(velocity.x, velocity.z).length() < 0.05:
+		velocity.x = 0.0
+		velocity.z = 0.0
 
 
 func _apply_air_movement(direction: Vector3, target_speed: float, delta: float) -> void:
@@ -402,6 +514,12 @@ func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
 
 	held_object = object
 	held_local_grab_point = held_object.to_local(grab_position)
+	# Held close, so it must not shove you around.
+	add_collision_exception_with(held_object)
+	# Small things come close, into your hand; big ones stay further out.
+	var span: float = Inventory._longest_side(object)
+	hold_point.position = Vector3(0.14, -0.2, -0.45) if span < 0.45 else Vector3(0.06, -0.08, -(0.7 + span * 0.65))
+	hold_point.position.z = maxf(hold_point.position.z, -2.0)
 	held_original_gravity_scale = held_object.gravity_scale
 	held_original_linear_damp = held_object.linear_damp
 	held_original_angular_damp = held_object.angular_damp
@@ -420,10 +538,13 @@ func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
 
 func _drop_held_object() -> void:
 	_stop_refuel()
+	hand_push = 0.25
 	if NetworkManager.is_online() and held_object != null:
 		sync_held_object_transform.rpc(held_object.get_path(), held_object.global_transform, held_object.linear_velocity, held_object.angular_velocity)
 		sync_held_object_state.rpc(held_object.get_path(), false)
 	_restore_held_object_physics()
+	if held_object != null:
+		remove_collision_exception_with(held_object)
 	held_object = null
 	_held_network_send_elapsed = 0.0
 
@@ -1120,7 +1241,7 @@ func _raycast_exclusions() -> Array:
 func gameplay_ui_open() -> bool:
 	var world := get_tree().current_scene
 	var pause_menu := world.get_node_or_null("PauseMenu") if world else null
-	return pause_menu != null and pause_menu.gameplay_ui_open()
+	return (pause_menu != null and pause_menu.gameplay_ui_open()) or inventory_open()
 
 
 func _create_interaction_tip() -> void:
@@ -1179,7 +1300,8 @@ func _layout_radio_caption() -> void:
 func _update_interaction_tip() -> void:
 	if is_instance_valid(listening_radio) and radio_caption:
 		radio_caption.visible = not radio_caption_label.text.is_empty() and not gameplay_ui_open()
-	var tip := "" if gameplay_ui_open() else _interaction_text()
+	tip_time = maxf(0.0, tip_time - get_physics_process_delta_time())
+	var tip := "" if gameplay_ui_open() else (tip_override if tip_time > 0.0 else _interaction_text())
 	interaction_tip.visible = not tip.is_empty()
 	if tip.is_empty():
 		return
@@ -1223,7 +1345,8 @@ func _interaction_text() -> String:
 			return "Hold left mouse  Paint   ·   R  Change color   ·   E  Drop"
 		if _find_touching_vehicle(held_object):
 			return "E  Weld %s to vehicle" % _object_title(held_object)
-		return "E  Drop %s" % _object_title(held_object)
+		var extra := "   ·   R  Eat" if held_object.is_in_group("food") else ""
+		return "E  Drop %s%s   ·   Q  Put away" % [_object_title(held_object), extra]
 	if target == null:
 		return ""
 	if target.is_in_group("road_radio") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
@@ -1262,6 +1385,8 @@ func _interaction_text() -> String:
 
 
 func _object_title(object: Node3D) -> String:
+	if object.is_in_group("food"):
+		return object.title()
 	if object.is_in_group("fuel_canister"):
 		return "fuel can"
 	if _is_spray_can(object):
@@ -1380,3 +1505,241 @@ func _get_car_max_fuel(car: Node3D) -> float:
 
 func _get_canister_fuel_fraction(canister: Node) -> float:
 	return float(canister.call("get_fuel_fraction")) if canister and canister.has_method("get_fuel_fraction") else 0.0
+
+
+# --- Feel: footsteps, head bob, landing ---------------------------------------
+
+func step_length(crouching: bool, sprinting: bool) -> float:
+	## Metres per footstep; the legs, the sounds and the head bob all use it.
+	return 0.72 if crouching else (1.55 if sprinting else 1.0)
+
+
+func _update_steps(delta: float, crouching: bool, sprinting: bool) -> void:
+	var on_floor := is_on_floor() if is_multiplayer_authority() else absf(remote_velocity.y) < 1.5
+	var flat := Vector3(velocity.x, 0, velocity.z) if is_multiplayer_authority() else Vector3(remote_velocity.x, 0, remote_velocity.z)
+	var speed := flat.length()
+	var stride := step_length(crouching, sprinting)
+	if on_floor and speed > 0.4:
+		step_travel += speed * delta
+		var count := floori(step_travel / stride)
+		if count != last_step:
+			last_step = count
+			footstep.stream = STEPS[randi() % STEPS.size()]
+			footstep.pitch_scale = randf_range(0.9, 1.08)
+			footstep.volume_db = -19.0 if crouching else (-8.0 if sprinting else -13.0)
+			footstep.play()
+	if is_multiplayer_authority():
+		if on_floor and not was_on_floor:
+			if fall_speed > 3.5:
+				footstep.stream = LAND
+				footstep.volume_db = -10.0 + minf(fall_speed, 12.0) * 0.6
+				footstep.play()
+				land_dip = minf(0.12, fall_speed * 0.009)
+			if fall_speed > SAFE_FALL_SPEED and vitals:
+				vitals.damage((fall_speed - SAFE_FALL_SPEED) * 7.0)
+			fall_speed = 0.0
+		was_on_floor = on_floor
+		# The view dips with each footfall and sways a touch side to side.
+		var phase := step_travel / stride * PI
+		var amount := clampf(speed / move_speed, 0.0, 1.4) if on_floor else 0.0
+		land_dip = move_toward(land_dip, 0.0, delta * 0.35)
+		var bob := Vector3(cos(phase) * 0.011, -absf(sin(phase)) * 0.026, 0.0) * amount
+		camera.position = camera.position.lerp(bob + Vector3.DOWN * land_dip, 1.0 - exp(-18.0 * delta))
+		camera.rotation.z = lerpf(camera.rotation.z, sin(phase) * 0.0045 * amount, 1.0 - exp(-12.0 * delta))
+
+
+# --- Body ----------------------------------------------------------------------
+
+func _animate_body(delta: float) -> void:
+	if body == null or not visible:
+		return
+	var local_view := is_multiplayer_authority()
+	var moving := velocity if local_view else remote_velocity
+	# When the ending turns your head for you, the body turns with it.
+	if local_view and (ending_locked or ending_look):
+		var facing := -camera.global_basis.z
+		body.rotation.y = lerp_angle(body.rotation.y, atan2(-facing.x, -facing.z) - global_rotation.y, 1.0 - exp(-8.0 * delta))
+	else:
+		body.rotation.y = 0.0
+	var targets: Array = [null, null]
+	var grip: Array = [0.0, 0.0]
+	if local_view:
+		hand_push = maxf(0.0, hand_push - delta)
+		stow_time = maxf(0.0, stow_time - delta)
+		if is_instance_valid(stowing):
+			# Into a pocket at your hip.
+			var pocket := body.to_global(Vector3(0.24, -0.15, 0.0))
+			stowing.global_position = stowing.global_position.lerp(pocket, 1.0 - exp(-16.0 * delta))
+			targets[1] = body.to_local(stowing.global_position)
+			grip[1] = 1.0
+			if stow_time <= 0.0:
+				_finish_stow()
+		elif is_instance_valid(held_object):
+			targets[1] = body.to_local(held_object.to_global(held_local_grab_point))
+			grip[1] = 1.0
+		elif hand_push > 0.0:
+			# Setting it down: the hand follows through, then comes back.
+			targets[1] = body.to_local(camera.global_transform * Vector3(0.12, -0.25, -0.62))
+		if flashlight_on:
+			targets[0] = body.to_local(camera.global_transform * Vector3(-0.26, -0.3, -0.42))
+			grip[0] = 1.0
+	elif flashlight_on:
+		targets[0] = Vector3(-0.2, 0.25, -0.35)
+		grip[0] = 1.0
+	body.animate(delta, {
+		"velocity": global_basis.inverse() * moving,
+		"on_floor": is_on_floor() if local_view else absf(remote_velocity.y) < 1.5,
+		"drop": standing_head_height - head.position.y,
+		"pitch": look_rotation_x,
+		"targets": targets,
+		"grip": grip,
+		"torch": flashlight_on,
+		"torch_basis": global_basis.inverse() * camera.global_basis if local_view else Basis(),
+		"step": step_length(head.position.y < standing_head_height - 0.2, Vector3(moving.x, 0, moving.z).length() > move_speed * 1.3),
+	})
+
+
+# --- Flashlight ----------------------------------------------------------------
+
+func set_flashlight(on: bool, forced: bool = false) -> void:
+	if ending_locked and not forced and on:
+		return
+	if on == flashlight_on and not forced:
+		return
+	flashlight_on = on
+	flashlight.visible = on
+	if ui_sound:
+		ui_sound.stream = TORCH_CLICK
+		ui_sound.play()
+	if NetworkManager.is_online() and is_multiplayer_authority():
+		_sync_flashlight.rpc(on)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_flashlight(on: bool) -> void:
+	flashlight_on = on
+	flashlight.visible = on
+
+
+# --- Inventory -------------------------------------------------------------------
+
+func inventory_open() -> bool:
+	return inventory != null and inventory.is_open()
+
+
+func open_inventory() -> void:
+	if inventory == null or ending_locked or is_instance_valid(active_vehicle):
+		return
+	inventory.open()
+
+
+func close_inventory() -> void:
+	if inventory:
+		inventory.close()
+
+
+func _show_tip(text: String) -> void:
+	tip_override = text
+	tip_time = 1.6
+
+
+func _stow_held_object() -> void:
+	var item := held_object
+	var reason: String = inventory.refusal(item)
+	if not reason.is_empty():
+		_show_tip(reason)
+		return
+	_drop_held_object()
+	hand_push = 0.0
+	item.freeze = true
+	item.set_meta("stow_layers", Vector2i(item.collision_layer, item.collision_mask))
+	item.collision_layer = 0
+	item.collision_mask = 0
+	stowing = item
+	stow_time = 0.22
+
+
+func _finish_stow() -> void:
+	var item := stowing
+	stowing = null
+	_set_stowed(item, true)
+	inventory.add(item)
+	if NetworkManager.is_online():
+		_sync_stowed.rpc(item.get_path(), true)
+
+
+func restore_stowed(item: RigidBody3D) -> void:
+	## Back into the pack when a saved trip is continued.
+	if inventory and not inventory.items.has(item):
+		_set_stowed(item, true)
+		inventory.add(item)
+
+
+func _set_stowed(item: RigidBody3D, stowed: bool) -> void:
+	if stowed:
+		if not item.has_meta("stow_layers"):
+			item.set_meta("stow_layers", Vector2i(item.collision_layer, item.collision_mask))
+		item.freeze = true
+		item.collision_layer = 0
+		item.collision_mask = 0
+		item.hide()
+		item.set_meta("stowed", true)
+	else:
+		var layers: Vector2i = item.get_meta("stow_layers", Vector2i(16, 17))
+		item.collision_layer = layers.x
+		item.collision_mask = layers.y
+		item.remove_meta("stow_layers")
+		item.remove_meta("stowed")
+		item.show()
+		item.freeze = false
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _sync_stowed(path: NodePath, stowed: bool) -> void:
+	var item := get_node_or_null(path) as RigidBody3D
+	if item:
+		_set_stowed(item, stowed)
+
+
+func _take_from_inventory(index: int) -> void:
+	if held_object:
+		return
+	var item: RigidBody3D = inventory.remove_at(index)
+	close_inventory()
+	if not is_instance_valid(item):
+		return
+	_set_stowed(item, false)
+	if NetworkManager.is_online():
+		_sync_stowed.rpc(item.get_path(), false)
+	item.global_position = body.to_global(Vector3(0.24, -0.15, 0.0))
+	item.linear_velocity = Vector3.ZERO
+	item.angular_velocity = Vector3.ZERO
+	_begin_grab_object(item, item.global_position)
+
+
+func _eat_from_inventory(index: int) -> void:
+	var item: RigidBody3D = inventory.remove_at(index)
+	if is_instance_valid(item):
+		_eat(item)
+
+
+func _eat_held_object() -> void:
+	var item := held_object
+	_drop_held_object()
+	hand_push = 0.0
+	_eat(item)
+
+
+func _eat(item: RigidBody3D) -> void:
+	vitals.eat(item)
+	_show_tip("Ate the %s" % _object_title(item))
+	if NetworkManager.is_online():
+		_sync_eaten.rpc(item.get_path())
+	item.queue_free()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _sync_eaten(path: NodePath) -> void:
+	var item := get_node_or_null(path)
+	if item:
+		item.queue_free()
