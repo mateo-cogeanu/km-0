@@ -46,6 +46,11 @@ SKULL = HEAD_POSITION + Vector((0, -0.01, 0.08))
 SMILE_Z = HEAD_POSITION.z - 0.03
 SMILE_HALF = 0.084
 FACE = HEAD_POSITION + Vector((0, -0.04, -0.045))
+FACE_RADII = (0.088, 0.1, 0.1)
+CRANIUM = (SKULL + Vector((0, 0.012, 0.035)), (0.108, 0.125, 0.18))
+CRANIUM_TILT = -0.16
+NECK_BASE = SHOULDERS + Vector((0, -0.05, 0.04))
+NECK_TOP = HEAD_BONE + Vector((0, -0.03, -0.045))
 EYE_HEIGHT = HEAD_POSITION.z + 0.093
 EYE_SPAN = 0.048
 EYE_DEPTH = HEAD_POSITION.y - 0.112
@@ -235,15 +240,14 @@ def build_skin():
         at = top[j].lerp(top[j + 1], s - j)
         f.ellipsoid(at, (0.012, 0.01, 0.01), 0.022)
     # Long neck with tendons.
-    neck_base = SHOULDERS + Vector((0, -0.05, 0.04))
-    neck_top = HEAD_BONE + Vector((0, -0.03, -0.045))
+    neck_base, neck_top = NECK_BASE, NECK_TOP
     f.capsule(neck_base, neck_top, 0.047, 0.037, 0.04)
     for side in (-1, 1):
         f.capsule(neck_base + Vector((side * 0.032, -0.035, -0.012)), neck_top + Vector((side * 0.024, -0.035, -0.022)),
             0.0095, 0.0085, 0.014)
     # Narrow egg skull with a heavy brow; the face is otherwise smooth.
-    f.ellipsoid(SKULL + Vector((0, 0.012, 0.035)), (0.108, 0.125, 0.18), 0.05, Quaternion((1, 0, 0), -0.16))
-    f.ellipsoid(HEAD_POSITION + Vector((0, -0.04, -0.045)), (0.088, 0.1, 0.1), 0.06)
+    f.ellipsoid(*CRANIUM, 0.05, Quaternion((1, 0, 0), CRANIUM_TILT))
+    f.ellipsoid(FACE, FACE_RADII, 0.06)
     f.ellipsoid(Vector((0, EYE_DEPTH + 0.014, EYE_HEIGHT + 0.03)), (0.078, 0.022, 0.016), 0.035)
     for side in (-1, 1):
         f.ellipsoid(Vector((side * 0.072, HEAD_POSITION.y - 0.06, HEAD_POSITION.z + 0.02)), (0.022, 0.06, 0.04), 0.03)
@@ -268,14 +272,19 @@ def build_skin():
     # Carve the mouth and deep eye sockets last.
     for n in range(41):
         x = SMILE_HALF * (n / 20 - 1)
-        f.ellipsoid(Vector((x, face_y(x) + 0.032, smile_z(x))), (0.009, 0.048, smile_height(x)), 0.005, subtract=True)
-    f.ellipsoid(Vector((0, FACE.y - 0.035, SMILE_Z + 0.012)), (0.066, 0.045, 0.048), 0.012, subtract=True)
+        # Shallower toward the corners so the thin cheeks are never cut through.
+        reach = 0.35 + 0.65 * (1.0 - (x / SMILE_HALF) ** 2)
+        f.ellipsoid(Vector((x, face_y(x) + 0.03 * reach, smile_z(x))), (0.009, 0.044 * reach, smile_height(x)), 0.004, subtract=True)
+    # A hollow behind the teeth, kept well inside the skull.
+    f.ellipsoid(Vector((0, FACE.y + 0.002, SMILE_Z)), (0.056, 0.05, 0.032), 0.01, subtract=True)
     for side in (-1, 1):
         f.ellipsoid(Vector((side * EYE_SPAN, EYE_DEPTH - 0.006, EYE_HEIGHT)), (0.027, 0.038, 0.024), 0.016, subtract=True)
     skin = f.mesh("Continuous skin")
     bpy.context.view_layer.objects.active = skin
+    recalculate_normals(skin)
     apply_modifier(skin, "LAPLACIANSMOOTH", iterations=2, lambda_factor=0.5, use_volume_preserve=True)
     apply_modifier(skin, "DECIMATE", ratio=0.15)
+    recalculate_normals(skin)
     skin.data.shade_smooth()
     print("skin verts", len(skin.data.vertices))
     return skin
@@ -295,6 +304,17 @@ def material(name, color, roughness):
     shader.inputs["Base Color"].default_value = (*color, 1.0)
     shader.inputs["Roughness"].default_value = roughness
     return mat
+
+
+def recalculate_normals(obj):
+    """Point every face outward. Godot culls back faces, so a single flipped
+    patch shows up in game as a hole you can see through."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=VOXEL * 0.05)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(obj.data)
+    bm.free()
 
 
 def apply_modifier(obj, kind, **settings):
@@ -322,7 +342,7 @@ def assign_skin_materials(skin):
         band = abs(c.z - smile_z(c.x)) - smile_height(c.x)
         if 0.0 < depth < 0.06 and band < 0.0:
             poly.material_index = 2 if depth < 0.012 else 1
-        elif depth > 0.025 and Vector((c.x / 0.07, (c.y - FACE.y + 0.035) / 0.05, (c.z - SMILE_Z - 0.012) / 0.052)).length < 1.05:
+        elif depth > 0.025 and Vector((c.x / 0.06, (c.y - FACE.y - 0.002) / 0.054, (c.z - SMILE_Z) / 0.036)).length < 1.08:
             poly.material_index = 1
 
 
@@ -361,7 +381,7 @@ def build_teeth():
     for name, upper in (("Upper teeth", True), ("Lower teeth", False)):
         bm = bmesh.new()
         edge = 1 if upper else -1
-        for depth, scale, count in ((0.009, 1.0, 30), (0.022, 0.72, 22)):
+        for depth, scale, count in ((0.014, 1.0, 30), (0.026, 0.72, 22)):
             for i in range(count):
                 t = (i + 0.5 + rng.uniform(-0.25, 0.25)) / count
                 x = SMILE_HALF * 0.94 * (2 * t - 1)
@@ -427,19 +447,41 @@ def smoothstep(edge0, edge1, x):
     return t * t * (3 - 2 * t)
 
 
+def ellipsoid_distance(p, center, radii, rotation=None):
+    local = p - center
+    if rotation:
+        local = rotation @ local
+    k0 = Vector((local.x / radii[0], local.y / radii[1], local.z / radii[2])).length
+    k1 = Vector((local.x / radii[0] ** 2, local.y / radii[1] ** 2, local.z / radii[2] ** 2)).length
+    return k0 * (k0 - 1.0) / max(k1, 1e-6)
+
+
+def head_weight(p, cranium_rot):
+    """1 for skin that belongs to the head, fading to 0 across the neck joint.
+
+    The whole skull, face and grin must follow the Head bone rigidly; any
+    neck weight there tears the mouth open when the head turns.
+    """
+    head = min(ellipsoid_distance(p, CRANIUM[0], CRANIUM[1], cranium_rot), ellipsoid_distance(p, FACE, FACE_RADII))
+    neck = segment_distance(p, NECK_BASE, NECK_TOP) - 0.045
+    # Past the top of the neck everything is head.
+    along = (p - NECK_TOP).dot((NECK_TOP - NECK_BASE).normalized())
+    near = (p - FACE).length < 0.32
+    return max(smoothstep(-0.015, 0.02, neck - head), smoothstep(-0.03, 0.01, along) if near else 0.0)
+
+
 def skin_to_rig(obj, rig, fixed=None):
     """Distance-based weights with a rigid skull, hands and feet."""
     bones = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
     groups = {name: obj.vertex_groups.new(name=name) for name in bones}
-    head_center = SKULL + Vector((0, -0.01, -0.04))
+    cranium_rot = Quaternion((1, 0, 0), CRANIUM_TILT).inverted()
     for v in obj.data.vertices:
         p = v.co
         if fixed:
             weights = dict(fixed)
         else:
             weights = {}
-            head_local = Vector(((p.x - head_center.x) / 0.14, (p.y - head_center.y) / 0.16, (p.z - head_center.z) / 0.25))
-            head_share = 1.0 - smoothstep(0.86, 1.06, head_local.length)
+            head_share = head_weight(p, cranium_rot)
             distances = {}
             for name, (a, b) in bones.items():
                 if name not in ("Head", "Jaw"):

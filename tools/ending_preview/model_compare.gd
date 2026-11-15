@@ -49,4 +49,24 @@ func _ready() -> void:
 	for i in 4:
 		await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(OUT + "/face.png")
+	# Straight-on and side views of the raw model's head (rest pose, +Z forward).
+	cam.fov = 30
+	cam.look_at_from_position(Vector3(-1.1, 0.88, 1.75), Vector3(-1.1, 0.88, 0.75))
+	for i in 4:
+		await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(OUT + "/front.png")
+	cam.look_at_from_position(Vector3(-0.1, 0.9, 0.85), Vector3(-1.1, 0.9, 0.8))
+	for i in 4:
+		await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(OUT + "/side.png")
+	# The game-posed copy, with the in-game skin and eye shaders.
+	var face := posed.head.global_position
+	cam.look_at_from_position(face + Vector3(0.25, 0.05, 0.75), face)
+	for i in 4:
+		await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(OUT + "/posed_front.png")
+	cam.look_at_from_position(face + Vector3(-0.6, 0.15, 0.35), face)
+	for i in 4:
+		await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(OUT + "/posed_side.png")
 	get_tree().quit()
