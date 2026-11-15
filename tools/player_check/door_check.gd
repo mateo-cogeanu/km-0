@@ -26,6 +26,17 @@ func _ready() -> void:
 		player.move_and_collide(inward * 0.04)
 		await get_tree().physics_frame
 	print("ended inside at local ", cabin.to_local(player.global_position).snapped(Vector3.ONE * 0.01))
+	# Face him and press E the way the game does.
+	player.look_at(cabin.to_global(Vector3(0.55, 1.0, -0.7)), Vector3.UP)
+	player.rotation.x = 0.0
+	player.rotation.z = 0.0
+	player.look_rotation_x = 0.0
+	player.head.rotation.x = 0.0
+	await _frames(5)
+	print("tip: ", player._interaction_text())
+	player._handle_interaction()
+	await _frames(30)
+	print("talking: ", is_instance_valid(player.talking_to), " caption: ", cabin.caption.text if cabin.caption else "")
 	get_tree().quit()
 
 

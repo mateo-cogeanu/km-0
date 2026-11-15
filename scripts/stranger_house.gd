@@ -214,7 +214,9 @@ func _build_stranger() -> void:
 	capsule.height = 1.9
 	hitbox.shape = capsule
 	talk_spot.add_child(hitbox)
+	# He blocks your way, and looking at that body counts as looking at him.
 	var solid := StaticBody3D.new()
+	solid.add_to_group("stranger")
 	add_child(solid)
 	solid.position = talk_spot.position
 	var block := CollisionShape3D.new()

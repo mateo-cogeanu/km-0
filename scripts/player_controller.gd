@@ -882,8 +882,9 @@ func _handle_interaction() -> void:
 	if radio and radio.is_in_group("loot_container"):
 		radio.get_parent().open()
 		return
-	if radio and radio.is_in_group("stranger"):
-		radio.get_parent().talk(self)
+	var touched := radio_hit.get("collider") as Node
+	if touched and touched.is_in_group("stranger"):
+		touched.get_parent().talk(self)
 		return
 	if radio and radio.is_in_group("cabin_door"):
 		radio.get_parent().get_parent().toggle_door()
