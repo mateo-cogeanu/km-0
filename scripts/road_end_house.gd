@@ -52,6 +52,8 @@ var stair_normals: Array[Vector3] = []
 var walls: Array[AABB] = []
 var lamps: Array[OmniLight3D] = []
 var lamp_energy: Array[float] = []
+## The bare bulbs you can see, which dim and flicker with the lamps.
+var bulbs: Array[StandardMaterial3D] = []
 ## Scales every light in the house, for the flickers.
 var light_level := 1.0
 var interior: Environment
@@ -213,6 +215,7 @@ func _build_house() -> void:
 	for x in [-2.75, -1.71]:
 		for z in [-1.61, -1.09]:
 			Shapes.box(self, "TableLeg", Vector3(0.068, 0.74, 0.066), Vector3(x, 0.371, z), floorboards)
+	_build_interior()
 	_lamp(Vector3(-1.7, 2.29, 1.31), 0.72, 4.9)
 	_lamp(Vector3(2.45, 2.82, -1.94), 0.46, 4.7)
 	# Washes the tall stairwell wall so what climbs down it can be seen against it.
@@ -284,6 +287,96 @@ func _build_exterior() -> void:
 	porch_light.shadow_enabled = true
 	add_child(porch_light)
 	porch_light.position = Vector3(1.06, 2.0, 4.02)
+
+
+func _build_interior() -> void:
+	## Lived-in, and then left: trim, dark windows, a few things where the
+	## sounds come from.
+	var wood := Shapes.material(Color("#4a3b2f"))
+	var glass := Shapes.material(Color("#0b0e14"), 0.35, 0.12)
+	# Faint night outside, so the panes read as windows and not holes.
+	glass.emission_enabled = true
+	glass.emission = Color("#1c2638")
+	glass.emission_energy_multiplier = 0.45
+	var enamel := Shapes.material(Color("#b3ab9b"), 0.1, 0.45)
+	var brass := Shapes.material(Color("#7a6646"), 0.6, 0.4)
+	var cloth := Shapes.material(Color("#2b2a2c"), 0.0, 0.95)
+	# Baseboards.
+	for side in [-1.0, 1.0]:
+		Shapes.box(self, "Baseboard", Vector3(0.03, 0.13, 7.0), Vector3(side * 3.395, 0.065, 0), wood)
+		Shapes.box(self, "Baseboard", Vector3(2.6, 0.13, 0.03), Vector3(side * 2.11, 0.065, 3.505), wood)
+	Shapes.box(self, "Baseboard", Vector3(6.8, 0.13, 0.03), Vector3(0, 0.065, -3.53), wood)
+	# The windows from inside: dark glass, nothing beyond it.
+	for spot: Array in [
+			[Vector3(-2.04, 1.28, 3.52), Vector3.FORWARD], [Vector3(2.04, 1.28, 3.52), Vector3.FORWARD],
+			[Vector3(2.04, 3.56, 3.52), Vector3.FORWARD],
+			[Vector3(-3.41, 1.28, -1.65), Vector3.RIGHT], [Vector3(-3.41, 1.28, 1.65), Vector3.RIGHT],
+			[Vector3(3.41, 1.28, -1.65), Vector3.LEFT], [Vector3(3.41, 1.28, 1.65), Vector3.LEFT],
+			[Vector3(3.41, 3.56, -1.65), Vector3.LEFT], [Vector3(3.41, 3.56, 1.65), Vector3.LEFT],
+			[Vector3(-2.05, 1.28, -3.545), Vector3.BACK], [Vector3(2.05, 3.56, -3.545), Vector3.BACK]]:
+		var at: Vector3 = spot[0]
+		var facing: Vector3 = spot[1]
+		var across := Vector3.UP.cross(facing).abs()
+		var flat := facing.abs()
+		Shapes.box(self, "InnerWindowFrame", across * 1.0 + Vector3.UP * 0.9 + flat * 0.02, at + facing * 0.01, wood)
+		Shapes.box(self, "InnerWindowGlass", across * 0.84 + Vector3.UP * 0.74 + flat * 0.01, at + facing * 0.02, glass)
+		Shapes.box(self, "InnerMullion", across * 0.025 + Vector3.UP * 0.74 + flat * 0.012, at + facing * 0.026, wood)
+		Shapes.box(self, "InnerMullion", across * 0.84 + Vector3.UP * 0.025 + flat * 0.012, at + facing * 0.026, wood)
+		Shapes.box(self, "InnerSill", across * 1.08 + Vector3.UP * 0.035 + flat * 0.09, at + facing * 0.045 + Vector3.DOWN * 0.465, wood)
+	# A worn rug.
+	Shapes.box(self, "Rug", Vector3(2.1, 0.008, 1.45), Vector3(0.25, 0.004, 0.55), Shapes.material(Color("#3e2522"), 0.0, 1.0))
+	Shapes.box(self, "RugField", Vector3(1.8, 0.009, 1.15), Vector3(0.25, 0.0045, 0.55), Shapes.material(Color("#523430"), 0.0, 1.0))
+	# Chairs at the table: one pulled out, one knocked over.
+	_chair(Vector3(-2.2, 0, -0.62), PI, wood)
+	var fallen := _chair(Vector3(-1.25, 0.22, -1.75), -0.6, wood)
+	fallen.rotate_object_local(Vector3.BACK, PI * 0.5)
+	# The fridge that hums, and the clock that ticks.
+	Shapes.box(self, "Fridge", Vector3(0.74, 1.68, 0.66), Vector3(-3.0, 0.84, -3.16), enamel, true)
+	Shapes.box(self, "FridgeSeam", Vector3(0.75, 0.012, 0.67), Vector3(-3.0, 1.18, -3.16), dark)
+	Shapes.box(self, "FridgeHandle", Vector3(0.03, 0.36, 0.04), Vector3(-2.72, 1.42, -2.81), brass)
+	Shapes.cylinder(self, "ClockFace", Vector3(-3.385, 2.05, -1.3), Vector3.RIGHT, 0.2, 0.04, Shapes.material(Color("#cfc5ad")), 24)
+	Shapes.cylinder(self, "ClockRim", Vector3(-3.395, 2.05, -1.3), Vector3.RIGHT, 0.225, 0.03, brass, 24)
+	var hour := Shapes.box(self, "ClockHand", Vector3(0.006, 0.11, 0.014), Vector3(-3.36, 2.09, -1.31), dark)
+	hour.rotation.x = 0.9
+	var minute := Shapes.box(self, "ClockHand", Vector3(0.006, 0.16, 0.01), Vector3(-3.358, 2.1, -1.27), dark)
+	minute.rotation.x = -2.6
+	# A picture hung crooked, too dark to make out.
+	var picture := Shapes.box(self, "PictureFrame", Vector3(0.035, 0.62, 0.48), Vector3(-3.39, 1.55, 0.15), wood)
+	picture.rotation.x = 0.06
+	Shapes.box(picture, "Picture", Vector3(0.01, 0.5, 0.36), Vector3(0.02, 0, 0), Shapes.material(Color("#1d1a19")))
+	# A long coat on a rack by the door.
+	Shapes.cylinder(self, "CoatRack", Vector3(-1.5, 0.88, 3.22), Vector3.UP, 0.025, 1.76, wood)
+	Shapes.cylinder(self, "CoatRackFoot", Vector3(-1.5, 0.02, 3.22), Vector3.UP, 0.2, 0.04, wood)
+	Shapes.box(self, "Coat", Vector3(0.4, 1.0, 0.2), Vector3(-1.5, 1.18, 3.1), cloth)
+	Shapes.box(self, "CoatShoulders", Vector3(0.46, 0.08, 0.22), Vector3(-1.5, 1.68, 3.1), cloth)
+	# Bare bulbs on cords for the room lamp and the one over the stairs.
+	for hang: Array in [[Vector3(-1.7, 2.33, 1.31), 2.53], [Vector3(1.25, 2.95, -1.5), 5.14]]:
+		var bulb_at: Vector3 = hang[0]
+		var top: float = hang[1]
+		Shapes.box(self, "LampCord", Vector3(0.008, top - bulb_at.y, 0.008), Vector3(bulb_at.x, (top + bulb_at.y) * 0.5, bulb_at.z), dark)
+		Shapes.cylinder(self, "LampSocket", bulb_at + Vector3.UP * 0.05, Vector3.UP, 0.022, 0.05, dark)
+		var glow := Shapes.material(Color("#f4dfb6"))
+		glow.emission_enabled = true
+		glow.emission = Color("#f3cf8e")
+		glow.emission_energy_multiplier = 2.2
+		bulbs.append(glow)
+		Shapes.cylinder(self, "Bulb", bulb_at - Vector3.UP * 0.02, Vector3.UP, 0.035, 0.07, glow, 10)
+
+
+func _chair(at: Vector3, turn: float, wood: Material) -> Node3D:
+	var chair := Node3D.new()
+	chair.name = "Chair"
+	add_child(chair)
+	chair.position = at
+	chair.rotation.y = turn
+	Shapes.box(chair, "Seat", Vector3(0.42, 0.04, 0.42), Vector3(0, 0.45, 0), wood)
+	for x in [-0.18, 0.18]:
+		for z in [-0.18, 0.18]:
+			Shapes.box(chair, "ChairLeg", Vector3(0.035, 0.45, 0.035), Vector3(x, 0.225, z), wood)
+		Shapes.box(chair, "ChairPost", Vector3(0.035, 0.5, 0.035), Vector3(x, 0.72, 0.19), wood)
+	for y in [0.62, 0.82]:
+		Shapes.box(chair, "ChairRail", Vector3(0.36, 0.05, 0.025), Vector3(0, y, 0.19), wood)
+	return chair
 
 
 func _window(at: Vector3, facing: Vector3, trim: Material) -> void:
@@ -1061,6 +1154,9 @@ func _process(delta: float) -> void:
 		return
 	for i in lamps.size():
 		lamps[i].light_energy = lamp_energy[i] * light_level
+	for bulb in bulbs:
+		bulb.emission_energy_multiplier = 2.2 * light_level
+		bulb.albedo_color = Color("#f4dfb6") if light_level > 0.5 else Color("#3a3631")
 	for title in ["StairLight", "StairRim", "StalkLight", "DoorLight"]:
 		var light := get_node_or_null(title) as OmniLight3D
 		if light:
