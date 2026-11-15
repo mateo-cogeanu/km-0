@@ -1128,6 +1128,9 @@ func show_radio_caption(radio: Area3D, message: String) -> void:
 		radio_caption.add_child(radio_caption_label)
 		$HUD.add_child(radio_caption)
 	radio_caption_label.text = message
+	if message.is_empty():
+		radio_caption.hide()
+		return
 	_layout_radio_caption()
 
 
@@ -1146,12 +1149,12 @@ func _layout_radio_caption() -> void:
 	radio_caption.scale = Vector2.ONE * ui_scale
 	var scaled := radio_caption.size * ui_scale
 	radio_caption.position = Vector2((extent.x - scaled.x) * 0.5, extent.y - scaled.y - 60.0)
-	radio_caption.visible = not gameplay_ui_open()
+	radio_caption.visible = not radio_caption_label.text.is_empty() and not gameplay_ui_open()
 
 
 func _update_interaction_tip() -> void:
 	if is_instance_valid(listening_radio) and radio_caption:
-		radio_caption.visible = not gameplay_ui_open()
+		radio_caption.visible = not radio_caption_label.text.is_empty() and not gameplay_ui_open()
 	var tip := "" if gameplay_ui_open() else _interaction_text()
 	interaction_tip.visible = not tip.is_empty()
 	if tip.is_empty():
