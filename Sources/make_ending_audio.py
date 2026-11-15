@@ -223,3 +223,52 @@ for channel, delays in [(left, [0.0297, 0.0371, 0.0411, 0.0437]), (right, [0.031
             channel[i] += 0.09 * comb[i]
 
 write_stereo("hit", left, right, 0.89)
+
+
+# Door hinges. Stick-slip friction: an uneven train of tiny catches, each
+# ringing the wooden door, faster and higher as it strains. The long one is the
+# door being pushed shut slowly; the short one is it swinging open.
+def creak(seconds, seed, base, spread, strain):
+    count = int(seconds * RATE)
+    rng = Random(seed)
+    wobble = drift(count, seed, 6)
+    pulses = [0.0] * count
+    t = 0.0
+    while t < seconds:
+        progress = t / seconds
+        rate = base + spread * (0.5 + 0.5 * wobble[min(count - 1, int(t * RATE))]) + strain * progress
+        # Now and then the hinge lets go for a moment.
+        if rng.random() < 0.012:
+            t += rng.uniform(0.04, 0.16)
+            continue
+        k = int(t * RATE)
+        if k < count:
+            pulses[k] += rng.uniform(0.5, 1.0)
+        t += (1.0 / rate) * rng.uniform(0.85, 1.15)
+    body = [0.0] * count
+    for freq, q, gain in [(310, 9, 0.8), (720, 14, 1.0), (1380, 18, 0.7), (2350, 20, 0.35)]:
+        for i, y in enumerate(resonator(pulses, freq, q)):
+            body[i] += gain * y
+    grit = band(noise(count, seed + 1), 900, 4000)
+    out = []
+    for i in range(count):
+        t = i / RATE
+        edge = min(1.0, t / 0.06, (seconds - t) / 0.12)
+        swell = 0.75 + 0.25 * sin(pi * t / seconds)
+        out.append(edge * swell * (body[i] + 0.04 * grit[i] * abs(body[i]) * 6))
+    return out
+
+
+write("door_creak", creak(3.7, 81, 22, 30, 40), 0.7)
+write("door_open", creak(1.2, 82, 45, 25, 20), 0.6)
+
+# The latch: a metal click and the soft thump of the door meeting its frame.
+count = int(0.5 * RATE)
+latch = [0.0] * count
+click = band(noise(int(0.01 * RATE), 91), 2500, 9000)
+add(latch, int(0.03 * RATE), [s * exp(-i / (0.0015 * RATE)) for i, s in enumerate(click)], 0.9)
+thump = band(noise(int(0.2 * RATE), 92), 60, 500)
+add(latch, 0, [s * exp(-i / (0.03 * RATE)) for i, s in enumerate(thump)], 1.0)
+ring = resonator([1.0] + [0.0] * (count - 1), 1900, 40)
+add(latch, int(0.03 * RATE), ring, 0.25)
+write("door_latch", latch, 0.75)

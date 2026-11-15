@@ -81,7 +81,9 @@ func _ready() -> void:
 	scene.add_child(player)
 	player.position = Vector3(0, 1.03, 2.2)
 	player.camera.make_current()
-	house.call_deferred("_on_entry", player)
+	# KM0_PREVIEW_EXTERIOR leaves the ending unstarted, to look at the house.
+	if not OS.has_environment("KM0_PREVIEW_EXTERIOR"):
+		house.call_deferred("_on_entry", player)
 	# Stop at the end card so the preview never reaches the menu or a save.
 	get_tree().node_added.connect(func(node: Node) -> void:
 		if node is Button and node.name == "EndButton":

@@ -15,6 +15,9 @@ const HOUSE_HUM := preload("res://assets/audio/ending/house_hum.wav")
 const FLICKER := preload("res://assets/audio/ending/flicker.wav")
 const CRACK := preload("res://assets/audio/ending/crack.wav")
 const HIT := preload("res://assets/audio/ending/hit.wav")
+const DOOR_CREAK := preload("res://assets/audio/ending/door_creak.wav")
+const DOOR_OPEN := preload("res://assets/audio/ending/door_open.wav")
+const DOOR_LATCH := preload("res://assets/audio/ending/door_latch.wav")
 
 var boards := Shapes.material(Color("#675545"))
 var floorboards := Shapes.material(Color("#504236"))
@@ -77,8 +80,31 @@ var fake_tilt: Control
 var fake_black: ColorRect
 var fake_card: Control
 var fake_twisted := false
+# Shutting the door behind you.
+var gaze_target := Vector3.ZERO
+var gaze_mix := 0.0
+var camera_bias := Vector3.ZERO
+var skit_shoulders := Vector3.ZERO
+var skit_pelvis := Vector3.ZERO
+var skit_palms: Array[Vector3] = []
+var skit_feet: Array[Vector3] = []
+var skit_normals: Array[Vector3] = []
+var skit_start := Vector3.ZERO
+var door_reach := Vector3.ZERO
+var door_angle := DOOR_OPEN_ANGLE
 
 const STAIR_TIME := 7.7
+const HOUSE_LAYER := 1 << 19
+const DOOR_OPEN_ANGLE := 103.0
+## Where it stops beside the open door to shut it, and where you end up standing,
+## clear of the door's swing.
+const DOOR_SPOT := Vector3(-0.85, 0, 1.72)
+const STAND_AT := Vector3(0.15, 0, 2.15)
+const SKITTER_TIME := 1.15
+const REACH_TIME := 2.4
+const DOOR_SWING_TIME := 2.1
+## A point on the door's inner face near its free edge, in hinge space.
+const DOOR_GRIP := Vector3(1.36, 1.2, -0.06)
 ## How far into the crawl it freezes before the lights go.
 const VANISH_AT := 0.53
 const FREEZE_AT := 0.44
@@ -126,6 +152,10 @@ const FINAL_JAW := [
 
 func _ready() -> void:
 	_build_house()
+	# The house gets its own light layer, so outdoor light that has no shadows
+	# can be kept off its insides once you are in.
+	for mesh: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):
+		mesh.layers = HOUSE_LAYER
 	var trigger := Area3D.new()
 	trigger.name = "EntryTrigger"
 	trigger.collision_layer = 0
@@ -169,6 +199,7 @@ func _build_house() -> void:
 		Shapes.box(self, "PorchPost", Vector3(0.145, 2.50, 0.145), Vector3(side * 1.47, 1.25, 4.99), boards)
 	Shapes.box(self, "PorchRoof", Vector3(3.22, 0.14, 1.56), Vector3(0, 2.51, 4.43), dark)
 	_build_front_door()
+	_build_exterior()
 	var stair_mat := Shapes.material(Color("#665346"))
 	for i in range(13):
 		var height := 0.207 * (i + 1)
@@ -186,6 +217,102 @@ func _build_house() -> void:
 	_lamp(Vector3(2.45, 2.82, -1.94), 0.46, 4.7)
 	# Washes the tall stairwell wall so what climbs down it can be seen against it.
 	_lamp(Vector3(1.25, 2.9, -1.5), 0.42, 3.4)
+
+
+func _build_exterior() -> void:
+	## Siding, trim, windows, gables, chimney and porch details on the outside.
+	var trim := Shapes.material(Color("#8f806b"))
+	var stone := Shapes.material(Color("#4a463f"), 0.0, 0.95)
+	var brick := Shapes.material(Color("#5c3b31"), 0.0, 0.9)
+	var shutter := Shapes.material(Color("#2f3a34"))
+	# Clapboards down the sides and across the back, like the front.
+	for i in range(18):
+		var y := 0.28 * (i + 1)
+		for side in [-1.0, 1.0]:
+			Shapes.box(self, "ClapboardSeam", Vector3(0.028, 0.011, 7.36), Vector3(side * 3.672, y, 0), boards)
+		Shapes.box(self, "ClapboardSeam", Vector3(7.2, 0.011, 0.028), Vector3(0, y, -3.797), boards)
+	# Corner boards and a stone foundation.
+	for x in [-3.66, 3.66]:
+		for z in [-3.8, 3.8]:
+			Shapes.box(self, "CornerBoard", Vector3(0.17, 5.3, 0.17), Vector3(x, 2.6, z), trim)
+	for side in [-1.0, 1.0]:
+		Shapes.box(self, "Foundation", Vector3(0.12, 0.44, 7.72), Vector3(side * 3.71, 0.12, 0), stone)
+		Shapes.box(self, "Foundation", Vector3(2.9, 0.44, 0.12), Vector3(side * 2.3, 0.12, 3.85), stone)
+	Shapes.box(self, "Foundation", Vector3(7.54, 0.44, 0.12), Vector3(0, 0.12, -3.84), stone)
+	# Windows all round, with sills; shutters on the front.
+	for y in [1.28, 3.56]:
+		for offset in [-1.65, 1.65]:
+			for side in [-1.0, 1.0]:
+				_window(Vector3(side * 3.72, y, offset), Vector3(side, 0, 0), trim)
+			_window(Vector3(offset * 1.24, y, -3.85), Vector3.FORWARD, trim)
+		for side in [-1.0, 1.0]:
+			Shapes.box(self, "Sill", Vector3(1.14, 0.05, 0.13), Vector3(side * 2.04, y - 0.48, 3.88), trim)
+			for edge in [-1.0, 1.0]:
+				var leaf := Shapes.box(self, "Shutter", Vector3(0.3, 0.97, 0.04), Vector3(side * 2.04 + edge * 0.69, y, 3.83), shutter)
+				for slat in range(6):
+					Shapes.box(leaf, "Slat", Vector3(0.26, 0.012, 0.012), Vector3(0, -0.4 + slat * 0.16, 0.024), boards)
+	# Close the gables under the roof, with a vent in each.
+	for z in [3.785, -3.785]:
+		_gable(z)
+		Shapes.box(self, "GableVent", Vector3(0.56, 0.26, 0.03), Vector3(0, 5.48, z + signf(z) * 0.02), trim)
+		Shapes.box(self, "GableVentSlots", Vector3(0.46, 0.18, 0.03), Vector3(0, 5.48, z + signf(z) * 0.035), dark)
+	# Ridge cap, boards along the eaves and a brick chimney.
+	Shapes.box(self, "RidgeCap", Vector3(0.26, 0.09, 8.0), Vector3(0, 6.02, 0), dark)
+	for side in [-1.0, 1.0]:
+		var fascia := Shapes.box(self, "Fascia", Vector3(0.05, 0.22, 7.98), Vector3(side * 3.95, 5.0, 0), trim)
+		fascia.rotation.z = -side * 0.23
+	Shapes.box(self, "Chimney", Vector3(0.62, 1.75, 0.62), Vector3(2.3, 6.18, -1.9), brick)
+	Shapes.box(self, "ChimneyCap", Vector3(0.76, 0.09, 0.76), Vector3(2.3, 7.08, -1.9), stone)
+	Shapes.box(self, "ChimneyFlue", Vector3(0.36, 0.05, 0.36), Vector3(2.3, 7.14, -1.9), dark)
+	# Porch railings and a lamp by the door.
+	for side in [-1.0, 1.0]:
+		Shapes.box(self, "PorchRail", Vector3(0.07, 0.06, 1.16), Vector3(side * 1.47, 0.9, 4.39), boards, true)
+		Shapes.box(self, "PorchRail", Vector3(0.06, 0.05, 1.16), Vector3(side * 1.47, 0.16, 4.39), boards)
+		for i in range(7):
+			Shapes.box(self, "Baluster", Vector3(0.035, 0.7, 0.035), Vector3(side * 1.47, 0.53, 3.93 + i * 0.15), boards)
+	Shapes.box(self, "PorchLampBase", Vector3(0.13, 0.2, 0.05), Vector3(1.06, 2.05, 3.81), dark)
+	var glow := Shapes.material(Color("#f2d29a"))
+	glow.emission_enabled = true
+	glow.emission = Color("#f0c27a")
+	glow.emission_energy_multiplier = 1.6
+	Shapes.cylinder(self, "PorchLampGlass", Vector3(1.06, 2.0, 3.89), Vector3.UP, 0.05, 0.16, glow)
+	var porch_light := OmniLight3D.new()
+	porch_light.name = "PorchLamp"
+	porch_light.light_color = Color("#f0c890")
+	porch_light.light_energy = 0.55
+	porch_light.omni_range = 4.0
+	porch_light.shadow_enabled = true
+	add_child(porch_light)
+	porch_light.position = Vector3(1.06, 2.0, 4.02)
+
+
+func _window(at: Vector3, facing: Vector3, trim: Material) -> void:
+	## A dark window in a frame with a sill, on an outside wall facing outward.
+	var across := Vector3.UP.cross(facing).abs()
+	var frame_size := across * 1.02 + Vector3.UP * 0.91 + facing.abs() * 0.12
+	Shapes.box(self, "WindowFrame", frame_size, at, floorboards)
+	Shapes.box(self, "DarkWindow", across * 0.82 + Vector3.UP * 0.7 + facing.abs() * 0.03, at + facing * 0.05, dark)
+	Shapes.box(self, "Mullion", across * 0.027 + Vector3.UP * 0.71 + facing.abs() * 0.03, at + facing * 0.07, boards)
+	Shapes.box(self, "Sill", across * 1.14 + Vector3.UP * 0.05 + facing.abs() * 0.13, at + facing * 0.05 + Vector3.DOWN * 0.48, trim)
+
+
+func _gable(z: float) -> void:
+	## The triangle of wall between the top of the front or back wall and the roof.
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var outward := signf(z)
+	for corner in ([Vector3(-2.72, 5.24, z), Vector3(2.72, 5.24, z), Vector3(0, 5.9, z)] if outward < 0 else [Vector3(2.72, 5.24, z), Vector3(-2.72, 5.24, z), Vector3(0, 5.9, z)]):
+		surface.set_normal(Vector3(0, 0, outward))
+		surface.add_vertex(corner)
+	var gable := MeshInstance3D.new()
+	gable.name = "Gable"
+	gable.mesh = surface.commit()
+	gable.material_override = plaster
+	add_child(gable)
+	for i in range(2):
+		var y := 5.24 + 0.28 * (i + 1)
+		var half := 2.72 * (1.0 - (y - 5.24) / 0.66)
+		Shapes.box(self, "ClapboardSeam", Vector3(half * 2.0, 0.011, 0.028), Vector3(0, y, z + outward * 0.01), boards)
 
 
 func _build_front_door() -> void:
@@ -238,7 +365,15 @@ func _open_door() -> void:
 	door_open = true
 	door_target.collision_layer = 0
 	var swing := create_tween().set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
-	swing.tween_property(door_hinge, "rotation:y", deg_to_rad(103.0), 1.05).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	swing.tween_property(door_hinge, "rotation:y", deg_to_rad(DOOR_OPEN_ANGLE), 1.05).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	var hinge := AudioStreamPlayer3D.new()
+	hinge.stream = DOOR_OPEN
+	hinge.unit_size = 3.0
+	hinge.volume_db = -6.0
+	add_child(hinge)
+	hinge.position = Vector3(0.0, 1.3, 3.65)
+	hinge.play()
+	hinge.finished.connect(hinge.queue_free)
 
 
 func _wall(at: Vector3, size: Vector3) -> void:
@@ -295,6 +430,10 @@ func _on_entry(body: Node3D) -> void:
 	looked = true
 	player = body
 	player.lock_for_ending(to_global(Vector3(0, 1.03, 5.62)))
+	# A step further inside, out of the door's way.
+	var inside := to_local(player.global_position)
+	var step_in := create_tween()
+	step_in.tween_property(player, "global_position", to_global(Vector3(STAND_AT.x, inside.y, STAND_AT.z)), 1.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	var world_environment := get_tree().current_scene.get_node("WorldEnvironment") as WorldEnvironment
 	interior = world_environment.environment.duplicate() as Environment
 	interior.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -304,10 +443,10 @@ func _on_entry(body: Node3D) -> void:
 	player.camera.environment = interior
 	_build_overlay()
 	var sun := get_tree().current_scene.get_node("Sun") as DirectionalLight3D
-	sun.light_cull_mask &= ~Creature.LIGHT_LAYER
+	sun.light_cull_mask &= ~(Creature.LIGHT_LAYER | HOUSE_LAYER)
 	var sky_fill := get_tree().current_scene.get_node_or_null("DayNightCycle/SkyFillLight") as DirectionalLight3D
 	if sky_fill:
-		sky_fill.light_cull_mask &= ~Creature.LIGHT_LAYER
+		sky_fill.light_cull_mask &= ~(Creature.LIGHT_LAYER | HOUSE_LAYER)
 	creature = Creature.new()
 	add_child(creature)
 	creature.keep_clear = _clear_of_walls
@@ -360,7 +499,17 @@ func _begin_descent() -> void:
 	# Everything goes quiet the moment it stops.
 	sequence.tween_callback(_stop_ambience)
 	sequence.tween_method(_crawl, FREEZE_AT, VANISH_AT, (VANISH_AT - FREEZE_AT) * CRAWL_TIME)
-	sequence.tween_interval(1.15)
+	sequence.tween_interval(0.7)
+	# Its eyes slide off you to the open door behind you. Then it goes for it.
+	sequence.tween_callback(_start_skitter)
+	sequence.tween_method(_look_at_door, 0.0, 1.0, 0.9).set_trans(Tween.TRANS_SINE)
+	sequence.tween_interval(0.35)
+	sequence.tween_method(_skitter, 0.0, 1.0, SKITTER_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	sequence.tween_callback(_start_reach)
+	sequence.tween_method(_shut_door, 0.0, 1.0, REACH_TIME)
+	sequence.tween_method(_door_swings_shut, 0.0, 1.0, DOOR_SWING_TIME)
+	sequence.tween_callback(_play_at.bind(DOOR_LATCH, to_global(Vector3(0.6, 1.1, 3.6)), 1.0))
+	sequence.tween_method(_after_door, 0.0, 1.0, 1.25)
 	sequence.tween_callback(_play_flicker)
 	for beat: Array in [[0.0, 0.07], [1.0, 0.12], [0.0, 0.05], [1.0, 0.34]]:
 		sequence.tween_callback(_set_lights.bind(beat[0]))
@@ -407,6 +556,123 @@ func _final_approach() -> void:
 	sequence.tween_callback(caption.set_text.bind(""))
 	sequence.tween_method(_hold_face.bind(true), line_end, line_end + 0.65, 0.65)
 	sequence.tween_callback(_show_fake_end)
+
+
+func _start_skitter() -> void:
+	skit_shoulders = last_shoulders
+	skit_pelvis = last_pelvis
+	skit_palms = last_palms.duplicate()
+	skit_feet = last_feet.duplicate()
+	skit_normals = last_normals.duplicate()
+	skit_start = creature.position
+	gaze_target = to_local(door_hinge.to_global(Vector3(0.7, 1.3, 0)))
+	_creature_light("DoorLight", Vector3(-0.15, 2.2, 2.75), Color("#d9b394"), 0.9, 3.2)
+
+
+func _look_at_door(amount: float) -> void:
+	gaze_mix = amount
+	creature.tilt = lerpf(0.38, -0.2, amount)
+	_pose(skit_shoulders, skit_pelvis, skit_palms, skit_normals, skit_feet, 5.03, 0.0, [Vector3.UP, Vector3.UP])
+
+
+func _skitter(t: float) -> void:
+	## Fast and low, wide around you, to the open door.
+	var bend := Vector3(0.4, 0, 0.78)
+	var strides := t * 3.5
+	var at := _crawl_path(skit_start, bend, DOOR_SPOT, t)
+	var forward := (bend - skit_start).lerp(DOOR_SPOT - bend, t).normalized()
+	creature.position = at
+	var blend := smoothstep(0.0, 0.2, t)
+	var palms: Array[Vector3] = []
+	var feet: Array[Vector3] = []
+	for i in range(2):
+		var side := -1.0 if i == 0 else 1.0
+		var phase := strides + i * 0.5
+		var hand_t := clampf((_contact(phase) - 0.05) / 3.5, 0, 1)
+		var hand_forward := (bend - skit_start).lerp(DOOR_SPOT - bend, hand_t).normalized()
+		var palm := _crawl_path(skit_start, bend, DOOR_SPOT, hand_t) + hand_forward * 0.28 + Vector3.UP.cross(hand_forward) * side * 0.4
+		palm.y = _swing(phase) * 0.16
+		palm = _between_walls(skit_palms[i].lerp(palm, blend))
+		palm.y = maxf(palm.y, _ground_under(palm, 0.14) + 0.02)
+		palms.append(palm)
+		var foot_t := clampf((_contact(phase + 0.5) - 0.42) / 3.5, 0, 1)
+		var foot_forward := (bend - skit_start).lerp(DOOR_SPOT - bend, foot_t).normalized()
+		var foot := _crawl_path(skit_start, bend, DOOR_SPOT, foot_t) - foot_forward * 0.5 + Vector3.UP.cross(foot_forward) * side * 0.3
+		foot.y = _swing(phase + 0.5) * 0.1
+		foot = _between_walls(skit_feet[i].lerp(foot, blend))
+		foot.y = maxf(foot.y, _ground_under(foot, 0.14))
+		feet.append(foot)
+	var shoulders := at + forward * 0.16 + Vector3.UP * (0.62 - absf(sin(strides * TAU)) * 0.04)
+	var pelvis := at - forward * 0.58 + Vector3.UP * 0.58
+	var normals: Array[Vector3] = [skit_normals[0].lerp(Vector3.UP, blend).normalized(), skit_normals[1].lerp(Vector3.UP, blend).normalized()]
+	_pose(skit_shoulders.lerp(shoulders, blend), skit_pelvis.lerp(pelvis, blend), palms, normals, feet, 5.03, 0.0, [Vector3.UP, Vector3.UP])
+	_play_contact(strides * 2.0, palms[floori(strides * 2.0) % 2], 1.18)
+	# Its gaze swings back to you as it arrives.
+	gaze_mix = 1.0 - smoothstep(0.6, 1.0, t)
+	creature.tilt = lerpf(-0.2, 0.25, t)
+
+
+func _start_reach() -> void:
+	skit_shoulders = last_shoulders
+	skit_pelvis = last_pelvis
+	skit_palms = last_palms.duplicate()
+	skit_feet = last_feet.duplicate()
+	door_reach = DOOR_SPOT + Vector3(-0.08, 1.02, 0.26)
+	var creak := _speaker(3.0)
+	creak.volume_db = -3.0
+	creak.stream = DOOR_CREAK
+	creak.position = Vector3(-0.6, 1.3, 3.0)
+	var start := create_tween()
+	start.tween_interval(REACH_TIME * 0.32)
+	start.tween_callback(creak.play)
+	creak.finished.connect(creak.queue_free)
+
+
+func _door_grip() -> Vector3:
+	return door_hinge.transform * DOOR_GRIP
+
+
+func _shut_door(t: float) -> void:
+	## Rears up, curls its long fingers around the edge of the door and pushes
+	## it shut, slowly, watching you the whole time.
+	var rise := smoothstep(0.0, 0.32, t)
+	var push := smoothstep(0.32, 1.0, t)
+	door_angle = lerpf(DOOR_OPEN_ANGLE, 52.0, push)
+	door_hinge.rotation.y = deg_to_rad(door_angle)
+	var grip := _door_grip()
+	var face := door_hinge.basis * Vector3.FORWARD
+	var reach := skit_palms[0].lerp(grip, rise) + Vector3.UP * sin(rise * PI) * 0.18
+	var palms: Array[Vector3] = [reach if push == 0.0 else grip, skit_palms[1]]
+	var normals: Array[Vector3] = [Vector3.UP.lerp(face, rise).normalized(), Vector3.UP]
+	var shoulders := skit_shoulders.lerp(door_reach, rise)
+	shoulders += (grip - shoulders) * Vector3(1, 0, 1) * 0.12 * push
+	camera_bias = (to_global(grip) - creature.head.global_position) * 0.55 * rise
+	_pose(shoulders, skit_pelvis, palms, normals, skit_feet, 5.03, 0.0, [Vector3.UP, Vector3.UP])
+
+
+func _door_swings_shut(t: float) -> void:
+	## It lets go. The door creaks the rest of the way by itself, and the hand
+	## that pushed it sinks back to the floor.
+	if t == 0.0 or skit_palms.size() < 3:
+		skit_palms = [last_palms[0], skit_palms[1], last_palms[0]]
+		skit_normals = [last_normals[0], Vector3.UP]
+		skit_shoulders = last_shoulders
+	door_angle = lerpf(52.0, 0.0, smoothstep(0.0, 1.0, t))
+	door_hinge.rotation.y = deg_to_rad(door_angle)
+	var drop := smoothstep(0.35, 1.0, t)
+	var rest := Vector3(-1.05, 0.0, 2.05)
+	var palms: Array[Vector3] = [skit_palms[2].lerp(rest, drop) + Vector3.UP * sin(drop * PI) * 0.1, skit_palms[1]]
+	var normals: Array[Vector3] = [skit_normals[0].lerp(Vector3.UP, drop).normalized(), Vector3.UP]
+	camera_bias = camera_bias * (1.0 - drop)
+	creature.tilt = lerpf(0.25, 0.55, t)
+	_pose(skit_shoulders, skit_pelvis, palms, normals, skit_feet, 5.03, 0.0, [Vector3.UP, Vector3.UP])
+
+
+func _after_door(t: float) -> void:
+	## Shut in. It holds still and stares.
+	camera_bias = Vector3.ZERO
+	creature.tilt = 0.55 + _twitch_at(t * 0.2, 0.1) * 0.2
+	_pose(skit_shoulders, skit_pelvis, last_palms, last_normals, skit_feet, 5.03, 0.0, [Vector3.UP, Vector3.UP])
 
 
 func _listen_toward_stairs(progress: float) -> void:
@@ -645,13 +911,13 @@ func _pose(shoulders: Vector3, pelvis: Vector3, palms: Array[Vector3], normals: 
 		last_pelvis = pelvis
 		last_normals = normals
 		last_foot_normals = foot_normals
-	var eye := to_local(player.camera.global_position)
+	var eye := to_local(player.camera.global_position).lerp(gaze_target, gaze_mix)
 	var local_palms: Array[Vector3] = [palms[0] - creature.position, palms[1] - creature.position]
 	var local_feet: Array[Vector3] = [feet[0] - creature.position, feet[1] - creature.position]
 	creature.pose_contacts(shoulders - creature.position, pelvis - creature.position, eye - creature.position,
 		local_palms, normals, local_feet, elapsed, reveal, foot_normals, back)
 	if camera_follow:
-		player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.22, _camera_response(5.5))
+		player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.22 + camera_bias, _camera_response(5.5))
 	if shake > 0.0:
 		player.camera.rotate_object_local(Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-0.4, 0.4)).normalized(), shake)
 
@@ -795,7 +1061,7 @@ func _process(delta: float) -> void:
 		return
 	for i in lamps.size():
 		lamps[i].light_energy = lamp_energy[i] * light_level
-	for title in ["StairLight", "StairRim", "StalkLight"]:
+	for title in ["StairLight", "StairRim", "StalkLight", "DoorLight"]:
 		var light := get_node_or_null(title) as OmniLight3D
 		if light:
 			light.light_energy = light.get_meta("energy", light.light_energy) * light_level
