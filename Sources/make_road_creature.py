@@ -467,7 +467,10 @@ def head_weight(p, cranium_rot):
     # Past the top of the neck everything is head.
     along = (p - NECK_TOP).dot((NECK_TOP - NECK_BASE).normalized())
     near = (p - FACE).length < 0.32
-    return max(smoothstep(-0.015, 0.02, neck - head), smoothstep(-0.03, 0.01, along) if near else 0.0)
+    # Only skin on or right at the head counts. Without this, the hands out in
+    # front of the body were "closer to the head than the neck" and followed it.
+    on_head = 1.0 - smoothstep(0.03, 0.06, head)
+    return max(smoothstep(-0.015, 0.02, neck - head) * on_head, smoothstep(-0.03, 0.01, along) if near else 0.0)
 
 
 BONE_RADIUS = {"Torso": 0.12, "Neck": 0.042, "UpperArm": 0.036, "Forearm": 0.026, "Thigh": 0.048, "Shin": 0.028}

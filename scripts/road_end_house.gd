@@ -51,8 +51,9 @@ const WALL_X := 2.55
 const WALL_NORMAL := Vector3.LEFT
 const WALL_STANDOFF := 0.27
 const WALL_START_Z := -3.1
-const WALL_END_Z := -0.62
-const WALL_EDGE_Z := -0.14
+const WALL_END_Z := -0.85
+# Palms stop this far back so the long fingers stay on the plaster too.
+const WALL_EDGE_Z := -0.36
 const WALL_STRIDES := 7.0
 ## Fraction of the crawl covered before it stops with a hand in the air.
 const CRAWL_PAUSE_AT := 0.47

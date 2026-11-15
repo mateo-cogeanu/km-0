@@ -73,6 +73,73 @@ func _ready() -> void:
 		scene.add_child(watcher)
 		watcher.look_at_from_position(Vector3(spot[0], spot[1], spot[2]), Vector3(spot[3], spot[4], spot[5]))
 		watcher.make_current()
+	if OS.has_environment("KM0_PREVIEW_MARKERS"):
+		# Coloured balls on the solved joints: elbows blue, wrists red, knees
+		# green, ankles yellow. Checks contacts against the walls.
+		var balls := {}
+		var colours := {"ForearmL": Color.BLUE, "ForearmR": Color.BLUE, "HandL": Color.RED, "HandR": Color.RED,
+			"ShinL": Color.GREEN, "ShinR": Color.GREEN, "FootL": Color.YELLOW, "FootR": Color.YELLOW}
+		get_tree().process_frame.connect(func() -> void:
+			var c: Node3D = house.creature
+			if not c or not c.posed.has("HandL"):
+				return
+			for label: String in colours:
+				if not balls.has(label):
+					var ball := MeshInstance3D.new()
+					ball.mesh = SphereMesh.new()
+					ball.mesh.radius = 0.035
+					ball.mesh.height = 0.07
+					var paint := StandardMaterial3D.new()
+					paint.albedo_color = colours[label]
+					paint.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+					paint.no_depth_test = true
+					ball.material_override = paint
+					c.add_child(ball)
+					balls[label] = ball
+				balls[label].position = c.posed[label].origin)
+	if OS.has_environment("KM0_PREVIEW_SKINCHECK"):
+		# Skin the mesh on the CPU and report where each hand and foot's
+		# vertices really end up, next to the joint they hang from.
+		var check := Timer.new()
+		add_child(check)
+		check.timeout.connect(func() -> void:
+			var c: Node3D = house.creature
+			if not c or not c.visible:
+				return
+			var mi := c.find_child("Continuous skin", true, false) as MeshInstance3D
+			var rig: Skeleton3D = c.rig
+			var arrays := mi.mesh.surface_get_arrays(0)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
+			var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
+			var report := {}
+			for v in range(0, verts.size(), 7):
+				var best := 0
+				for k in 4:
+					if weights[v * 4 + k] > weights[v * 4 + best]:
+						best = k
+				var bind_index := bones[v * 4 + best]
+				var name := mi.skin.get_bind_name(bind_index)
+				if not name in ["HandL", "HandR", "FootL", "FootR"]:
+					continue
+				var p := Vector3.ZERO
+				for k in 4:
+					var w := weights[v * 4 + k]
+					if w > 0.0:
+						var bi := bones[v * 4 + k]
+						var bone := rig.find_bone(mi.skin.get_bind_name(bi))
+						p += w * (rig.get_bone_global_pose(bone) * mi.skin.get_bind_pose(bi) * verts[v])
+				if not report.has(name):
+					report[name] = [Vector3.ZERO, 0, 0.0]
+				report[name][0] += p
+				report[name][1] += 1
+				report[name][2] = maxf(report[name][2], p.distance_to(c.posed[name].origin))
+			var line := []
+			for name: String in report:
+				line.append("%s joint=%s mesh=%s far=%.2f" % [name, (c.posed[name].origin + c.position).snapped(Vector3.ONE * 0.01),
+					(report[name][0] / report[name][1] + c.position).snapped(Vector3.ONE * 0.01), report[name][2]])
+			print(" | ".join(line)))
+		check.start(1.0)
 	if OS.has_environment("KM0_PREVIEW_DEBUG"):
 		var timer := Timer.new()
 		add_child(timer)
