@@ -2,6 +2,8 @@ extends Node3D
 
 const MODEL := preload("res://assets/characters/road_creature.glb")
 const EYE := preload("res://assets/characters/road_eye.gdshader")
+const SKIN := preload("res://assets/characters/road_skin.gdshader")
+const LIGHT_LAYER := 1 << 18
 const SIDES := ["L", "R"]
 
 var head: Node3D
@@ -22,6 +24,14 @@ func _ready() -> void:
 		indices[label] = index
 		rest[label] = rig.get_bone_global_rest(index)
 
+	var skin_material := ShaderMaterial.new()
+	skin_material.shader = SKIN
+	for mesh: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
+		mesh.layers = LIGHT_LAYER
+		for surface in mesh.mesh.get_surface_count():
+			var material := mesh.mesh.surface_get_material(surface)
+			if material and material.resource_name.begins_with("Pale mottled skin"):
+				mesh.set_surface_override_material(surface, skin_material)
 	var eye_material := ShaderMaterial.new()
 	eye_material.shader = EYE
 	for eye: MeshInstance3D in model.find_children("Black eye*", "MeshInstance3D", true, false):

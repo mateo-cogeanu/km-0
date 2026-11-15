@@ -101,6 +101,7 @@ func _lamp(at: Vector3, energy: float, reach: float) -> void:
 	light.light_energy = energy
 	light.omni_range = reach
 	light.shadow_enabled = true
+	light.light_cull_mask &= ~Creature.LIGHT_LAYER
 	add_child(light)
 	light.position = at
 
@@ -115,13 +116,21 @@ func _on_entry(body: Node3D) -> void:
 	var interior := world_environment.environment.duplicate() as Environment
 	interior.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	interior.ambient_light_color = Color("#a6a7b4")
-	interior.ambient_light_energy = 0.24
+	interior.ambient_light_energy = 0.19
+	interior.ambient_light_sky_contribution = 0.0
 	player.camera.environment = interior
 	_build_overlay()
+	var sun := get_tree().current_scene.get_node("Sun") as DirectionalLight3D
+	sun.light_cull_mask &= ~Creature.LIGHT_LAYER
+	var sky_fill := get_tree().current_scene.get_node_or_null("DayNightCycle/SkyFillLight") as DirectionalLight3D
+	if sky_fill:
+		sky_fill.light_cull_mask &= ~Creature.LIGHT_LAYER
 	creature = Creature.new()
 	add_child(creature)
 	creature.position = Vector3(1.80, 2.70, -3.36)
 	creature.hide()
+	_creature_light("StairLight", Vector3(2.0, 3.41, -0.65), Color("#dfb99a"), 1.45, 4.8)
+	_creature_light("StairRim", Vector3(2.33, 2.45, -3.27), Color("#8b9fc8"), 0.86, 4.2)
 	voice = _speaker(2.4)
 	footfall = _speaker(4.5)
 	sequence = create_tween()
@@ -252,14 +261,21 @@ func _pose(shoulders: Vector3, pelvis: Vector3, palms: Array[Vector3], normals: 
 func _lean(amount: float) -> void:
 	_final_pose(amount, amount * 0.52)
 	creature.set_jaw_offset(-0.006 * amount)
-	if amount > 0.35 and not creature.has_node("FaceFill"):
-		var fill := OmniLight3D.new()
-		fill.name = "FaceFill"
-		fill.light_color = Color("#e1d1cd")
-		fill.light_energy = 0.64
-		fill.omni_range = 1.6
-		creature.add_child(fill)
-		fill.global_position = player.camera.global_position
+	if amount > 0.35 and not has_node("FaceFill"):
+		var eye := to_local(player.camera.global_position)
+		_creature_light("FaceFill", eye + Vector3(-0.83, 0.51, -0.08), Color("#f0c9ac"), 1.48, 3.0)
+		_creature_light("FaceRim", eye + Vector3(0.65, 0.66, -1.48), Color("#8b9ecb"), 0.82, 3.0)
+
+
+func _creature_light(title: String, at: Vector3, tint: Color, energy: float, reach: float) -> void:
+	var light := OmniLight3D.new()
+	light.name = title
+	light.position = at
+	light.light_color = tint
+	light.light_energy = energy
+	light.omni_range = reach
+	light.light_cull_mask = Creature.LIGHT_LAYER
+	add_child(light)
 
 
 func _final_pose(amount: float, elapsed: float) -> void:
