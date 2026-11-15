@@ -92,18 +92,15 @@ func _aim_bone(label: String, start: Vector3, end: Vector3, bind_end: Vector3) -
 	var direction := (bind_end - bind.origin).normalized()
 	var span := end - start
 	var rotation := Basis(Quaternion(direction, span.normalized()))
-	var stretch := clampf(span.length() / bind.origin.distance_to(bind_end), 0.35, 1.62)
+	var stretch := span.length() / bind.origin.distance_to(bind_end)
 	_set_bone(label, Transform3D((rotation * bind.basis).scaled_local(Vector3(1.0, stretch, 1.0)), start))
 
 
 func _set_bone(label: String, target: Transform3D) -> void:
-	var index := indices[label]
-	var parent := rig.get_bone_parent(index)
-	var local := target
-	if parent >= 0:
-		local = posed[rig.get_bone_name(parent)].affine_inverse() * target
+	# Contact targets are in skeleton space. Apply them directly so a stretched
+	# forearm cannot inherit scale or shear from the upper arm.
 	posed[label] = target
-	rig.set_bone_pose(index, local)
+	rig.set_bone_global_pose_override(indices[label], target, 1.0, true)
 
 
 func _twitch(elapsed: float) -> float:
