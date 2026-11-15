@@ -140,6 +140,29 @@ func _add_broadcast_stop() -> void:
 	Shapes.box(self, "RelayCabinet", Vector3(0.57, 0.99, 0.58), Vector3(-2.57, 0.495, -0.18), cabinet, true)
 	if broadcast == RoadRadio.Broadcast.TOWER:
 		_build_relay_tower()
+		_add_relay_log()
+
+
+func _add_relay_log() -> void:
+	var paper := Shapes.material(Color("#b7aa8b"))
+	Shapes.box(self, "CheckInSheet", Vector3(0.20, 0.003, 0.26), Vector3(-2.56, 0.994, 0.108), paper)
+	var entries := Label3D.new()
+	entries.name = "CheckInLog"
+	entries.position = Vector3(-2.56, 0.996, 0.108)
+	entries.rotation.x = -PI / 2.0
+	entries.font_size = 32
+	entries.pixel_size = 0.00038
+	entries.outline_size = 0
+	entries.modulate = Color("#3c392f")
+	entries.text = """EAST ROAD  •  18:00
+
+  LEN         —
+  RUTH        —
+  MICK        18:02
+  JUNE        —
+  ALAN        —
+  ROSE        —"""
+	add_child(entries)
 
 
 func _build_relay_tower() -> void:

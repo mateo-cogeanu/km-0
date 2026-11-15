@@ -12,29 +12,29 @@ const RECORDINGS := [
 ]
 const LINES := [
 	[
-		[0.55, "Attention, anyone on the east service road."],
-		[4.381, "This is a repeating message on the county channel."],
-		[7.904, "If your set is breaking up, there’s a receiver in the first garage past the workshop."],
+		[0.55, "County to the east road crews. Anyone still on the channel?"],
+		[5.138, "County, this is the first garage. We’ve got three cars out front. I’m still waiting on their drivers."],
+		[13.103, "Copy that. I’ll keep the channel open."],
 	],
 	[
-		[0.55, "County channel to all stations. The service road is still passable."],
-		[5.73, "There are more receivers along the road."],
-		[8.571, "Look for the relay tower beyond the repair sheds. The red lamp is still working."],
+		[0.55, "I left the kettle on for Len. He said he’d be five minutes."],
+		[4.997, "Did he make it past the sheds?"],
+		[7.631, "His van’s here. The keys are still in it."],
 	],
 	[
-		[0.55, "All stations, this is the county channel."],
-		[4.126, "If you’re heading east, stay on the paved road."],
-		[7.759, "The relay tower is past the next stretch of open country. There’s a receiver in the building beside it."],
+		[0.55, "East sheds to county. I can see the relay tower from here. Red light’s still on."],
+		[6.93, "Have you heard from the night crew?"],
+		[9.499, "Just their six o’clock check-in. I’ve heard it twice now."],
 	],
 	[
-		[0.55, "County relay to anyone receiving. Keep following the service road."],
-		[5.742, "There’s a receiver farther down, before the pavement ends."],
-		[10.243, "Leave this frequency open for anyone still coming through."],
+		[0.55, "County, we got the relay back up."],
+		[3.639, "How many checked in?"],
+		[5.671, "I have six names on the sheet. Only one of them’s answered since dark."],
 	],
 	[
-		[0.55, "Attention, all travelers on the east service road."],
-		[4.578, "When the pavement ends, look for the house on the right."],
-		[8.699, "The front door is shut to keep the wind out. Come on in."],
+		[0.55, "County channel, for anyone still on the east road. The house on the right, where the pavement runs out. That’s where we’ve been waiting."],
+		[10.015, "We’ve got the kettle on."],
+		[12.173, "I’ll keep the channel open."],
 	],
 ]
 

@@ -7,6 +7,9 @@ const HELLO := preload("res://assets/audio/ending/hello.wav")
 const ANYBODY := preload("res://assets/audio/ending/anybody.wav")
 const TRICKED := preload("res://assets/audio/ending/tricked.wav")
 const STEP := preload("res://assets/audio/ending/step.wav")
+const DRY_TICKS := preload("res://assets/audio/ending/dry_ticks.wav")
+const RAPID_CLICKS := preload("res://assets/audio/ending/rapid_clicks.wav")
+const THROAT_RATTLE := preload("res://assets/audio/ending/throat_rattle.wav")
 
 var boards := Shapes.material(Color("#675545"))
 var floorboards := Shapes.material(Color("#504236"))
@@ -16,6 +19,7 @@ var player: Node3D
 var creature: Node3D
 var voice: AudioStreamPlayer3D
 var footfall: AudioStreamPlayer3D
+var creature_sound: AudioStreamPlayer3D
 var sequence: Tween
 var overlay: CanvasLayer
 var caption: Label
@@ -198,24 +202,34 @@ func _on_entry(body: Node3D) -> void:
 	_creature_light("StairRim", Vector3(2.33, 2.45, -3.27), Color("#8b9fc8"), 0.86, 4.2)
 	voice = _speaker(2.4)
 	footfall = _speaker(4.5)
+	creature_sound = _speaker(2.8)
+	creature_sound.volume_db = -7.0
 	sequence = create_tween()
 	sequence.tween_interval(0.95)
 	sequence.tween_callback(_speak.bind(HELLO, "Hello? Anybody there?", player.camera.global_position + player.camera.global_basis.z * 0.15))
-	sequence.tween_interval(4.7)
+	sequence.tween_interval(2.78)
+	sequence.tween_callback(_play_creature_sound.bind(DRY_TICKS))
+	sequence.tween_interval(1.92)
 	sequence.tween_callback(_begin_descent)
 
 
 func _begin_descent() -> void:
 	_speak(ANYBODY, "Anybody there?", creature.global_position + Vector3.UP * 1.15)
 	sequence = create_tween()
-	sequence.tween_method(_listen_toward_stairs, 0.0, 1.0, 2.45)
+	sequence.tween_method(_listen_toward_stairs, 0.0, 0.61, 1.5)
+	sequence.tween_callback(_play_creature_sound.bind(THROAT_RATTLE))
+	sequence.tween_method(_listen_toward_stairs, 0.61, 1.0, 0.95)
 	sequence.tween_callback(creature.show)
 	sequence.tween_method(_descend, 0.0, 1.0, STAIR_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	sequence.tween_callback(_start_crawl)
-	sequence.tween_method(_stair_hold, 0.0, 1.65, 1.65)
+	sequence.tween_method(_stair_hold, 0.0, 0.48, 0.48)
+	sequence.tween_callback(_play_creature_sound.bind(RAPID_CLICKS))
+	sequence.tween_method(_stair_hold, 0.48, 1.65, 1.17)
 	sequence.tween_method(_crawl, 0.0, 1.0, CRAWL_TIME)
 	sequence.tween_method(_lean, 0.0, 1.0, LEAN_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	sequence.tween_method(_hold_face.bind(false), 0.0, CLOSE_HOLD, CLOSE_HOLD)
+	sequence.tween_method(_hold_face.bind(false), 0.0, 0.76, 0.76)
+	sequence.tween_callback(_play_creature_sound.bind(RAPID_CLICKS))
+	sequence.tween_method(_hold_face.bind(false), 0.76, CLOSE_HOLD, CLOSE_HOLD - 0.76)
 	sequence.tween_callback(_deliver_line)
 	sequence.tween_method(_hold_face.bind(true), 0.0, 2.15, 2.15)
 	sequence.tween_callback(_show_end)
@@ -396,6 +410,12 @@ func _hold_face(elapsed: float, speaking: bool) -> void:
 
 func _deliver_line() -> void:
 	_speak(TRICKED, "Tricked you too.", creature.jaw.global_position)
+
+
+func _play_creature_sound(stream: AudioStream) -> void:
+	creature_sound.global_position = creature.jaw.global_position if creature.visible else creature.global_position + Vector3.UP * 1.15
+	creature_sound.stream = stream
+	creature_sound.play()
 
 
 func _speaker(distance: float) -> AudioStreamPlayer3D:
