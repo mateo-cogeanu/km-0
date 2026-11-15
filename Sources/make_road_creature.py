@@ -30,8 +30,8 @@ BLEND = ROOT / "Sources/road_creature.blend"
 VOXEL = 0.0032
 
 # Lengths shared with road_creature.gd. Keep both files in sync.
-UPPER_ARM, FOREARM = 0.73, 0.78
-THIGH, SHIN = 0.69, 0.65
+UPPER_ARM, FOREARM = 0.56, 0.6
+THIGH, SHIN = 0.54, 0.52
 SHOULDER_SPAN, HIP_SPAN = 0.193, 0.116
 HEAD_LIFT, HEAD_REACH, HEAD_PIVOT = 0.16, 0.36, 0.105
 
@@ -470,6 +470,9 @@ def head_weight(p, cranium_rot):
     return max(smoothstep(-0.015, 0.02, neck - head), smoothstep(-0.03, 0.01, along) if near else 0.0)
 
 
+BONE_RADIUS = {"Torso": 0.12, "Neck": 0.042, "UpperArm": 0.036, "Forearm": 0.026, "Thigh": 0.048, "Shin": 0.028}
+
+
 def skin_to_rig(obj, rig, fixed=None):
     """Distance-based weights with a rigid skull, hands and feet."""
     bones = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
@@ -482,20 +485,32 @@ def skin_to_rig(obj, rig, fixed=None):
         else:
             weights = {}
             head_share = head_weight(p, cranium_rot)
+            # Hands and feet move rigidly. Fingertips reach 0.3 m from the joint,
+            # so a plain nearest-bone test would hang them on the forearm or shin.
+            extremity, extremity_share = None, 0.0
+            for suffix in ("L", "R"):
+                for name, parent in (("Hand", "Forearm"), ("Foot", "Shin")):
+                    joint_at, tip = bones[name + suffix]
+                    if (p - joint_at).length < 0.36:
+                        # Closer to the hand or foot's own axis than to the forearm or shin.
+                        own = segment_distance(p, joint_at, joint_at + (tip - joint_at) * 1.4)
+                        limb = segment_distance(p, *bones[parent + suffix])
+                        share = smoothstep(-0.008, 0.012, limb - own)
+                        if share > extremity_share:
+                            extremity, extremity_share = name + suffix, share
             distances = {}
             for name, (a, b) in bones.items():
-                if name not in ("Head", "Jaw"):
-                    distances[name] = segment_distance(p, a, b)
-            for suffix in ("L", "R"):
-                for extremity in ("Hand", "Foot"):
-                    a, b = bones[extremity + suffix]
-                    past = (p - a).dot((b - a).normalized())
-                    near = (p - a).length < 0.26
-                    distances[extremity + suffix] = 0.0001 + max(0.0, 0.012 - past) * 0.6 if near and past > -0.03 else 9.0
+                if name not in ("Head", "Jaw", "HandL", "HandR", "FootL", "FootR"):
+                    # Distance to the bone's flesh, not its axis, so the thick
+                    # ribcage keeps its own skin when an arm lifts.
+                    distances[name] = max(segment_distance(p, a, b) - BONE_RADIUS[name.rstrip("LR")], 0.002)
             ranked = sorted(distances.items(), key=lambda item: item[1])[:3]
             total = sum(1.0 / max(d, 0.0005) ** 6 for _, d in ranked)
+            body_share = (1.0 - head_share) * (1.0 - extremity_share)
             for name, d in ranked:
-                weights[name] = (1.0 / max(d, 0.0005) ** 6) / total * (1.0 - head_share)
+                weights[name] = (1.0 / max(d, 0.0005) ** 6) / total * body_share
+            if extremity:
+                weights[extremity] = (1.0 - head_share) * extremity_share
             if head_share > 0:
                 jaw = smoothstep(smile_z(p.x) + 0.004, smile_z(p.x) - 0.035, p.z) * smoothstep(HEAD_POSITION.y + 0.02, HEAD_POSITION.y - 0.06, p.y)
                 weights["Head"] = head_share * (1.0 - jaw)

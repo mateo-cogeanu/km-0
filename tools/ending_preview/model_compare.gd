@@ -40,7 +40,7 @@ func _ready() -> void:
 	var palms: Array[Vector3] = [Vector3(-0.39, 0, 0.37), Vector3(0.39, 0, 0.37)]
 	var normals: Array[Vector3] = [Vector3.UP, Vector3.UP]
 	var feet: Array[Vector3] = [Vector3(-0.32, 0, -0.51), Vector3(0.32, 0, -0.51)]
-	posed.pose_contacts(shoulders, pelvis, Vector3(0, 1.0, 3.0), palms, normals, feet, 0.0)
+	posed.pose_contacts(shoulders, pelvis, Vector3(0, 1.95, 1.4), palms, normals, feet, 0.0)
 	for i in 4:
 		await RenderingServer.frame_post_draw
 	DirAccess.make_dir_recursive_absolute(OUT)

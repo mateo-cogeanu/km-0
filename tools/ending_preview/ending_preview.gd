@@ -64,6 +64,26 @@ func _ready() -> void:
 	get_tree().node_added.connect(func(node: Node) -> void:
 		if node is Button:
 			get_tree().quit())
+	# KM0_PREVIEW_CAMERA="x,y,z,tx,ty,tz" watches from a fixed spot instead of
+	# through the player's eyes.
+	var spot := OS.get_environment("KM0_PREVIEW_CAMERA").split_floats(",")
+	if spot.size() == 6:
+		var watcher := Camera3D.new()
+		watcher.fov = 60.0
+		scene.add_child(watcher)
+		watcher.look_at_from_position(Vector3(spot[0], spot[1], spot[2]), Vector3(spot[3], spot[4], spot[5]))
+		watcher.make_current()
+	if OS.has_environment("KM0_PREVIEW_DEBUG"):
+		var timer := Timer.new()
+		add_child(timer)
+		timer.timeout.connect(func() -> void:
+			var c: Node3D = house.creature
+			if c and c.visible:
+				var parts := []
+				for label in ["Torso", "Neck", "Head", "HandL", "HandR", "FootL", "FootR", "ForearmL", "ShinL"]:
+					parts.append("%s=%s" % [label, (c.posed[label].origin + c.position).snapped(Vector3.ONE * 0.01)])
+				print(snappedf(Time.get_ticks_msec() / 1000.0, 0.1), " ", " ".join(parts)))
+		timer.start(0.5)
 	if not frames_dir.is_empty():
 		DirAccess.make_dir_recursive_absolute(frames_dir)
 		RenderingServer.frame_post_draw.connect(_save_frame)
