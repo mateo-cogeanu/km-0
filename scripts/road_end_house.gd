@@ -18,6 +18,7 @@ const HIT := preload("res://assets/audio/ending/hit.wav")
 const DOOR_CREAK := preload("res://assets/audio/ending/door_creak.wav")
 const DOOR_OPEN := preload("res://assets/audio/ending/door_open.wav")
 const DOOR_LATCH := preload("res://assets/audio/ending/door_latch.wav")
+const BREATH_CLOSE := preload("res://assets/audio/ending/breath_close.wav")
 
 var boards := Shapes.material(Color("#675545"))
 var floorboards := Shapes.material(Color("#504236"))
@@ -82,6 +83,9 @@ var fake_tilt: Control
 var fake_black: ColorRect
 var fake_card: Control
 var fake_twisted := false
+var breather: AudioStreamPlayer3D
+## How open its pupils are in the light; they narrow to slits when it is close.
+var eye_open := 0.35
 # Shutting the door behind you.
 var gaze_target := Vector3.ZERO
 var gaze_mix := 0.0
@@ -609,7 +613,8 @@ func _begin_descent() -> void:
 		sequence.tween_interval(beat[1])
 	sequence.tween_callback(_play_flicker)
 	sequence.tween_callback(_set_lights.bind(0.0))
-	sequence.tween_interval(0.12)
+	# Only its eyes in the dark, still on you. Then they go out.
+	sequence.tween_interval(0.75)
 	sequence.tween_callback(creature.hide)
 	# In the dark, something fast skitters off toward the far wall.
 	sequence.tween_interval(0.4)
@@ -631,8 +636,10 @@ func _final_approach() -> void:
 	sequence = create_tween()
 	sequence.tween_callback(_set_lights.bind(0.0))
 	sequence.tween_callback(creature.hide)
-	sequence.tween_interval(2.3)
+	sequence.tween_interval(1.25)
+	# Two eyes open in the dark, right beside you, before the lights come back.
 	sequence.tween_callback(_place_at.bind(stalk_spots.size() - 1))
+	sequence.tween_interval(1.15)
 	sequence.tween_callback(_set_lights.bind(1.0))
 	sequence.tween_method(_turn_to_creature, 0.0, 1.0, 0.42)
 	sequence.tween_method(_turn_to_creature, 1.0, 1.0, 0.55)
@@ -652,6 +659,7 @@ func _final_approach() -> void:
 
 
 func _start_skitter() -> void:
+	creature.jitter = 0.0
 	skit_shoulders = last_shoulders
 	skit_pelvis = last_pelvis
 	skit_palms = last_palms.duplicate()
@@ -762,7 +770,8 @@ func _door_swings_shut(t: float) -> void:
 
 
 func _after_door(t: float) -> void:
-	## Shut in. It holds still and stares.
+	## Shut in. It holds still and stares, twitching.
+	creature.jitter = 0.6
 	camera_bias = Vector3.ZERO
 	creature.tilt = 0.55 + _twitch_at(t * 0.2, 0.1) * 0.2
 	_pose(skit_shoulders, skit_pelvis, last_palms, last_normals, skit_feet, 5.03, 0.0, [Vector3.UP, Vector3.UP])
@@ -867,6 +876,7 @@ func _start_crawl() -> void:
 
 
 func _stair_hold(seconds: float) -> void:
+	creature.jitter = 0.4
 	var breath := sin(seconds * 2.5) * 0.012
 	# Hangs on the wall at the foot of the stairs, head lowering toward you.
 	var lean := Vector3(0, -0.14, 0.1) * smoothstep(0.4, 1.6, seconds)
@@ -884,6 +894,7 @@ func _crawl(phase_progress: float) -> void:
 	# Approach, freeze with a hand raised and the head cocked, then scuttle.
 	var progress := _crawl_distance(phase_progress)
 	var freeze := smoothstep(0.4, 0.46, phase_progress) * (1.0 - smoothstep(0.58, 0.62, phase_progress))
+	creature.jitter = freeze * 0.55
 	creature.tilt = freeze * 0.38 + _twitch_at(phase_progress, 0.5) * 0.12
 	# For one stride the right elbow bends the wrong way, then pops back.
 	creature.elbow_flip[1] = smoothstep(0.27, 0.33, phase_progress) if phase_progress < 0.37 else 0.0
@@ -1067,11 +1078,19 @@ func _hold_face(elapsed: float, speaking: bool) -> void:
 	var sample := minf(elapsed * 20.0, FINAL_JAW.size() - 1)
 	var index := floori(sample)
 	var opening := lerpf(FINAL_JAW[index], FINAL_JAW[mini(index + 1, FINAL_JAW.size() - 1)], sample - index) / 255.0
-	creature.set_jaw_offset(-0.003 - 0.007 * opening if speaking else -0.006)
+	# Teeth chattering along with the clicks.
+	var chatter := 0.0
+	if not speaking and elapsed > 0.76 and elapsed < 1.85:
+		chatter = 0.0028 if sin(elapsed * 92.0) > 0.0 else 0.0
+	creature.set_jaw_offset(-0.003 - 0.007 * opening if speaking else -0.006 - chatter)
 	shake = maxf(0.0, shake - get_process_delta_time() * 0.05)
+	if is_instance_valid(breather):
+		breather.global_position = creature.jaw.global_position
 
 
 func _deliver_line() -> void:
+	if is_instance_valid(breather):
+		breather.queue_free()
 	_speak(TRICKED, "", creature.jaw.global_position)
 
 
@@ -1164,6 +1183,8 @@ func _process(delta: float) -> void:
 	interior.ambient_light_energy = 0.19 * lerpf(0.06, 1.0, light_level)
 	if stalking:
 		_stalk(delta)
+	if creature:
+		creature.set_eyes(lerpf(7.0, 1.0, light_level), lerpf(1.0, eye_open, light_level))
 
 
 func _set_lights(level: float) -> void:
@@ -1202,6 +1223,7 @@ func _play_at(stream: AudioStream, at: Vector3, pitch: float = 1.0) -> void:
 
 
 func _begin_stalk() -> void:
+	creature.jitter = 0.0
 	## The room is empty. You can look around now; it is somewhere in here.
 	creature.tilt = 0.0
 	creature.elbow_flip[0] = 0.0
@@ -1286,7 +1308,9 @@ func _flicker_move() -> void:
 	var blink := create_tween()
 	blink.tween_callback(_play_flicker)
 	blink.tween_callback(_set_lights.bind(0.0))
-	blink.tween_interval(1.0)
+	blink.tween_interval(0.45)
+	blink.tween_callback(creature.hide)
+	blink.tween_interval(0.55)
 	blink.tween_callback(_place_at.bind(stalk_index + 1))
 	blink.tween_callback(_set_lights.bind(1.0))
 	blink.tween_callback(func() -> void: stalking = true)
@@ -1348,6 +1372,12 @@ func _start_rush() -> void:
 	shake = 0.035
 	sting.stream = HIT
 	sting.play()
+	creature.jitter = 0.85
+	var narrow := create_tween()
+	narrow.tween_property(self, "eye_open", 0.0, 0.25)
+	narrow.tween_interval(RUSH_TIME)
+	narrow.tween_callback(func() -> void:
+		breather = _loop(BREATH_CLOSE, to_local(creature.jaw.global_position), -9.0))
 
 
 func _show_fake_end() -> void:

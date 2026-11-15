@@ -272,3 +272,30 @@ add(latch, 0, [s * exp(-i / (0.03 * RATE)) for i, s in enumerate(thump)], 1.0)
 ring = resonator([1.0] + [0.0] * (count - 1), 1900, 40)
 add(latch, int(0.03 * RATE), ring, 0.25)
 write("door_latch", latch, 0.75)
+
+
+# Breathing right in your face: quick, shallow and wet, with a rattle on each
+# breath out. Loops.
+count = int(2.6 * RATE)
+breath = [0.0] * count
+air = noise(count, 101)
+throat = resonator(resonator(air, 650, 2.5), 1400, 2.0)
+hiss = band(air, 1800, 6500)
+rng = Random(102)
+t = 0.0
+while t < 2.6 - 0.32:
+    inhale = rng.uniform(0.13, 0.19)
+    exhale = rng.uniform(0.17, 0.25)
+    for part, length, level, rattle in [(0, inhale, 0.55, 0.0), (1, exhale, 1.0, 1.0)]:
+        start = int(t * RATE)
+        n = int(length * RATE)
+        for i in range(n):
+            k = start + i
+            if k >= count:
+                break
+            shape = sin(pi * i / n) ** 1.5
+            buzz = 1.0 + rattle * 0.8 * (1 if sin(2 * pi * 38 * i / RATE + rng.random() * 0.2) > 0.6 else -0.3)
+            breath[k] += level * shape * buzz * (0.8 * throat[k] + 0.35 * hiss[k])
+        t += length + rng.uniform(0.02, 0.06)
+    t += rng.uniform(0.03, 0.12)
+write("breath_close", breath, 0.6)

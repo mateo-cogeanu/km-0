@@ -28,6 +28,9 @@ var elbow_flip: Array[float] = [0.0, 0.0]
 ## space, and returns the joint moved out of any wall on the root's side.
 ## Elbows and knees swing around their limb to stay clear.
 var keep_clear := Callable()
+## 0 to 1: how often and how hard the head jerks in small, sharp twitches.
+var jitter := 0.0
+var eye_material: ShaderMaterial
 var torso_length := 0.744
 var neck_length := 0.3
 var rest_spine := Vector3.BACK
@@ -53,7 +56,22 @@ func _ready() -> void:
 			var material := mesh.mesh.surface_get_material(surface)
 			if material and material.resource_name.begins_with("Pale mottled skin"):
 				mesh.set_surface_override_material(surface, skin_material)
-	var eye_material := ShaderMaterial.new()
+			elif material is BaseMaterial3D:
+				# Wet: the mouth, gums and teeth catch the light.
+				var title := material.resource_name
+				var gloss := 0.0
+				if title.begins_with("Mouth interior") or title.begins_with("Gum tissue"):
+					gloss = 0.2
+				elif title.begins_with("Aged ivory"):
+					gloss = 0.3
+				if gloss > 0.0:
+					var wet := StandardMaterial3D.new()
+					wet.albedo_color = material.albedo_color
+					wet.albedo_texture = material.albedo_texture
+					wet.roughness = gloss
+					wet.metallic_specular = 0.7
+					mesh.set_surface_override_material(surface, wet)
+	eye_material = ShaderMaterial.new()
 	eye_material.shader = EYE
 	for eye: MeshInstance3D in model.find_children("Black eye*", "MeshInstance3D", true, false):
 		eye.material_override = eye_material
@@ -91,6 +109,16 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 	var jerk := _twitch(elapsed - 1.52) * -0.65 + _twitch(elapsed - 6.29)
 	head.rotate_object_local(Vector3.BACK, 0.045 * sin(elapsed * 1.45) + inspect * 0.24 + jerk * (0.16 + reveal * 0.025) + tilt)
 	head.rotate_object_local(Vector3.RIGHT, jerk * 0.061)
+	if jitter > 0.0:
+		# Insect-quick: a sharp little jerk now and then, held, then gone.
+		var clock := Time.get_ticks_msec() / 1000.0
+		var beat := floorf(clock * 2.6)
+		var chance := fposmod(sin(beat * 12.9898) * 43758.5453, 1.0)
+		if chance < jitter * 0.75:
+			var local := (clock * 2.6 - beat) / 2.6
+			var snap := smoothstep(0.0, 0.025, local) * (1.0 - smoothstep(0.09, 0.14, local))
+			var aim := fposmod(sin(beat * 78.233) * 12345.678, 1.0) * TAU
+			head.rotate_object_local(Vector3(cos(aim), sin(aim), 0.0), snap * (0.06 + 0.06 * chance))
 	var neck_end := shoulders + head_offset - head.basis.z * HEAD_PIVOT
 	neck_end = shoulders + (neck_end - shoulders).normalized() * neck_length
 	head.position = neck_end + head.basis.z * HEAD_PIVOT
@@ -149,6 +177,11 @@ func _reach(root: Vector3, target: Vector3, length: float) -> Vector3:
 	var span := target - root
 	var limit := length * 0.985
 	return target if span.length() <= limit else root + span.normalized() * limit
+
+
+func set_eyes(glow: float, dilate: float) -> void:
+	eye_material.set_shader_parameter("glow", glow)
+	eye_material.set_shader_parameter("dilate", dilate)
 
 
 func set_jaw_offset(offset: float) -> void:

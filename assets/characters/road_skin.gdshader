@@ -27,7 +27,13 @@ void fragment() {
 	float cloud = 0.69 * skin_noise(skin_position * 7.5) + 0.31 * skin_noise(skin_position * 21.0);
 	// Keep the mottling faint so the whole body reads as one even, pale skin.
 	float patches = smoothstep(0.2, 0.8, cloud);
-	ALBEDO = mix(vec3(0.40, 0.34, 0.31), vec3(0.50, 0.43, 0.39), patches);
+	vec3 skin = mix(vec3(0.40, 0.34, 0.31), vec3(0.50, 0.43, 0.39), patches);
+	// Thin veins showing through, branching like cracks under the surface.
+	float coarse = 1.0 - abs(skin_noise(skin_position * 11.0) * 2.0 - 1.0);
+	float fine = 1.0 - abs(skin_noise(skin_position * 29.0 + vec3(3.1)) * 2.0 - 1.0);
+	float veins = smoothstep(0.93, 0.985, coarse) * 0.7 + smoothstep(0.95, 0.99, fine) * 0.35;
+	veins *= smoothstep(0.25, 0.6, skin_noise(skin_position * 3.0 + vec3(7.0)));
+	ALBEDO = mix(skin, vec3(0.27, 0.24, 0.32), clamp(veins, 0.0, 0.6));
 	ROUGHNESS = mix(0.8, 0.72, patches);
 	SPECULAR = 0.26;
 
