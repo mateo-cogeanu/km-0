@@ -43,6 +43,15 @@ const STAIR_TIME := 7.7
 const CRAWL_TIME := 7.0
 const LEAN_TIME := 2.25
 const CLOSE_HOLD := 3.1
+const INTRO_QUESTION_CUE := 1.07
+const FINAL_WORDS_CUE := 1.27
+# Level of the final take, sampled every 50 ms, including the breath and pause.
+const FINAL_JAW := [
+	0, 84, 126, 121, 100, 71, 46, 29, 16, 7,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	52, 108, 128, 198, 85, 0, 75, 186, 214, 184, 82, 108,
+	193, 214, 202, 213, 195, 182, 1, 0, 0, 0, 0, 0,
+]
 
 
 func _ready() -> void:
@@ -206,17 +215,26 @@ func _on_entry(body: Node3D) -> void:
 	creature_sound.volume_db = -7.0
 	sequence = create_tween()
 	sequence.tween_interval(0.95)
-	sequence.tween_callback(_speak.bind(HELLO, "Hello? Anybody there?", player.camera.global_position + player.camera.global_basis.z * 0.15))
-	sequence.tween_interval(2.78)
+	sequence.tween_callback(_speak.bind(HELLO, "You: Hello?", player.camera.global_position + player.camera.global_basis.z * 0.15))
+	sequence.tween_interval(INTRO_QUESTION_CUE)
+	sequence.tween_callback(caption.set_text.bind("You: Anybody there?"))
+	sequence.tween_interval(HELLO.get_length() - INTRO_QUESTION_CUE)
+	sequence.tween_callback(caption.set_text.bind(""))
+	sequence.tween_interval(1.25)
 	sequence.tween_callback(_play_creature_sound.bind(DRY_TICKS))
 	sequence.tween_interval(1.92)
 	sequence.tween_callback(_begin_descent)
 
 
 func _begin_descent() -> void:
-	_speak(ANYBODY, "Anybody there?", creature.global_position + Vector3.UP * 1.15)
+	_speak(ANYBODY, "[Your voice, upstairs] Anybody there?", creature.global_position + Vector3.UP * 1.15)
 	sequence = create_tween()
-	sequence.tween_method(_listen_toward_stairs, 0.0, 0.61, 1.5)
+	var reply_duration := ANYBODY.get_length()
+	var listen_duration := maxf(1.5, reply_duration + 0.25)
+	var look_at_reply_end := 0.61 * reply_duration / listen_duration
+	sequence.tween_method(_listen_toward_stairs, 0.0, look_at_reply_end, reply_duration)
+	sequence.tween_callback(caption.set_text.bind(""))
+	sequence.tween_method(_listen_toward_stairs, look_at_reply_end, 0.61, listen_duration - reply_duration)
 	sequence.tween_callback(_play_creature_sound.bind(THROAT_RATTLE))
 	sequence.tween_method(_listen_toward_stairs, 0.61, 1.0, 0.95)
 	sequence.tween_callback(creature.show)
@@ -231,7 +249,12 @@ func _begin_descent() -> void:
 	sequence.tween_callback(_play_creature_sound.bind(RAPID_CLICKS))
 	sequence.tween_method(_hold_face.bind(false), 0.76, CLOSE_HOLD, CLOSE_HOLD - 0.76)
 	sequence.tween_callback(_deliver_line)
-	sequence.tween_method(_hold_face.bind(true), 0.0, 2.15, 2.15)
+	var line_end := TRICKED.get_length() + 0.35
+	sequence.tween_method(_hold_face.bind(true), 0.0, FINAL_WORDS_CUE, FINAL_WORDS_CUE)
+	sequence.tween_callback(caption.set_text.bind("Creature: Tricked you too."))
+	sequence.tween_method(_hold_face.bind(true), FINAL_WORDS_CUE, line_end, line_end - FINAL_WORDS_CUE)
+	sequence.tween_callback(caption.set_text.bind(""))
+	sequence.tween_method(_hold_face.bind(true), line_end, line_end + 0.65, 0.65)
 	sequence.tween_callback(_show_end)
 
 
@@ -404,12 +427,14 @@ func _final_pose(amount: float, elapsed: float) -> void:
 
 func _hold_face(elapsed: float, speaking: bool) -> void:
 	_final_pose(1.0, (1.58 + elapsed * 0.42) if speaking else (0.52 + elapsed / CLOSE_HOLD * 1.06))
-	var opening := maxf(0.0, sin(elapsed * 19.0)) * exp(-elapsed * 0.82)
+	var sample := minf(elapsed * 20.0, FINAL_JAW.size() - 1)
+	var index := floori(sample)
+	var opening := lerpf(FINAL_JAW[index], FINAL_JAW[mini(index + 1, FINAL_JAW.size() - 1)], sample - index) / 255.0
 	creature.set_jaw_offset(-0.003 - 0.007 * opening if speaking else -0.006)
 
 
 func _deliver_line() -> void:
-	_speak(TRICKED, "Tricked you too.", creature.jaw.global_position)
+	_speak(TRICKED, "", creature.jaw.global_position)
 
 
 func _play_creature_sound(stream: AudioStream) -> void:
@@ -432,10 +457,6 @@ func _speak(stream: AudioStream, line: String, at: Vector3) -> void:
 	voice.stream = stream
 	voice.play()
 	caption.text = line
-	var timer := get_tree().create_timer(stream.get_length(), false)
-	timer.timeout.connect(func() -> void:
-		if is_instance_valid(caption) and caption.text == line:
-			caption.text = "")
 
 
 func _build_overlay() -> void:
