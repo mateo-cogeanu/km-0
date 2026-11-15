@@ -20,6 +20,9 @@ var sequence: Tween
 var overlay: CanvasLayer
 var caption: Label
 var looked := false
+var door_open := false
+var door_hinge: Node3D
+var door_target: Area3D
 var previous_step := -1
 var walk_start := Vector3.ZERO
 var last_palms: Array[Vector3] = []
@@ -82,8 +85,7 @@ func _build_house() -> void:
 				Vector3(side * 2.18, 0.28 * (i + 1), 3.785), boards)
 		Shapes.box(self, "PorchPost", Vector3(0.145, 2.50, 0.145), Vector3(side * 1.47, 1.25, 4.99), boards)
 	Shapes.box(self, "PorchRoof", Vector3(3.22, 0.14, 1.56), Vector3(0, 2.51, 4.43), dark)
-	var open_door := Shapes.box(self, "OpenDoor", Vector3(1.44, 2.43, 0.08), Vector3(-0.956, 1.22, 3.12), boards)
-	open_door.rotation.y = -1.30
+	_build_front_door()
 	var stair_mat := Shapes.material(Color("#665346"))
 	for i in range(13):
 		var height := 0.207 * (i + 1)
@@ -99,6 +101,59 @@ func _build_house() -> void:
 			Shapes.box(self, "TableLeg", Vector3(0.068, 0.74, 0.066), Vector3(x, 0.371, z), floorboards)
 	_lamp(Vector3(-1.7, 2.29, 1.31), 0.72, 4.9)
 	_lamp(Vector3(2.45, 2.82, -1.94), 0.46, 4.7)
+
+
+func _build_front_door() -> void:
+	door_hinge = Node3D.new()
+	door_hinge.name = "FrontDoorHinge"
+	door_hinge.position = Vector3(-0.737, 0, 3.65)
+	add_child(door_hinge)
+	Shapes.box(door_hinge, "FrontDoor", Vector3(1.47, 2.49, 0.105), Vector3(0.737, 1.25, 0), boards, true)
+	for height in [0.58, 1.79]:
+		Shapes.box(door_hinge, "RecessedPanel", Vector3(1.13, 0.83, 0.022), Vector3(0.737, height, 0.054), floorboards)
+	var brass := Shapes.material(Color("#867050"), 0.57)
+	Shapes.cylinder(door_hinge, "Knob", Vector3(1.31, 1.03, 0.084), Vector3.BACK, 0.045, 0.065, brass)
+
+	door_target = Area3D.new()
+	door_target.name = "FrontDoorTarget"
+	door_target.collision_layer = 8
+	door_target.collision_mask = 0
+	door_target.position = Vector3(0.0, 1.25, 3.728)
+	door_target.add_to_group("house_front_door")
+	add_child(door_target)
+	var hitbox := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(1.46, 2.48, 0.12)
+	hitbox.shape = box
+	door_target.add_child(hitbox)
+
+
+func request_open_door() -> void:
+	if not NetworkManager.is_online():
+		_open_door()
+	elif multiplayer.is_server():
+		_open_door.rpc()
+	else:
+		_request_open_door.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_open_door() -> void:
+	if not multiplayer.is_server() or door_open:
+		return
+	var sender := get_tree().current_scene.get_node_or_null(str(multiplayer.get_remote_sender_id())) as Node3D
+	if sender and sender.global_position.distance_to(door_target.global_position) < 4.0:
+		_open_door.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func _open_door() -> void:
+	if door_open:
+		return
+	door_open = true
+	door_target.collision_layer = 0
+	var swing := create_tween().set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
+	swing.tween_property(door_hinge, "rotation:y", deg_to_rad(103.0), 1.05).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 
 func _wall(at: Vector3, size: Vector3) -> void:
@@ -117,7 +172,7 @@ func _lamp(at: Vector3, energy: float, reach: float) -> void:
 
 
 func _on_entry(body: Node3D) -> void:
-	if looked or not body.is_in_group("local_player") or body.active_vehicle:
+	if not door_open or looked or not body.is_in_group("local_player") or body.active_vehicle:
 		return
 	looked = true
 	player = body

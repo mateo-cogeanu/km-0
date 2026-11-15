@@ -690,6 +690,9 @@ func _handle_interaction() -> void:
 
 	var radio_hit := _crosshair_hit(grab_distance)
 	var radio := radio_hit.get("collider") as Area3D
+	if radio and radio.is_in_group("house_front_door"):
+		radio.get_parent().request_open_door()
+		return
 	if radio and radio.is_in_group("road_radio"):
 		if is_instance_valid(listening_radio) and listening_radio != radio:
 			listening_radio.stop_listening()
@@ -1197,7 +1200,9 @@ func _interaction_text() -> String:
 	if target == null:
 		return ""
 	if target.is_in_group("road_radio") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
-		return "E  Turn off radio" if target == listening_radio else ("E  Key the relay radio" if target.relay else "E  Tune the workshop radio")
+		return "E  Turn off radio" if target == listening_radio else "E  Tune radio"
+	if target.is_in_group("house_front_door") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
+		return "E  Open front door"
 	if target.is_in_group("shack_interactable"):
 		return "Hold left mouse and drag  Move %s" % ("shutter" if target.name == "GarageDoorTarget" else "door")
 	if target is Area3D and car:

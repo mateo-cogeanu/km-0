@@ -1,24 +1,44 @@
 extends Area3D
 
 const Shapes := preload("res://scripts/prop_shapes.gd")
-const WORKSHOP := preload("res://assets/audio/radio/workshop.wav")
-const RELAY := preload("res://assets/audio/radio/relay.wav")
+enum Broadcast { WORKSHOP, FIRST_GARAGE, WAYSIDE, TOWER, LAST_STOP }
+
+const RECORDINGS := [
+	preload("res://assets/audio/radio/workshop.wav"),
+	preload("res://assets/audio/radio/relay.wav"),
+	preload("res://assets/audio/radio/wayside.wav"),
+	preload("res://assets/audio/radio/tower.wav"),
+	preload("res://assets/audio/radio/last_stop.wav"),
+]
 const LINES := [
 	[
-		[0.42, "East service road. Is the workshop receiving?"],
-		[3.24, "If you can hear me, the old relay is still on."],
-		[6.71, "Should be a little way down the road. Try calling from there."],
-		[9.73, "I’ll keep this channel open."],
+		[0.55, "Attention, anyone on the east service road."],
+		[4.381, "This is a repeating message on the county channel."],
+		[7.904, "If your set is breaking up, there’s a receiver in the first garage past the workshop."],
 	],
 	[
-		[0.58, "Workshop, I can hear you now. I’m at the pump house."],
-		[4.23, "Keep to the service road."],
-		[5.92, "When the pavement ends, it’s the house on the right."],
-		[8.87, "I’ll leave the door open."],
+		[0.55, "County channel to all stations. The service road is still passable."],
+		[5.73, "There are more receivers along the road."],
+		[8.571, "Look for the relay tower beyond the repair sheds. The red lamp is still working."],
+	],
+	[
+		[0.55, "All stations, this is the county channel."],
+		[4.126, "If you’re heading east, stay on the paved road."],
+		[7.759, "The relay tower is past the next stretch of open country. There’s a receiver in the building beside it."],
+	],
+	[
+		[0.55, "County relay to anyone receiving. Keep following the service road."],
+		[5.742, "There’s a receiver farther down, before the pavement ends."],
+		[10.243, "Leave this frequency open for anyone still coming through."],
+	],
+	[
+		[0.55, "Attention, all travelers on the east service road."],
+		[4.578, "When the pavement ends, look for the house on the right."],
+		[8.699, "The front door is shut to keep the wind out. Come on in."],
 	],
 ]
 
-var relay := false
+var broadcast := Broadcast.WORKSHOP
 var voice: AudioStreamPlayer3D
 var carrier: AudioStreamPlayer3D
 var dial: StandardMaterial3D
@@ -47,7 +67,7 @@ func _ready() -> void:
 	Shapes.cylinder(self, "TuningKnob", Vector3(0.102, 0.007, 0.139), Vector3.BACK, 0.032, 0.026, casing)
 	Shapes.cylinder(self, "PowerKnob", Vector3(0.152, -0.029, 0.136), Vector3.BACK, 0.016, 0.025, metal, 12)
 	Shapes.tube(self, "Antenna", Vector3(0.142, 0.067, -0.087), Vector3(0.161, 0.459, -0.205), 0.006, metal)
-	if relay:
+	if broadcast == Broadcast.TOWER:
 		Shapes.box(self, "AntennaCoupler", Vector3(0.13, 0.065, 0.12), Vector3(-0.257, -0.035, 0), casing)
 		Shapes.tube(self, "Coax", Vector3(-0.26, -0.026, -0.06), Vector3(-0.26, 0.56, -0.091), 0.006, face)
 	var hitbox := CollisionShape3D.new()
@@ -55,8 +75,8 @@ func _ready() -> void:
 	box.size = Vector3(0.41, 0.185, 0.265)
 	hitbox.shape = box
 	add_child(hitbox)
-	voice = _make_player(RELAY if relay else WORKSHOP, -4.0)
-	carrier = _make_player(_carrier_sound(), -19.0 if relay else -15.0)
+	voice = _make_player(RECORDINGS[broadcast], -4.0)
+	carrier = _make_player(_carrier_sound(), -18.0 - broadcast * 0.9)
 	voice.finished.connect(stop_listening)
 	set_process(false)
 
@@ -76,8 +96,8 @@ func _process(_delta: float) -> void:
 		stop_listening()
 		return
 	var playback := voice.get_playback_position()
-	var captions: Array = LINES[int(relay)]
-	var line := ""
+	var captions: Array = LINES[broadcast]
+	var line := "Carrier signal…"
 	for entry: Array in captions:
 		if playback >= entry[0]:
 			line = entry[1]

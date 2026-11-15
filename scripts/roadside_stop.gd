@@ -63,15 +63,7 @@ func _ready() -> void:
 		if block in [-1, -2, -3]:
 			vehicle_kind = -block - 1
 	garage.add_traces(stop_index, vehicle_kind)
-	if stop_index == -5:
-		var radio := RoadRadio.new()
-		radio.name = "RelayRadio"
-		radio.relay = true
-		radio.position = Vector3(-2.55, 1.08, -0.18)
-		radio.rotation.y = PI / 2.0
-		add_child(radio)
-		var cabinet := Shapes.material(Color("#676559"), 0.2)
-		Shapes.box(self, "RelayCabinet", Vector3(0.57, 0.99, 0.58), Vector3(-2.57, 0.495, -0.18), cabinet, true)
+	_add_broadcast_stop()
 
 	# Dynamic finds live outside the streamed scenery so carried and parked items survive.
 	var world := get_tree().current_scene
@@ -122,6 +114,68 @@ func _ready() -> void:
 		if vehicle_kind == 2:
 			var spare_engine := _spawn_part(finds, "SpareBikeEngine", BIKE_ENGINE, Vector3(1.55, 1.17, -2.32), Vector3.ONE, "engine")
 			spare_engine.set_meta("engine_variant", "Bike")
+
+
+func _add_broadcast_stop() -> void:
+	var block := floori(stop_index / 12.0)
+	var broadcast := RoadRadio.Broadcast.WORKSHOP
+	if stop_index == -5:
+		broadcast = RoadRadio.Broadcast.FIRST_GARAGE
+	elif block == -2:
+		broadcast = RoadRadio.Broadcast.WAYSIDE
+	elif block == -3:
+		broadcast = RoadRadio.Broadcast.TOWER
+	elif block == -5:
+		broadcast = RoadRadio.Broadcast.LAST_STOP
+	if broadcast == RoadRadio.Broadcast.WORKSHOP:
+		return
+
+	var radio := RoadRadio.new()
+	radio.name = "RelayRadio"
+	radio.broadcast = broadcast
+	radio.position = Vector3(-2.55, 1.08, -0.18)
+	radio.rotation.y = PI / 2.0
+	add_child(radio)
+	var cabinet := Shapes.material(Color("#676559"), 0.2)
+	Shapes.box(self, "RelayCabinet", Vector3(0.57, 0.99, 0.58), Vector3(-2.57, 0.495, -0.18), cabinet, true)
+	if broadcast == RoadRadio.Broadcast.TOWER:
+		_build_relay_tower()
+
+
+func _build_relay_tower() -> void:
+	var tower := Node3D.new()
+	tower.name = "RelayTower"
+	tower.position = Vector3(-5.7, 0, -1.95)
+	add_child(tower)
+	var steel := Shapes.material(Color("#777770"), 0.48)
+	var faded_red := Shapes.material(Color("#804638"), 0.21)
+	var concrete := Shapes.material(Color("#8a8271"))
+	Shapes.box(tower, "Foundation", Vector3(3.3, 0.21, 3.3), Vector3(0, 0.07, 0), concrete, true)
+	var corners := [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]
+	for level in range(9):
+		var base_y := 0.18 + level * 2.6
+		var base_width := lerpf(1.44, 0.28, level / 9.0)
+		var top_width := lerpf(1.44, 0.28, (level + 1) / 9.0)
+		var finish := faded_red if level % 4 >= 2 else steel
+		for i in corners.size():
+			var corner: Vector2 = corners[i]
+			var neighbour: Vector2 = corners[(i + 1) % corners.size()]
+			var foot := Vector3(corner.x * base_width, base_y, corner.y * base_width)
+			var top := Vector3(corner.x * top_width, base_y + 2.6, corner.y * top_width)
+			Shapes.tube(tower, "Upright", foot, top, 0.075, finish)
+			Shapes.tube(tower, "CrossBrace", foot, Vector3(neighbour.x * top_width, top.y, neighbour.y * top_width), 0.035, finish)
+			Shapes.tube(tower, "HorizontalBrace", foot, Vector3(neighbour.x * base_width, base_y, neighbour.y * base_width), 0.042, steel)
+	Shapes.tube(tower, "AntennaMast", Vector3(0, 23.45, 0), Vector3(0, 28.4, 0), 0.074, steel)
+	for y in [24.4, 25.45, 26.5]:
+		Shapes.tube(tower, "AntennaElement", Vector3(-1.45, y, 0), Vector3(1.45, y, 0), 0.032, steel)
+	var red_lens := Shapes.material(Color("#bd3a21"))
+	red_lens.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	red_lens.emission_enabled = true
+	red_lens.emission = Color("#ff3220")
+	var beacon := Shapes.cylinder(tower, "Beacon", Vector3(0, 28.5, 0), Vector3.UP, 0.18, 0.24, red_lens)
+	var flash := tower.create_tween().set_loops()
+	flash.tween_property(beacon, "visible", false, 0.4)
+	flash.tween_property(beacon, "visible", true, 1.8)
 
 
 func _configure_sedan_loadout(vehicle: RigidBody3D) -> void:

@@ -5,7 +5,7 @@ const Stop := preload("res://scripts/roadside_stop.gd")
 const Terrain := preload("res://scripts/roadside_terrain.gd")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const ROAD_END := 9.0
-const HOUSE_APPROACH := -1000.0
+const HOUSE_APPROACH := -5200.0
 const STOP_BLOCK := 12
 const GROUND_TILE_SIZE := 160.0
 const GROUND_DEPTH := 8.0
@@ -170,6 +170,8 @@ func _create_segment(index: int) -> Node3D:
 	_add_strip(segment, "GravelLeft", start, end, -half - shoulder_width, -half, -0.009, gravel, "Dirt")
 	_add_strip(segment, "GravelRight", start, end, half, half + shoulder_width, -0.009, gravel, "Dirt")
 	var marking_end := end - 3.0 if end == ROAD_END else end
+	if start == HOUSE_APPROACH:
+		_add_strip(segment, "CrumbledFarEnd", start - 0.46, start + 0.10, -half, half, -0.012, gravel)
 	for side in [-1.0, 1.0]:
 		var edge: float = side * (half - 0.16)
 		_add_strip(segment, "EdgeLine", start, marking_end, edge - 0.045, edge + 0.045, 0.002, white)
