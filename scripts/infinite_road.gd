@@ -4,6 +4,8 @@ const Shapes := preload("res://scripts/prop_shapes.gd")
 const Stop := preload("res://scripts/roadside_stop.gd")
 const Terrain := preload("res://scripts/roadside_terrain.gd")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
+const Dread := preload("res://scripts/road_dread.gd")
+const StrangerHouse := preload("res://scripts/stranger_house.gd")
 const ROAD_END := 9.0
 const HOUSE_APPROACH := -5200.0
 const STOP_BLOCK := 12
@@ -41,6 +43,16 @@ func _ready() -> void:
 	# Local boxes keep collision broad-phase bounds close to the bodies using them.
 	ground_shape.size = Vector3(GROUND_TILE_SIZE + GROUND_OVERLAP, GROUND_DEPTH, GROUND_TILE_SIZE + GROUND_OVERLAP)
 	desert_ground = Shapes.box(self, "DesertHorizon", Vector3(2000.0, 0.06, 2000.0), Vector3(0, -0.105, 0), sand)
+	var dread := Dread.new()
+	dread.name = "RoadDread"
+	dread.road = self
+	add_child(dread)
+	# Back the other way, past where the road begins, someone else is holed up.
+	var cabin := StrangerHouse.new()
+	cabin.name = "StrangerHouse"
+	add_child(cabin)
+	cabin.position = StrangerHouse.LOCATION
+	cabin.rotation.y = StrangerHouse.TURN
 	_update_segments()
 
 

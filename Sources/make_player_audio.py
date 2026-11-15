@@ -67,3 +67,58 @@ count = int(0.06 * RATE)
 click = band(noise(count, 250), 1800, 8000)
 body = band(noise(count, 251), 300, 1500)
 write("flashlight_click", [click[i] * exp(-i / (0.0012 * RATE)) + 0.4 * body[i] * exp(-i / (0.006 * RATE)) for i in range(count)], 0.45)
+
+
+def resonator(samples, freq, q):
+    from math import cos as _cos
+    w = 2 * pi * freq / RATE
+    alpha = sin(w) / (2 * q)
+    b0, b2 = alpha, -alpha
+    a0, a1, a2 = 1 + alpha, -2 * _cos(w), 1 - alpha
+    x1 = x2 = y1 = y2 = 0.0
+    out = []
+    for x in samples:
+        y = (b0 * x + b2 * x2 - a1 * y1 - a2 * y2) / a0
+        x2, x1, y2, y1 = x1, x, y1, y
+        out.append(y)
+    return out
+
+
+# Water pouring from a bottle onto your face: a bubbly glug and a splashy hiss.
+count = int(1.5 * RATE)
+rng = Random(260)
+splash = band(noise(count, 261), 900, 6500)
+glug = [0.0] * count
+t = 0.0
+while t < 1.4:
+    k = int(t * RATE)
+    freq = rng.uniform(380, 720)
+    n = int(0.04 * RATE)
+    for i in range(n):
+        if k + i < count:
+            glug[k + i] += sin(2 * pi * freq * (1 + i / n * 0.6) * i / RATE) * exp(-i / (0.012 * RATE)) * 0.6
+    t += rng.uniform(0.06, 0.13)
+pour = []
+for i in range(count):
+    u = i / RATE
+    edge = min(1.0, u / 0.08, (1.5 - u) / 0.15)
+    pour.append(edge * (0.55 * splash[i] * (0.7 + 0.3 * sin(u * 23)) + glug[i]))
+write("pour", pour, 0.5)
+
+# A drawer sliding and a lid opening.
+count = int(0.45 * RATE)
+slide = band(noise(count, 270), 300, 2500)
+write("drawer", [slide[i] * min(1.0, i / (0.03 * RATE)) * exp(-i / (0.25 * RATE)) * (0.8 + 0.2 * sin(i / RATE * 90)) for i in range(count)], 0.45)
+count = int(0.35 * RATE)
+thunk = band(noise(count, 271), 120, 900)
+latch = band(noise(count, 272), 2000, 7000)
+write("lid", [thunk[i] * exp(-i / (0.04 * RATE)) + 0.5 * latch[i] * exp(-i / (0.003 * RATE)) for i in range(count)], 0.5)
+
+# Batteries clicking into the flashlight.
+count = int(0.25 * RATE)
+clicks = [0.0] * count
+for k, at in enumerate((0.0, 0.07, 0.16)):
+    snap = band(noise(int(0.01 * RATE), 280 + k), 2200, 8000)
+    for i, s in enumerate(snap):
+        clicks[int(at * RATE) + i] += s * exp(-i / (0.0015 * RATE))
+write("batteries", clicks, 0.4)

@@ -69,6 +69,63 @@ func _ready() -> void:
 	print("speed: ", Vector2(player.velocity.x, player.velocity.z).length())
 	key.pressed = false
 	Input.parse_input_event(key)
+	player.set_flashlight(false)
+	cycle.time_of_day = 0.45
+	# The workshop cooler.
+	var cooler: Node3D = null
+	for box in get_tree().get_nodes_in_group("loot_box"):
+		if box.get_parent().name == "Shack":
+			cooler = box
+	print("cooler: ", cooler)
+	var front := cooler.global_transform * Vector3(0, 0, 1.0)
+	player.global_position = Vector3(front.x, cooler.global_position.y + 1.05, front.z)
+	await _frames(5)
+	player.look_at(Vector3(cooler.global_position.x, player.global_position.y, cooler.global_position.z), Vector3.UP)
+	player.rotation.x = 0.0
+	player.rotation.z = 0.0
+	_look(-0.9)
+	cooler.open()
+	await _frames(40)
+	_shot("08_cooler")
+	var bottle: RigidBody3D = null
+	for item in cooler.items:
+		if item.is_in_group("water"):
+			bottle = item
+	player._begin_grab_object(bottle, bottle.global_position)
+	await _frames(20)
+	player.vitals.thirst = 30.0
+	player._start_drinking()
+	await _frames(45)
+	_shot("09_drinking")
+	await _frames(60)
+	print("thirst after drinking: ", player.vitals.thirst, " bottle: ", bottle.amount)
+	player._drop_held_object()
+	player.vitals.fatigue = 80.0
+	player._try_sleep("in the cot")
+	await _frames(300)
+	print("after sleep: fatigue ", player.vitals.fatigue, " time ", cycle.time_of_day)
+	# The stranger, back past the start of the road.
+	var cabin: Node3D = get_tree().current_scene.get_node("InfiniteRoad/StrangerHouse")
+	player.global_position = cabin.to_global(Vector3(0.1, 1.06, 0.9))
+	await _frames(20)
+	player.look_at(cabin.to_global(Vector3(0.55, 1.06, -0.7)) * Vector3(1, 0, 1) + Vector3(0, player.global_position.y, 0), Vector3.UP)
+	player.rotation.x = 0.0
+	player.rotation.z = 0.0
+	_look(-0.05)
+	await _frames(30)
+	cabin.talk(player)
+	await _frames(60)
+	_shot("10_stranger")
+	var guard := 0
+	while not cabin.choosing and guard < 40:
+		cabin._next_line()
+		guard += 1
+		await _frames(4)
+	await _frames(10)
+	_shot("11_choice")
+	cabin._chose(true)
+	await _frames(20)
+	print("has flare: ", player.has_item("flare") != null)
 	await _frames(10)
 	get_tree().quit()
 

@@ -299,3 +299,63 @@ while t < 2.6 - 0.32:
         t += length + rng.uniform(0.02, 0.06)
     t += rng.uniform(0.03, 0.12)
 write("breath_close", breath, 0.6)
+
+
+# The front door rattling against its lock.
+count = int(0.9 * RATE)
+rattle = [0.0] * count
+rng = Random(301)
+for k in range(9):
+    at = int((k * 0.085 + rng.uniform(0, 0.02)) * RATE)
+    knock = band(noise(int(0.05 * RATE), 302 + k), 150, 1800)
+    metal = band(noise(int(0.02 * RATE), 320 + k), 2500, 8000)
+    for i in range(len(knock)):
+        if at + i < count:
+            rattle[at + i] += knock[i] * exp(-i / (0.012 * RATE)) * (1.0 if k % 2 == 0 else 0.7)
+    for i in range(len(metal)):
+        if at + i < count:
+            rattle[at + i] += 0.5 * metal[i] * exp(-i / (0.002 * RATE))
+write("door_rattle", rattle, 0.75)
+
+# A road flare: the scratch of the striker, a pop, then a steady fizzing hiss.
+count = int(0.6 * RATE)
+scratch = band(noise(count, 330), 1500, 7000)
+strike = [scratch[i] * (0.4 + 0.6 * abs(sin(i / RATE * 60))) * exp(-i / (0.25 * RATE)) for i in range(count)]
+pop = band(noise(int(0.08 * RATE), 331), 100, 3000)
+add(strike, int(0.18 * RATE), [s * exp(-i / (0.02 * RATE)) for i, s in enumerate(pop)], 1.2)
+write("flare_strike", strike, 0.75)
+count = 3 * RATE
+fizz = band(noise(count, 332), 1200, 9000)
+crackle = band(noise(count, 333), 400, 2500)
+rng = Random(334)
+hiss = []
+for i in range(count):
+    pops = 1.0 + (2.5 if rng.random() < 0.002 else 0.0)
+    hiss.append(0.6 * fizz[i] * (0.85 + 0.15 * sin(i / RATE * 11)) + 0.25 * crackle[i] * pops)
+write("flare_hiss", hiss, 0.5)
+
+# A shriek with no impact: the throat alone, recoiling.
+count = int(1.3 * RATE)
+shriek = [0.0] * count
+length = count
+wobble = drift(length, 340, 18)
+for ratio, level, seed in [(1.0, 1.0, 341), (1.06, 0.7, 342), (0.7071, 0.5, 343)]:
+    hiss_n = noise(length, seed)
+    source = []
+    phase = 0.0
+    smooth = 0.0
+    for i in range(length):
+        t = i / RATE
+        f0 = ratio * (900 - 350 * min(1.0, t / 1.1)) * (1 + 0.04 * sin(2 * pi * 9 * t) + 0.03 * wobble[i])
+        phase = (phase + f0 / RATE) % 1.0
+        smooth += 0.5 * ((2 * phase - 1) - smooth)
+        source.append(smooth + 0.6 * hiss_n[i] * (0.4 + 0.6 * (phase < 0.3)))
+    throat = [0.0] * length
+    for freq, q, gain in [(950, 6, 1.0), (1500, 7, 0.7), (3000, 9, 0.45)]:
+        for i, y in enumerate(resonator(source, freq, q)):
+            throat[i] += gain * y
+    for i in range(length):
+        t = i / RATE
+        env = min(1.0, t / 0.02) * (1.0 if t < 0.9 else max(0.0, 1 - (t - 0.9) / 0.35))
+        shriek[i] += tanh(2.6 * throat[i]) * env * level * 0.6
+write("shriek", shriek, 0.85)

@@ -167,7 +167,7 @@ func _build_tutorial() -> void:
 	_add_tutorial_step(items, "3. Fuel up and head out",
 		"Take the fuel can from the shack and open the car’s fuel cap. Aim at the filler to refuel. Open the shutter, get in, and follow the road. Check abandoned buildings for supplies along the way.")
 	_add_tutorial_step(items, "4. Look after yourself",
-		"Eat what you find to keep your hunger up: hold food and press R. Sprinting uses stamina. Q puts away what you’re holding, or opens your pack when your hands are empty. F switches your flashlight on and off.")
+		"Eat and drink what you find: hold it and press R. Search coolers and toolboxes for supplies. Sleep on the cot, or press Z in a parked car, when you get tired. Q puts away what you’re holding, or opens your pack when your hands are empty. F switches your flashlight on and off; batteries run down.")
 	var actions := HBoxContainer.new()
 	items.add_child(actions)
 	var start := Style.button("Start repairs", 17)

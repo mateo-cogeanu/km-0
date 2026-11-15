@@ -9,6 +9,7 @@ const BIKE := preload("res://scenes/two_wheeler.tscn")
 const BATTERY := preload("res://assets/vehicles/parts/batterypack.glb")
 const BIKE_ENGINE := preload("res://assets/vehicles/parts/bike_engine.tscn")
 const Salvage := preload("res://scripts/roadside_salvage.gd")
+const SupplyItem := preload("res://scripts/supply_item.gd")
 
 # The engine also identifies the original part when Continue replays swaps.
 # Keep existing profiles and their selection stable for saved stops.
@@ -90,13 +91,38 @@ func _ready() -> void:
 	pantry.seed = hash("km0:food:%d" % stop_index)
 	var spots := [Vector3(2.2, 0.05, -1.3), Vector3(1.85, 0.05, -0.7), Vector3(2.6, 0.05, -0.25), Vector3(-2.3, 0.05, -1.55), Vector3(-1.9, 0.05, -2.0)]
 	var kinds := FoodItem.KINDS.keys()
-	for i in pantry.randi_range(1, 3):
-		var food := FoodItem.new()
-		food.kind = kinds[pantry.randi_range(0, kinds.size() - 1)]
-		food.name = "Food_%d" % i
-		food.position = spots.pop_at(pantry.randi_range(0, spots.size() - 1))
-		food.rotation.y = pantry.randf_range(0.0, TAU)
-		finds.add_child(food)
+	kinds.append_array(["water", "water"])
+	# Now and then, someone got here first: everything eaten, the empties
+	# thrown about.
+	var raided := absi(stop_index) > 6 and pantry.randf() < 0.2
+	if raided:
+		_add_empties(finds, pantry)
+	else:
+		for i in pantry.randi_range(1, 3):
+			var kind: String = kinds[pantry.randi_range(0, kinds.size() - 1)]
+			var food: Variant = SupplyItem.new() if kind == "water" else FoodItem.new()
+			food.kind = kind
+			food.name = "Food_%d" % i
+			food.position = spots.pop_at(pantry.randi_range(0, spots.size() - 1))
+			food.rotation.y = pantry.randf_range(0.0, TAU)
+			finds.add_child(food)
+	# Something to search.
+	if pantry.randf() < 0.6:
+		var cooler := LootBox.new()
+		cooler.name = "Cooler"
+		cooler.style = "cooler" if pantry.randf() < 0.6 else "cabinet"
+		cooler.seed_text = "stop%d:cooler" % stop_index
+		if raided:
+			cooler.contents = PackedStringArray(["batteries"])
+		cooler.position = Vector3(-2.35, 0, -2.25)
+		finds.add_child(cooler)
+	if pantry.randf() < 0.45:
+		var toolbox := LootBox.new()
+		toolbox.name = "Toolbox"
+		toolbox.style = "toolbox"
+		toolbox.seed_text = "stop%d:toolbox" % stop_index
+		toolbox.position = Vector3(1.05, 0.97, -2.38)
+		finds.add_child(toolbox)
 
 	if vehicle_kind == 2 or rng.randf() < 0.73:
 		_spawn_part(finds, "SpareBattery", BATTERY, Vector3(2.76, 0.56, 0.35), Vector3(0.13, 0.073, 0.094), "aux_battery")
@@ -129,6 +155,28 @@ func _ready() -> void:
 		if vehicle_kind == 2:
 			var spare_engine := _spawn_part(finds, "SpareBikeEngine", BIKE_ENGINE, Vector3(1.55, 1.17, -2.32), Vector3.ONE, "engine")
 			spare_engine.set_meta("engine_variant", "Bike")
+
+
+func _add_empties(parent: Node3D, rng: RandomNumberGenerator) -> void:
+	## Opened, emptied cans and torn wrappers, scattered.
+	var tin := Shapes.material(Color("#8f8d88"), 0.75, 0.35)
+	var inside := Shapes.material(Color("#2a2522"))
+	var wrapper := Shapes.material(Color("#5a2a1e"))
+	for i in rng.randi_range(5, 8):
+		var at := Vector3(rng.randf_range(-2.6, 2.4), 0.04, rng.randf_range(-2.4, 0.8))
+		if i % 3 == 2:
+			var paper := Shapes.box(parent, "TornWrapper", Vector3(0.12, 0.004, 0.05), at - Vector3(0, 0.035, 0), wrapper)
+			paper.rotation = Vector3(rng.randf_range(-0.2, 0.2), rng.randf_range(0, TAU), rng.randf_range(-0.2, 0.2))
+			continue
+		var can := Node3D.new()
+		can.name = "EmptyCan"
+		parent.add_child(can)
+		can.position = at
+		can.rotation = Vector3(PI * 0.5, rng.randf_range(0, TAU), 0) if rng.randf() < 0.7 else Vector3(0, rng.randf_range(0, TAU), 0)
+		Shapes.cylinder(can, "Tin", Vector3.ZERO, Vector3.UP, 0.042, 0.11, tin, 12)
+		Shapes.cylinder(can, "Open", Vector3(0, 0.054, 0), Vector3.UP, 0.036, 0.004, inside, 12)
+		if not can.rotation.x:
+			can.position.y = 0.055
 
 
 func _add_broadcast_stop() -> void:

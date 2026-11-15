@@ -12,6 +12,9 @@ const STEPS := [
 ]
 const LAND := preload("res://assets/audio/player/land.wav")
 const TORCH_CLICK := preload("res://assets/audio/player/flashlight_click.wav")
+const POUR := preload("res://assets/audio/player/pour.wav")
+const LOAD_BATTERIES := preload("res://assets/audio/player/batteries.wav")
+const DRINK_TIME := 1.5
 ## Falling faster than this hurts when you land.
 const SAFE_FALL_SPEED := 9.5
 
@@ -105,6 +108,10 @@ var stow_time := 0.0
 var tip_override := ""
 var tip_time := 0.0
 var remote_velocity := Vector3.ZERO
+var drinking: RigidBody3D
+var drink_time := 0.0
+var pour_particles: GPUParticles3D
+var talking_to: Node
 var remote_last := Vector3.ZERO
 
 @onready var head: Node3D = $Head
@@ -189,6 +196,17 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_animate_body(delta)
+	if is_multiplayer_authority() and vitals:
+		_update_drinking(delta)
+		if flashlight_on:
+			if not vitals.flashlight_running(delta):
+				set_flashlight(false, true)
+				_show_tip("The flashlight is dead")
+			elif vitals.battery < 15.0:
+				# Nearly flat: dim, with the odd stutter.
+				flashlight.light_energy = 2.4 * (0.35 + vitals.battery / 15.0 * 0.5) * (0.2 if randf() < 0.03 else 1.0)
+			else:
+				flashlight.light_energy = 2.4
 	if not NetworkManager.is_online() or not is_multiplayer_authority():
 		return
 	var view := get_viewport().get_camera_3d()
@@ -246,6 +264,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if ending_locked and ending_look and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		_turn_head(event.relative)
 		return
+	if ending_locked and ending_look and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
+		get_tree().call_group("road_end_house", "try_door", self)
+		return
 	if inventory_open() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
 		close_inventory()
 		get_viewport().set_input_as_handled()
@@ -261,6 +282,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				active_vehicle.request_leave()
 			else:
 				_exit_vehicle()
+			get_viewport().set_input_as_handled()
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Z:
+			_try_sleep("in the car")
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
@@ -287,6 +311,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
 		if held_object and held_object.is_in_group("food"):
 			_eat_held_object()
+			return
+		if held_object and held_object.is_in_group("water"):
+			_start_drinking()
+			return
+		if held_object and held_object.is_in_group("battery_pack"):
+			_load_batteries(held_object)
 			return
 		if _try_wire_pointed_battery():
 			return
@@ -517,8 +547,16 @@ func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
 	# Held close, so it must not shove you around.
 	add_collision_exception_with(held_object)
 	# Small things come close, into your hand; big ones stay further out.
+	# Hold it so its near side sits a hand's reach away: small things low and to
+	# the right in your hand, big ones lower and further out so you can still
+	# see past them.
 	var span: float = Inventory._longest_side(object)
-	hold_point.position = Vector3(0.14, -0.2, -0.45) if span < 0.45 else Vector3(0.06, -0.08, -(0.7 + span * 0.65))
+	if span < 0.35:
+		hold_point.position = Vector3(0.15, -0.21, -0.42)
+	elif span < 0.8:
+		hold_point.position = Vector3(0.1, -0.24, -(0.45 + span * 0.55))
+	else:
+		hold_point.position = Vector3(0.0, -0.32 - span * 0.12, -(0.55 + span * 0.5))
 	hold_point.position.z = maxf(hold_point.position.z, -2.0)
 	held_original_gravity_scale = held_object.gravity_scale
 	held_original_linear_damp = held_object.linear_damp
@@ -837,6 +875,15 @@ func _handle_interaction() -> void:
 	var radio := radio_hit.get("collider") as Area3D
 	if radio and radio.is_in_group("house_front_door"):
 		radio.get_parent().request_open_door()
+		return
+	if radio and radio.is_in_group("bed"):
+		_try_sleep("in the cot")
+		return
+	if radio and radio.is_in_group("loot_container"):
+		radio.get_parent().open()
+		return
+	if radio and radio.is_in_group("stranger"):
+		radio.get_parent().talk(self)
 		return
 	if radio and radio.is_in_group("road_radio"):
 		if is_instance_valid(listening_radio) and listening_radio != radio:
@@ -1241,7 +1288,7 @@ func _raycast_exclusions() -> Array:
 func gameplay_ui_open() -> bool:
 	var world := get_tree().current_scene
 	var pause_menu := world.get_node_or_null("PauseMenu") if world else null
-	return (pause_menu != null and pause_menu.gameplay_ui_open()) or inventory_open()
+	return (pause_menu != null and pause_menu.gameplay_ui_open()) or inventory_open() or is_instance_valid(talking_to)
 
 
 func _create_interaction_tip() -> void:
@@ -1320,7 +1367,8 @@ func _interaction_text() -> String:
 	if is_instance_valid(active_vehicle):
 		if NetworkManager.is_online() and shared_seat > 0:
 			return "Mouse  Look around   ·   E  Exit"
-		return "C  Change camera   ·   L  Headlights   ·   E  Exit"
+		var rest := "   ·   Z  Sleep" if vitals and vitals.can_sleep() else ""
+		return "C  Change camera   ·   L  Headlights   ·   E  Exit" + rest
 	var hit := _crosshair_hit(vehicle_interact_distance)
 	var target := hit.get("collider") as Node3D
 	var car := _vehicle_from_target(target)
@@ -1345,7 +1393,13 @@ func _interaction_text() -> String:
 			return "Hold left mouse  Paint   ·   R  Change color   ·   E  Drop"
 		if _find_touching_vehicle(held_object):
 			return "E  Weld %s to vehicle" % _object_title(held_object)
-		var extra := "   ·   R  Eat" if held_object.is_in_group("food") else ""
+		var extra := ""
+		if held_object.is_in_group("food"):
+			extra = "   ·   R  Eat"
+		elif held_object.is_in_group("water") and held_object.amount > 0.05:
+			extra = "   ·   R  Drink"
+		elif held_object.is_in_group("battery_pack"):
+			extra = "   ·   R  Load into flashlight"
 		return "E  Drop %s%s   ·   Q  Put away" % [_object_title(held_object), extra]
 	if target == null:
 		return ""
@@ -1353,6 +1407,13 @@ func _interaction_text() -> String:
 		return "E  Turn off radio" if target == listening_radio else "E  Tune radio"
 	if target.is_in_group("house_front_door") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
 		return "E  Open front door"
+	var near := camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance
+	if near and target.is_in_group("bed"):
+		return "E  Sleep" if vitals.can_sleep() else "You're not tired"
+	if near and target.is_in_group("loot_container"):
+		return "" if target.get_parent().opened else "E  Search %s" % target.get_parent().title()
+	if near and target.is_in_group("stranger"):
+		return "E  Talk"
 	if target.is_in_group("shack_interactable"):
 		return "Hold left mouse and drag  Move %s" % ("shutter" if target.name == "GarageDoorTarget" else "door")
 	if target is Area3D and car:
@@ -1385,7 +1446,7 @@ func _interaction_text() -> String:
 
 
 func _object_title(object: Node3D) -> String:
-	if object.is_in_group("food"):
+	if object.is_in_group("food") or object.has_method("set_amount"):
 		return object.title()
 	if object.is_in_group("fuel_canister"):
 		return "fuel can"
@@ -1604,6 +1665,9 @@ func _animate_body(delta: float) -> void:
 func set_flashlight(on: bool, forced: bool = false) -> void:
 	if ending_locked and not forced and on:
 		return
+	if on and vitals and vitals.battery <= 0.0:
+		_show_tip("The flashlight is dead. Find batteries")
+		return
 	if on == flashlight_on and not forced:
 		return
 	flashlight_on = on
@@ -1718,9 +1782,17 @@ func _take_from_inventory(index: int) -> void:
 
 
 func _eat_from_inventory(index: int) -> void:
-	var item: RigidBody3D = inventory.remove_at(index)
-	if is_instance_valid(item):
+	var item: RigidBody3D = inventory.items[index]
+	if item.is_in_group("food"):
+		inventory.remove_at(index)
 		_eat(item)
+	elif item.is_in_group("battery_pack"):
+		inventory.remove_at(index)
+		_load_batteries(item)
+	elif item.is_in_group("water") and not held_object:
+		# Take it out and drink it straight away.
+		_take_from_inventory(index)
+		_start_drinking()
 
 
 func _eat_held_object() -> void:
@@ -1743,3 +1815,135 @@ func _sync_eaten(path: NodePath) -> void:
 	var item := get_node_or_null(path)
 	if item:
 		item.queue_free()
+
+
+# --- Drinking ------------------------------------------------------------------
+
+func _start_drinking() -> void:
+	var bottle := held_object
+	if bottle == null or bottle.amount <= 0.05 or is_instance_valid(drinking):
+		if bottle and bottle.amount <= 0.05:
+			_show_tip("It's empty")
+		return
+	drinking = bottle
+	drink_time = 0.0
+	bottle.freeze = true
+	ui_sound.stream = POUR
+	ui_sound.play()
+	if pour_particles == null:
+		pour_particles = GPUParticles3D.new()
+		pour_particles.amount = 90
+		pour_particles.lifetime = 0.45
+		var motion := ParticleProcessMaterial.new()
+		motion.direction = Vector3(0, -1, 0)
+		motion.spread = 6.0
+		motion.initial_velocity_min = 0.6
+		motion.initial_velocity_max = 1.0
+		motion.gravity = Vector3(0, -9.8, 0)
+		motion.scale_min = 0.6
+		motion.scale_max = 1.2
+		pour_particles.process_material = motion
+		var drop := SphereMesh.new()
+		drop.radius = 0.006
+		drop.height = 0.014
+		var wet := StandardMaterial3D.new()
+		wet.albedo_color = Color(0.7, 0.85, 1.0, 0.6)
+		wet.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		wet.roughness = 0.05
+		drop.material = wet
+		pour_particles.draw_pass_1 = drop
+		pour_particles.local_coords = false
+		add_child(pour_particles)
+	pour_particles.emitting = true
+
+
+func _update_drinking(delta: float) -> void:
+	if not is_instance_valid(drinking):
+		if pour_particles:
+			pour_particles.emitting = false
+		return
+	drink_time += delta
+	# Up above your face, tipped over, water pouring down.
+	var lift := smoothstep(0.0, 0.35, drink_time) * (1.0 - smoothstep(DRINK_TIME - 0.3, DRINK_TIME, drink_time))
+	var low := camera.global_transform * Vector3(0.15, -0.21, -0.42)
+	var high := camera.global_transform * Vector3(0.0, 0.2, -0.34)
+	var tip := Basis(camera.global_basis.x, PI * 0.82 * lift) * camera.global_basis
+	drinking.global_transform = Transform3D(tip, low.lerp(high, lift))
+	held_local_grab_point = Vector3(0, 0.1, 0)
+	pour_particles.global_position = drinking.to_global(Vector3(0, 0.25, 0))
+	pour_particles.emitting = lift > 0.6
+	if drink_time >= DRINK_TIME:
+		vitals.drink(34.0)
+		drinking.set_amount(drinking.amount - 0.34)
+		drinking.freeze = false
+		_show_tip("That's better" if drinking.amount > 0.05 else "That was the last of it")
+		drinking = null
+
+
+# --- Batteries and sleep -----------------------------------------------------------
+
+func _load_batteries(pack: RigidBody3D) -> void:
+	if pack == held_object:
+		_drop_held_object()
+		hand_push = 0.0
+	vitals.battery = 100.0
+	ui_sound.stream = LOAD_BATTERIES
+	ui_sound.play()
+	_show_tip("New batteries in the flashlight")
+	if NetworkManager.is_online():
+		_sync_eaten.rpc(pack.get_path())
+	pack.queue_free()
+
+
+func _try_sleep(where: String) -> void:
+	if vitals == null:
+		return
+	if is_instance_valid(active_vehicle) and active_vehicle.linear_velocity.length() > 1.0:
+		_show_tip("Stop the car first")
+		return
+	if not vitals.can_sleep():
+		_show_tip("You're not tired")
+		return
+	vitals.sleep_until_morning(where)
+
+
+# --- Talking ----------------------------------------------------------------------
+
+func start_talking(other: Node) -> void:
+	talking_to = other
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func stop_talking() -> void:
+	talking_to = null
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func has_item(group: String) -> RigidBody3D:
+	## The first carried item in a group, held or in the pack.
+	if is_instance_valid(held_object) and held_object.is_in_group(group):
+		return held_object
+	if inventory:
+		for item in inventory.items:
+			if is_instance_valid(item) and item.is_in_group(group):
+				return item
+	return null
+
+
+func give_item(item: RigidBody3D) -> void:
+	## Straight into the pack, or into your hand if it is full.
+	if inventory.refusal(item).is_empty():
+		_set_stowed(item, true)
+		inventory.add(item)
+	elif held_object == null:
+		_set_stowed(item, false)
+		item.global_position = camera.global_transform * Vector3(0.15, -0.21, -0.42)
+		_begin_grab_object(item, item.global_position)
+
+
+func use_up(item: RigidBody3D) -> void:
+	if item == held_object:
+		_drop_held_object()
+	if inventory.items.has(item):
+		inventory.remove_at(inventory.items.find(item))
+	item.queue_free()

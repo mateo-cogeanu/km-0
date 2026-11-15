@@ -15,6 +15,8 @@ var side_door: Area3D
 
 const RoadRadio := preload("res://scripts/road_radio.gd")
 const FoodItem := preload("res://scripts/food_item.gd")
+const Supply := preload("res://scripts/supply_item.gd")
+const LootBox := preload("res://scripts/loot_container.gd")
 
 
 func _ready() -> void:
@@ -38,6 +40,19 @@ func _ready() -> void:
 			item.name = "Food_" + food[0]
 			item.position = food[1]
 			bench.add_child(item)
+		var bottle := Supply.new()
+		bottle.kind = "water"
+		bottle.name = "Water_bench"
+		bottle.position = Vector3(1.85, 0.98, -2.45)
+		bench.add_child(bottle)
+		# A cot against the wall to sleep on, and a cooler beside it.
+		_add_cot(Vector3(-3.42, 0, -1.55))
+		var cooler := LootBox.new()
+		cooler.name = "Cooler"
+		cooler.style = "cooler"
+		cooler.contents = PackedStringArray(["water", "soup", "batteries"])
+		cooler.position = Vector3(-3.35, 0, -3.15)
+		add_child(cooler)
 
 
 func get_door_state() -> Dictionary:
@@ -383,3 +398,31 @@ func _set_mesh_overlay_recursive(node: Node, material: Material) -> void:
 
 	for child in node.get_children():
 		_set_mesh_overlay_recursive(child, material)
+
+
+func _add_cot(at: Vector3) -> void:
+	var Shapes := preload("res://scripts/prop_shapes.gd")
+	var cot := Node3D.new()
+	cot.name = "Cot"
+	add_child(cot)
+	cot.position = at
+	var frame := Shapes.material(Color("#4a4f45"), 0.4, 0.5)
+	var canvas := Shapes.material(Color("#5d6248"), 0.0, 0.95)
+	Shapes.box(cot, "Canvas", Vector3(0.72, 0.05, 1.9), Vector3(0, 0.4, 0), canvas, true)
+	Shapes.box(cot, "Blanket", Vector3(0.7, 0.05, 1.05), Vector3(0, 0.44, 0.35), Shapes.material(Color("#7a4a3a"), 0.0, 1.0))
+	Shapes.box(cot, "Pillow", Vector3(0.5, 0.08, 0.3), Vector3(0, 0.46, -0.72), Shapes.material(Color("#cfc8b6"), 0.0, 1.0))
+	for x in [-0.36, 0.36]:
+		Shapes.box(cot, "Rail", Vector3(0.04, 0.04, 1.95), Vector3(x, 0.38, 0), frame)
+		for z in [-0.9, 0.9]:
+			Shapes.box(cot, "Leg", Vector3(0.04, 0.38, 0.04), Vector3(x, 0.19, z), frame)
+	var target := Area3D.new()
+	target.collision_layer = 8
+	target.collision_mask = 0
+	target.add_to_group("bed")
+	cot.add_child(target)
+	var hitbox := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(0.8, 0.3, 2.0)
+	hitbox.shape = shape
+	hitbox.position.y = 0.42
+	target.add_child(hitbox)

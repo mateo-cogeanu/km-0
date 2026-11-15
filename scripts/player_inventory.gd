@@ -112,8 +112,15 @@ func _refresh() -> void:
 		var name_label := Style.label(title.left(1).to_upper() + title.substr(1), 16)
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(name_label)
+		var use := ""
 		if body.is_in_group("food"):
-			var eat := Style.button("Eat", 15)
+			use = "Eat"
+		elif body.is_in_group("water") and body.amount > 0.05:
+			use = "Drink"
+		elif body.is_in_group("battery_pack"):
+			use = "Load"
+		if not use.is_empty():
+			var eat := Style.button(use, 15)
 			eat.pressed.connect(func() -> void: eat_requested.emit(i))
 			row.add_child(eat)
 		var take := Style.button("Take", 15)

@@ -1,5 +1,7 @@
 extends Node
 
+const RoadEndHouse := preload("res://scripts/road_end_house.gd")
+
 const SAVE_PATH := "user://trip.save"
 const SAVE_VERSION := 1
 const AUTOSAVE_SECONDS := 60.0
@@ -97,6 +99,8 @@ func save_trip() -> bool:
 	bodies.append_array(get_tree().get_nodes_in_group("fuel_canister"))
 	bodies.append_array(get_tree().get_nodes_in_group("spray_can"))
 	bodies.append_array(get_tree().get_nodes_in_group("food"))
+	for group in ["water", "battery_pack", "flare"]:
+		bodies.append_array(get_tree().get_nodes_in_group(group))
 	for body in bodies:
 		if body.is_queued_for_deletion():
 			continue
@@ -112,6 +116,12 @@ func save_trip() -> bool:
 			data["color"] = body.spray_color
 		if body.get_meta("stowed", false):
 			data["stowed"] = true
+		if body.has_method("set_amount"):
+			data["amount"] = body.amount
+		if body.get_meta("given", false):
+			data["given"] = true
+		if body.get_meta("in_container", false):
+			data["in_container"] = true
 		objects[part_id] = data
 
 	var driving := ""
@@ -142,6 +152,9 @@ func save_trip() -> bool:
 		"look": player.look_rotation_x,
 		"vitals": player.vitals.to_save() if player.vitals else {},
 		"has_food": true,
+		"has_supplies": true,
+		"opened": _opened_containers(world),
+		"house_seen": RoadEndHouse.seen,
 		"driving": driving,
 		"first_person": player.active_vehicle.first_person_camera_enabled if not driving.is_empty() else false,
 		"vehicle_look": Vector2(player.active_vehicle.camera_yaw, player.active_vehicle.camera_pitch) if not driving.is_empty() else Vector2.ZERO,
@@ -172,6 +185,14 @@ func save_trip() -> bool:
 	return true
 
 
+func _opened_containers(world: Node) -> Array:
+	var opened := []
+	for box in get_tree().get_nodes_in_group("loot_box"):
+		if box.opened:
+			opened.append(str(world.get_path_to(box)))
+	return opened
+
+
 func _object_id(world: Node, body: Node) -> String:
 	var id := str(body.get_meta("trip_part_id", ""))
 	if id.is_empty():
@@ -196,6 +217,7 @@ func restore_trip(world: Node) -> void:
 	player.look_rotation_x = data["look"]
 	if player.vitals and data.get("vitals") is Dictionary:
 		player.vitals.from_save(data["vitals"])
+	RoadEndHouse.seen = data.get("house_seen", false)
 	player.head.rotation.x = player.look_rotation_x
 	world.get_node("DayNightCycle").time_of_day = data["time"]
 	world.get_node("Shack").restore_door_state(data.get("garage_doors", {}))
@@ -255,13 +277,15 @@ func restore_trip(world: Node) -> void:
 	bodies.append_array(get_tree().get_nodes_in_group("fuel_canister"))
 	bodies.append_array(get_tree().get_nodes_in_group("spray_can"))
 	bodies.append_array(get_tree().get_nodes_in_group("food"))
+	for group in ["water", "battery_pack", "flare"]:
+		bodies.append_array(get_tree().get_nodes_in_group(group))
 	for body in bodies:
 		if body.is_queued_for_deletion():
 			continue
 		var part_id := _object_id(world, body)
 		if not objects.has(part_id):
 			# Food came after older saves; leave it where it lies for them.
-			if body.is_in_group("food") and not data.has("has_food"):
+			if (body.is_in_group("food") or body.has_method("set_amount")) and not data.has("has_supplies" if body.has_method("set_amount") else "has_food"):
 				continue
 			body.queue_free()
 			continue
@@ -271,6 +295,18 @@ func restore_trip(world: Node) -> void:
 			body.fuel_amount = saved["fuel"]
 		if saved.has("color"):
 			body.set_spray_color(saved["color"])
+		if saved.has("amount"):
+			body.set_amount(saved["amount"])
+		if saved.get("given", false) and body.has_method("handed_over"):
+			body.handed_over()
+		elif saved.get("given", false):
+			body.set_meta("given", true)
+			body.show()
+			body.freeze = false
+			body.collision_layer = 16
+			body.collision_mask = 17
+		if saved.has("in_container") or body.get_meta("in_container", false):
+			body.set_meta("in_container", saved.get("in_container", false))
 		if saved.get("stowed", false):
 			player.restore_stowed(body)
 		if saved.has("welded"):
@@ -295,4 +331,8 @@ func restore_trip(world: Node) -> void:
 		vehicle.camera_pitch = look.y
 		vehicle._update_camera_rotation()
 		vehicle.set_first_person_camera_enabled(data.get("first_person", false))
+	for path in data.get("opened", []):
+		var box := world.get_node_or_null(path)
+		if box:
+			box.open(true)
 	road._update_segments()

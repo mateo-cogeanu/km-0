@@ -19,6 +19,13 @@ const DOOR_CREAK := preload("res://assets/audio/ending/door_creak.wav")
 const DOOR_OPEN := preload("res://assets/audio/ending/door_open.wav")
 const DOOR_LATCH := preload("res://assets/audio/ending/door_latch.wav")
 const BREATH_CLOSE := preload("res://assets/audio/ending/breath_close.wav")
+const DOOR_RATTLE := preload("res://assets/audio/ending/door_rattle.wav")
+const FLARE_STRIKE := preload("res://assets/audio/ending/flare_strike.wav")
+const FLARE_HISS := preload("res://assets/audio/ending/flare_hiss.wav")
+const SHRIEK := preload("res://assets/audio/ending/shriek.wav")
+## Whether this trip has already been through the ending once. A second visit
+## plays out differently.
+static var seen := false
 
 var boards := Shapes.material(Color("#675545"))
 var floorboards := Shapes.material(Color("#504236"))
@@ -84,6 +91,15 @@ var fake_black: ColorRect
 var fake_card: Control
 var fake_twisted := false
 var roaming := false
+var revisit := false
+var revisit_spoken := false
+var flare_wait := 0.0
+var waiting_flare := false
+var flare_hand: Node3D
+var flare_light: OmniLight3D
+var flare_sound: AudioStreamPlayer
+var eyes_dead := false
+var flash: ColorRect
 var roam_time := 0.0
 var roam_inside := false
 var breather: AudioStreamPlayer3D
@@ -164,6 +180,8 @@ const FINAL_JAW := [
 
 
 func _ready() -> void:
+	add_to_group("road_end_house")
+	revisit = seen
 	_build_house()
 	# The house gets its own light layer, so outdoor light that has no shadows
 	# can be kept off its insides once you are in.
@@ -339,8 +357,12 @@ func _build_interior() -> void:
 	Shapes.box(self, "RugField", Vector3(1.8, 0.009, 1.15), Vector3(0.25, 0.0045, 0.55), Shapes.material(Color("#523430"), 0.0, 1.0))
 	# Chairs at the table: one pulled out, one knocked over.
 	_chair(Vector3(-2.2, 0, -0.62), PI, wood)
-	var fallen := _chair(Vector3(-1.25, 0.22, -1.75), -0.6, wood)
-	fallen.rotate_object_local(Vector3.BACK, PI * 0.5)
+	if revisit:
+		# Set back on its feet, in the middle of the room, facing the door.
+		_chair(Vector3(0.2, 0, 0.9), PI, wood)
+	else:
+		var fallen := _chair(Vector3(-1.25, 0.22, -1.75), -0.6, wood)
+		fallen.rotate_object_local(Vector3.BACK, PI * 0.5)
 	# The fridge that hums, and the clock that ticks.
 	Shapes.box(self, "Fridge", Vector3(0.74, 1.68, 0.66), Vector3(-3.0, 0.84, -3.16), enamel, true)
 	Shapes.box(self, "FridgeSeam", Vector3(0.75, 0.012, 0.67), Vector3(-3.0, 1.18, -3.16), dark)
@@ -353,13 +375,20 @@ func _build_interior() -> void:
 	minute.rotation.x = -2.6
 	# A picture hung crooked, too dark to make out.
 	var picture := Shapes.box(self, "PictureFrame", Vector3(0.035, 0.62, 0.48), Vector3(-3.39, 1.55, 0.15), wood)
-	picture.rotation.x = 0.06
-	Shapes.box(picture, "Picture", Vector3(0.01, 0.5, 0.36), Vector3(0.02, 0, 0), Shapes.material(Color("#1d1a19")))
+	picture.rotation.x = 0.0 if revisit else 0.06
+	Shapes.box(picture, "Picture", Vector3(0.01, 0.5, 0.36), Vector3(0.02, 0, 0), Shapes.material(Color("#b5aa95") if revisit else Color("#1d1a19")))
+	if revisit:
+		# Now you can make it out: a pale face, grinning.
+		for side in [-1.0, 1.0]:
+			Shapes.box(picture, "PaintedEye", Vector3(0.012, 0.03, 0.03), Vector3(0.026, 0.08, side * 0.06), Shapes.material(Color("#1a0a0a")))
+		Shapes.box(picture, "PaintedGrin", Vector3(0.012, 0.025, 0.22), Vector3(0.026, -0.06, 0), Shapes.material(Color("#2a0e0e")))
 	# A long coat on a rack by the door.
 	Shapes.cylinder(self, "CoatRack", Vector3(-1.5, 0.88, 3.22), Vector3.UP, 0.025, 1.76, wood)
 	Shapes.cylinder(self, "CoatRackFoot", Vector3(-1.5, 0.02, 3.22), Vector3.UP, 0.2, 0.04, wood)
-	Shapes.box(self, "Coat", Vector3(0.4, 1.0, 0.2), Vector3(-1.5, 1.18, 3.1), cloth)
-	Shapes.box(self, "CoatShoulders", Vector3(0.46, 0.08, 0.22), Vector3(-1.5, 1.68, 3.1), cloth)
+	# The second time, the coat is gone.
+	if not revisit:
+		Shapes.box(self, "Coat", Vector3(0.4, 1.0, 0.2), Vector3(-1.5, 1.18, 3.1), cloth)
+		Shapes.box(self, "CoatShoulders", Vector3(0.46, 0.08, 0.22), Vector3(-1.5, 1.68, 3.1), cloth)
 	# Bare bulbs on cords for the room lamp and the one over the stairs.
 	for hang: Array in [[Vector3(-1.7, 2.33, 1.31), 2.53], [Vector3(1.25, 2.95, -1.5), 5.14]]:
 		var bulb_at: Vector3 = hang[0]
@@ -549,8 +578,10 @@ func _on_entry(body: Node3D) -> void:
 	if sky_fill:
 		sky_fill.light_cull_mask &= ~(Creature.LIGHT_LAYER | HOUSE_LAYER)
 	# An ordinary, quiet house first: a clock and the hum of the wiring.
-	ambience.append(_loop(CLOCK_TICK, Vector3(-3.3, 2.05, -1.3), -15.0))
-	ambience.append(_loop(HOUSE_HUM, Vector3(-2.4, 1.0, -3.2), -21.0))
+	if ambience.is_empty():
+		if not revisit:
+			ambience.append(_loop(CLOCK_TICK, Vector3(-3.3, 2.05, -1.3), -15.0))
+		ambience.append(_loop(HOUSE_HUM, Vector3(-2.4, 1.0, -3.2), -21.0))
 
 
 func _roam(delta: float) -> void:
@@ -559,6 +590,20 @@ func _roam(delta: float) -> void:
 		return
 	roam_time += delta
 	var at := to_local(player.global_position)
+	if revisit:
+		# Nothing comes. Only, once, your own voice from upstairs.
+		if roam_time > 14.0 and not revisit_spoken:
+			revisit_spoken = true
+			if not overlay:
+				_build_overlay()
+			_speak(ANYBODY, "[Your voice, upstairs] Anybody there?", to_global(Vector3(1.88, 3.3, -3.0)), 0.96)
+			var clear := create_tween()
+			clear.tween_interval(ANYBODY.get_length() + 0.3)
+			clear.tween_callback(caption.set_text.bind(""))
+		if at.z > LEAVE_Z + 1.5 or at.distance_to(Vector3.ZERO) > 9.0:
+			roaming = false
+			looked = false
+		return
 	# Only once you are properly in does turning back count as leaving.
 	if at.z < LEAVE_Z - 0.45:
 		roam_inside = true
@@ -571,6 +616,7 @@ func _roam(delta: float) -> void:
 func _begin_ending() -> void:
 	roaming = false
 	looked = true
+	seen = true
 	player.lock_for_ending(to_global(Vector3(0, 1.03, 5.62)))
 	# Back to just inside the door, out of the door's way, wherever you were.
 	var inside := to_local(player.global_position)
@@ -637,6 +683,7 @@ func _begin_descent() -> void:
 	sequence.tween_method(_shut_door, 0.0, 1.0, REACH_TIME)
 	sequence.tween_method(_door_swings_shut, 0.0, 1.0, DOOR_SWING_TIME)
 	sequence.tween_callback(_play_at.bind(DOOR_LATCH, to_global(Vector3(0.6, 1.1, 3.6)), 1.0))
+	sequence.tween_callback(func() -> void: door_target.collision_layer = 8)
 	sequence.tween_method(_after_door, 0.0, 1.0, 1.25)
 	sequence.tween_callback(_play_flicker)
 	for beat: Array in [[0.0, 0.07], [1.0, 0.12], [0.0, 0.05], [1.0, 0.34]]:
@@ -674,19 +721,38 @@ func _final_approach() -> void:
 	sequence.tween_callback(_set_lights.bind(1.0))
 	sequence.tween_method(_turn_to_creature, 0.0, 1.0, 0.42)
 	sequence.tween_method(_turn_to_creature, 1.0, 1.0, 0.55)
+	sequence.tween_callback(_flare_or_rush)
+
+
+func _flare_or_rush() -> void:
+	## Carrying the stranger's flare, you get a moment to use it.
+	if player.has_method("has_item") and player.has_item("flare"):
+		waiting_flare = true
+		flare_wait = 2.8
+		caption.text = "[Click]  Light the flare"
+		return
+	_rush()
+
+
+func _rush() -> void:
+	sequence = create_tween()
 	sequence.tween_callback(_start_rush)
 	sequence.tween_method(_lean, 0.0, 1.0, RUSH_TIME).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
-	sequence.tween_method(_hold_face.bind(false), 0.0, 0.76, 0.76)
-	sequence.tween_callback(_play_creature_sound.bind(RAPID_CLICKS))
-	sequence.tween_method(_hold_face.bind(false), 0.76, CLOSE_HOLD, CLOSE_HOLD - 0.76)
-	sequence.tween_callback(_deliver_line)
+	_finale(sequence)
+
+
+func _finale(steps: Tween) -> void:
+	steps.tween_method(_hold_face.bind(false), 0.0, 0.76, 0.76)
+	steps.tween_callback(_play_creature_sound.bind(RAPID_CLICKS))
+	steps.tween_method(_hold_face.bind(false), 0.76, CLOSE_HOLD, CLOSE_HOLD - 0.76)
+	steps.tween_callback(_deliver_line)
 	var line_end := TRICKED.get_length() + 0.35
-	sequence.tween_method(_hold_face.bind(true), 0.0, FINAL_WORDS_CUE, FINAL_WORDS_CUE)
-	sequence.tween_callback(caption.set_text.bind("Creature: Tricked you too."))
-	sequence.tween_method(_hold_face.bind(true), FINAL_WORDS_CUE, line_end, line_end - FINAL_WORDS_CUE)
-	sequence.tween_callback(caption.set_text.bind(""))
-	sequence.tween_method(_hold_face.bind(true), line_end, line_end + 0.65, 0.65)
-	sequence.tween_callback(_show_fake_end)
+	steps.tween_method(_hold_face.bind(true), 0.0, FINAL_WORDS_CUE, FINAL_WORDS_CUE)
+	steps.tween_callback(caption.set_text.bind("Creature: Tricked you too."))
+	steps.tween_method(_hold_face.bind(true), FINAL_WORDS_CUE, line_end, line_end - FINAL_WORDS_CUE)
+	steps.tween_callback(caption.set_text.bind(""))
+	steps.tween_method(_hold_face.bind(true), line_end, line_end + 0.65, 0.65)
+	steps.tween_callback(_show_fake_end)
 
 
 func _start_skitter() -> void:
@@ -1141,6 +1207,8 @@ func _speaker(distance: float) -> AudioStreamPlayer3D:
 
 
 func _speak(stream: AudioStream, line: String, at: Vector3, pitch: float = 1.0) -> void:
+	if voice == null:
+		voice = _speaker(2.4)
 	voice.global_position = at
 	voice.pitch_scale = pitch
 	voice.stream = stream
@@ -1217,7 +1285,20 @@ func _process(delta: float) -> void:
 	if stalking:
 		_stalk(delta)
 	if creature:
-		creature.set_eyes(lerpf(7.0, 1.0, light_level), lerpf(1.0, eye_open, light_level))
+		if eyes_dead:
+			creature.set_eyes(0.0, 0.0)
+		else:
+			creature.set_eyes(lerpf(7.0, 1.0, light_level), lerpf(1.0, eye_open, light_level))
+	if waiting_flare:
+		flare_wait -= delta
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_key_pressed(KEY_E) or Input.is_key_pressed(KEY_F):
+			_light_flare()
+		elif flare_wait <= 0.0:
+			waiting_flare = false
+			caption.text = ""
+			_rush()
+	if flare_light and flare_light.visible:
+		flare_light.light_energy = 3.2 + randf_range(-0.6, 0.6)
 
 
 func _set_lights(level: float) -> void:
@@ -1519,3 +1600,200 @@ func _lunge(amount: float) -> void:
 	var face_light := get_node_or_null("FaceFill") as OmniLight3D
 	if face_light:
 		face_light.light_energy = 1.6
+
+
+
+# --- The front door during the stalk ------------------------------------------
+
+func try_door(by: Node3D) -> void:
+	## Locked. It rattles, and the noise brings it.
+	if not door_target or door_target.collision_layer == 0 or not is_instance_valid(creature):
+		return
+	var camera: Camera3D = by.camera
+	var toward := door_target.global_position - camera.global_position
+	if toward.length() > 3.6 or toward.normalized().dot(-camera.global_basis.z) < 0.8:
+		return
+	_play_at(DOOR_RATTLE, door_target.global_position, randf_range(0.95, 1.05))
+	caption.text = "[The door won't open]"
+	var clear := create_tween()
+	clear.tween_interval(1.6)
+	clear.tween_callback(func() -> void:
+		if caption.text == "[The door won't open]":
+			caption.text = "")
+	if stalking:
+		if stalk_index >= stalk_spots.size() - 2:
+			_final_approach()
+		elif stalk_index >= 0:
+			_flicker_move()
+
+
+# --- The flare -------------------------------------------------------------------
+
+func _light_flare() -> void:
+	waiting_flare = false
+	caption.text = ""
+	var item: RigidBody3D = player.has_item("flare")
+	if item:
+		player.use_up(item)
+	skit_shoulders = last_shoulders
+	skit_pelvis = last_pelvis
+	skit_palms = last_palms.duplicate()
+	skit_feet = last_feet.duplicate()
+	# Your eyes follow it down.
+	camera_follow = true
+	# In your hand, low on the left, spitting red.
+	flare_hand = Node3D.new()
+	player.camera.add_child(flare_hand)
+	flare_hand.position = Vector3(-0.2, -0.24, -0.42)
+	flare_hand.rotation = Vector3(0.9, 0.25, 0.0)
+	Shapes.cylinder(flare_hand, "Tube", Vector3(0, -0.08, 0), Vector3.UP, 0.019, 0.24, Shapes.material(Color("#b0261c"), 0.0, 0.5), 12)
+	var burn := Shapes.material(Color("#ff5a3a"))
+	burn.emission_enabled = true
+	burn.emission = Color("#ff3a1a")
+	burn.emission_energy_multiplier = 6.0
+	Shapes.cylinder(flare_hand, "Burn", Vector3(0, 0.05, 0), Vector3.UP, 0.02, 0.03, burn, 12)
+	var sparks := GPUParticles3D.new()
+	sparks.amount = 70
+	sparks.lifetime = 0.5
+	var motion := ParticleProcessMaterial.new()
+	motion.direction = Vector3(0, 1, 0)
+	motion.spread = 40.0
+	motion.initial_velocity_min = 0.4
+	motion.initial_velocity_max = 1.2
+	motion.gravity = Vector3(0, -2.0, 0)
+	sparks.process_material = motion
+	var spark := SphereMesh.new()
+	spark.radius = 0.004
+	spark.height = 0.008
+	var hot := StandardMaterial3D.new()
+	hot.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hot.albedo_color = Color("#ffb070")
+	spark.material = hot
+	sparks.draw_pass_1 = spark
+	sparks.local_coords = false
+	flare_hand.add_child(sparks)
+	sparks.position.y = 0.07
+	sparks.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for mesh: GeometryInstance3D in flare_hand.find_children("*", "GeometryInstance3D", true, false):
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	flare_light = OmniLight3D.new()
+	flare_light.light_color = Color("#ff4a2a")
+	flare_light.light_energy = 3.2
+	flare_light.omni_range = 8.0
+	flare_light.shadow_enabled = true
+	flare_hand.add_child(flare_light)
+	flare_light.position.y = 0.12
+	_play_at(FLARE_STRIKE, player.camera.global_position, 1.0)
+	flare_sound = AudioStreamPlayer.new()
+	var hiss: AudioStreamWAV = FLARE_HISS
+	hiss.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	hiss.loop_end = hiss.data.size() / 2
+	flare_sound.stream = hiss
+	flare_sound.volume_db = -9.0
+	add_child(flare_sound)
+	var strike := create_tween()
+	strike.tween_interval(0.3)
+	strike.tween_callback(flare_sound.play)
+	# It shrieks, comes off the wall, and drops.
+	strike.tween_callback(_play_creature_sound.bind(SHRIEK))
+	strike.tween_method(_collapse, 0.0, 1.0, 0.75).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	strike.tween_callback(_play_at.bind(STEP, to_global(_floor_spot()), 0.55))
+	for twitch in 3:
+		strike.tween_callback(func() -> void: creature.jitter = 1.0)
+		strike.tween_interval(0.18)
+		strike.tween_callback(func() -> void: creature.jitter = 0.0)
+		strike.tween_interval(0.5 + twitch * 0.35)
+	strike.tween_callback(func() -> void:
+		eyes_dead = true
+		creature.tilt = 0.4
+		camera_follow = false
+		player.begin_ending_look())
+	# Still. The flare fizzes. Nothing moves for a long time.
+	strike.tween_interval(7.5)
+	for beat: Array in [[0.2, 0.08], [1.0, 0.1], [0.1, 0.12], [0.8, 0.07]]:
+		strike.tween_callback(func() -> void: flare_light.light_energy = 3.2 * beat[0])
+		strike.tween_interval(beat[1])
+	strike.tween_callback(func() -> void:
+		flare_light.visible = false
+		flare_hand.hide()
+		flare_sound.stop()
+		_set_lights(0.0)
+		creature.hide())
+	strike.tween_interval(0.55)
+	strike.tween_callback(_burst_start)
+	strike.tween_method(_burst, 0.0, 1.0, 0.35).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	strike.tween_callback(func() -> void:
+		face_close = 0.35
+		creature.jitter = 0.85
+		sequence = create_tween()
+		_finale(sequence))
+
+
+func _floor_spot() -> Vector3:
+	var spot: Dictionary = stalk_spots[-1]
+	return spot["center"] + spot["normal"] * 0.78
+
+
+func _collapse(t: float) -> void:
+	## Off the wall and face down on the floor, limbs flung out.
+	var spot: Dictionary = stalk_spots[-1]
+	var heading: Vector3 = (spot["heading"] as Vector3) * Vector3(1, 0, 1)
+	heading = heading.normalized()
+	var across := Vector3.UP.cross(heading).normalized()
+	var rest_at := _floor_spot()
+	rest_at.y = 0.24
+	var lying_shoulders := rest_at + heading * 0.372
+	var lying_pelvis := rest_at - heading * 0.372
+	var arc := Vector3.UP * sin(t * PI) * 0.25
+	var shoulders := skit_shoulders.lerp(lying_shoulders, t) + arc
+	var pelvis := skit_pelvis.lerp(lying_pelvis, t) + arc * 0.6
+	var palms: Array[Vector3] = []
+	var feet: Array[Vector3] = []
+	for i in 2:
+		var side := -1.0 if i == 0 else 1.0
+		var palm_down := Vector3(rest_at.x, 0.0, rest_at.z) + heading * 0.55 + across * side * 0.45
+		var foot_down := Vector3(rest_at.x, 0.0, rest_at.z) - heading * 0.7 + across * side * 0.38
+		palms.append(skit_palms[i].lerp(palm_down, smoothstep(0.2, 1.0, t)))
+		feet.append(skit_feet[i].lerp(foot_down, smoothstep(0.3, 1.0, t)))
+	var normal: Vector3 = spot["normal"]
+	var normals: Array[Vector3] = [normal.lerp(Vector3.UP, t).normalized(), normal.lerp(Vector3.UP, t).normalized()]
+	creature.position = Vector3(rest_at.x, 0, rest_at.z)
+	_pose(shoulders, pelvis, palms, normals, feet, 4.3, 0.0, normals, normal.slerp(Vector3.UP, t))
+
+
+func _burst_start() -> void:
+	## The biggest one: out of the dark, right in your face.
+	player.end_ending_look()
+	var facing: Vector3 = -player.camera.global_basis.z
+	face_basis = Basis.looking_at(Vector3(facing.x, 0, facing.z).normalized(), Vector3.UP)
+	face_back = Vector3.UP
+	eyes_dead = false
+	eye_open = 0.0
+	creature.tilt = 0.0
+	creature.jitter = 1.0
+	creature.show()
+	camera_follow = true
+	_set_lights(1.0)
+	sting.stream = HIT
+	sting.volume_db = 0.0
+	sting.play()
+	_play_creature_sound(SHRIEK)
+	shake = 0.07
+	if flash == null:
+		flash = ColorRect.new()
+		flash.color = Color(0.6, 0.05, 0.03, 0.0)
+		flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		overlay.add_child(flash)
+		flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	flash.color.a = 0.32
+	var fade := create_tween()
+	fade.tween_property(flash, "color:a", 0.0, 0.35)
+
+
+func _burst(t: float) -> void:
+	face_close = 0.95 - 0.5 * t
+	if not has_node("FaceFill"):
+		_lean(1.0)
+	$FaceFill.light_energy = 1.8
+	_final_pose(1.0, 2.5)
+	creature.set_jaw_offset(-0.012)

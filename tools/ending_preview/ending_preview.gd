@@ -41,7 +41,23 @@ class PreviewPlayer extends Node3D:
 	func end_ending_look() -> void:
 		ending_look = false
 
+	# KM0_PREVIEW_FLARE gives the player the stranger's flare and lights it as
+	# soon as the ending offers the chance.
+	var flare: RigidBody3D
+
+	func has_item(group: String) -> RigidBody3D:
+		if group == "flare" and OS.has_environment("KM0_PREVIEW_FLARE"):
+			if flare == null:
+				flare = RigidBody3D.new()
+			return flare
+		return null
+
+	func use_up(_item: RigidBody3D) -> void:
+		OS.unset_environment("KM0_PREVIEW_FLARE")
+
 	func _process(delta: float) -> void:
+		if house and house.waiting_flare:
+			house._light_flare()
 		if not ending_look or not OS.has_environment("KM0_PREVIEW_LOOK"):
 			return
 		look_clock += delta

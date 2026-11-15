@@ -69,6 +69,9 @@ var carrier: AudioStreamPlayer3D
 var dial: StandardMaterial3D
 var listener: Node3D
 var caption := ""
+var echo: AudioStreamPlayer3D
+var echo_at := -1.0
+const YOUR_VOICE := preload("res://assets/audio/ending/anybody.wav")
 
 
 func _ready() -> void:
@@ -102,6 +105,9 @@ func _ready() -> void:
 	add_child(hitbox)
 	voice = _make_player(RECORDINGS[broadcast], VOICE_VOLUME)
 	voice.bus = _radio_bus()
+	echo = _make_player(YOUR_VOICE, VOICE_VOLUME + 2.0)
+	echo.bus = _radio_bus()
+	echo.pitch_scale = 0.94
 	carrier = _make_player(_carrier_sound(), -18.0 - broadcast * 0.9)
 	voice.finished.connect(stop_listening)
 	set_process(false)
@@ -160,6 +166,15 @@ func _process(_delta: float) -> void:
 		return
 	# Reception drifts: now and then the voice sinks under the carrier.
 	var elapsed := voice.get_playback_position()
+	# Sometimes, under the broadcast, it is your own voice.
+	if echo_at > 0.0 and elapsed >= echo_at:
+		echo_at = -1.0
+		echo.play()
+		caption = "[Your voice, faint] ...Anybody there?"
+		listener.show_radio_caption(self, caption)
+	if echo.playing:
+		voice.volume_db = VOICE_VOLUME - 22.0
+		return
 	var drift := pow(maxf(0.0, sin(elapsed * 0.83 + broadcast) * sin(elapsed * 0.31 + broadcast * 2.0)), 3.0)
 	voice.volume_db = VOICE_VOLUME - drift * 9.0 + sin(elapsed * 23.0) * drift * 1.5
 	var playback := voice.get_playback_position()
@@ -178,6 +193,7 @@ func toggle_listening(player: Node3D) -> void:
 		stop_listening()
 		return
 	listener = player
+	echo_at = randf_range(9.0, maxf(10.0, RECORDINGS[broadcast].get_length() - 6.0)) if randf() < 0.3 else -1.0
 	caption = "Carrier signal…"
 	listener.show_radio_caption(self, caption)
 	dial.emission_enabled = true
@@ -194,6 +210,7 @@ func stop_listening() -> void:
 	caption = ""
 	voice.stop()
 	carrier.stop()
+	echo.stop()
 	dial.emission_enabled = false
 
 
