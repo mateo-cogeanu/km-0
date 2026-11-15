@@ -26,6 +26,16 @@ var last_palms: Array[Vector3] = []
 var last_feet: Array[Vector3] = []
 var last_shoulders := Vector3.ZERO
 var last_pelvis := Vector3.ZERO
+var last_normals: Array[Vector3] = []
+var stair_palms: Array[Vector3] = []
+var stair_feet: Array[Vector3] = []
+var stair_shoulders := Vector3.ZERO
+var stair_pelvis := Vector3.ZERO
+
+const STAIR_TIME := 7.7
+const CRAWL_TIME := 7.0
+const LEAN_TIME := 2.25
+const CLOSE_HOLD := 3.1
 
 
 func _ready() -> void:
@@ -134,25 +144,31 @@ func _on_entry(body: Node3D) -> void:
 	voice = _speaker(2.4)
 	footfall = _speaker(4.5)
 	sequence = create_tween()
-	sequence.tween_interval(0.65)
+	sequence.tween_interval(0.95)
 	sequence.tween_callback(_speak.bind(HELLO, "Hello? Anybody there?", player.camera.global_position + player.camera.global_basis.z * 0.15))
-	sequence.tween_interval(2.87)
+	sequence.tween_interval(4.7)
 	sequence.tween_callback(_begin_descent)
 
 
 func _begin_descent() -> void:
 	_speak(ANYBODY, "Anybody there?", creature.global_position + Vector3.UP * 1.15)
 	sequence = create_tween()
-	sequence.tween_interval(0.92)
+	sequence.tween_method(_listen_toward_stairs, 0.0, 1.0, 2.45)
 	sequence.tween_callback(creature.show)
-	sequence.tween_method(_descend, 0.0, 1.0, 4.25)
+	sequence.tween_method(_descend, 0.0, 1.0, STAIR_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	sequence.tween_callback(_start_crawl)
-	sequence.tween_method(_crawl, 0.0, 1.0, 2.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	sequence.tween_method(_lean, 0.0, 1.0, 0.65).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	sequence.tween_method(_hold_face.bind(false), 0.0, 0.45, 0.45)
+	sequence.tween_method(_stair_hold, 0.0, 1.65, 1.65)
+	sequence.tween_method(_crawl, 0.0, 1.0, CRAWL_TIME)
+	sequence.tween_method(_lean, 0.0, 1.0, LEAN_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	sequence.tween_method(_hold_face.bind(false), 0.0, CLOSE_HOLD, CLOSE_HOLD)
 	sequence.tween_callback(_deliver_line)
-	sequence.tween_method(_hold_face.bind(true), 0.0, 1.36, 1.36)
+	sequence.tween_method(_hold_face.bind(true), 0.0, 2.15, 2.15)
 	sequence.tween_callback(_show_end)
+
+
+func _listen_toward_stairs(progress: float) -> void:
+	var focus := to_global(Vector3(1.88, 2.55, -2.86))
+	player.aim_ending_camera(focus, _camera_response(1.2) * smoothstep(0.33, 0.90, progress))
 
 
 func _descend(progress: float) -> void:
@@ -168,12 +184,13 @@ func _descend(progress: float) -> void:
 		var phase := stride + i * 0.5
 		var reach := _contact(phase)
 		var point_z := clampf(-3.02 + (reach + 0.84) * 0.42, -3.3, -0.05)
-		var plant_height := _stair_height(point_z) + 0.91
+		var plant_height := _step_height(reach, -3.02 + 0.84 * 0.42, -3.3, -0.05) + 0.91
 		var wall_x := 1.04 if i == 0 else 2.55
 		var lift := _swing(phase)
 		palms.append(Vector3(wall_x - side * lift * 0.16, plant_height + lift * 0.20, point_z))
 		var foot_z := clampf(-3.38 + (_contact(phase + 0.5) + 0.38) * 0.42, -3.42, 0.12)
-		feet.append(Vector3(1.80 + side * 0.26, _stair_height(foot_z) + _swing(phase + 0.5) * 0.11, foot_z))
+		var foot_y := _step_height(_contact(phase + 0.5), -3.38 + 0.38 * 0.42, -3.42, 0.12)
+		feet.append(Vector3(1.80 + side * 0.26, foot_y + _swing(phase + 0.5) * 0.11, foot_z))
 	var shoulders := Vector3(1.80, floor_y + 0.98 + sin(stride * TAU) * 0.043, center_z + 0.26)
 	var pelvis := Vector3(1.80, floor_y + 0.71, center_z - 0.48)
 	_pose(shoulders, pelvis, palms, normals, feet, progress * 3.65)
@@ -184,12 +201,29 @@ func _stair_height(z: float) -> float:
 	return 0.0 if z > 0.042 else clampf(floorf((0.041 - z) / 0.27) + 1.0, 1.0, 13.0) * 0.207
 
 
+func _step_height(reach: float, start: float, near: float, far: float) -> float:
+	var base := floorf(reach)
+	var from := _stair_height(clampf(start + base * 0.42, near, far))
+	var to := _stair_height(clampf(start + (base + 1.0) * 0.42, near, far))
+	return lerpf(from, to, fposmod(reach, 1.0))
+
+
 func _start_crawl() -> void:
 	walk_start = creature.position
+	stair_palms = last_palms
+	stair_feet = last_feet
+	stair_shoulders = last_shoulders
+	stair_pelvis = last_pelvis
 	previous_step = -1
 
 
-func _crawl(progress: float) -> void:
+func _stair_hold(seconds: float) -> void:
+	var breath := sin(seconds * 2.5) * 0.012
+	_pose(stair_shoulders + Vector3.UP * breath, stair_pelvis, stair_palms, last_normals, stair_feet, 3.65 + seconds * 0.35)
+
+
+func _crawl(phase_progress: float) -> void:
+	var progress := smoothstep(0.15, 1.0, phase_progress)
 	var eye := to_local(player.camera.global_position)
 	var end := Vector3(eye.x, 0, eye.z - 1.03)
 	var bend := Vector3(1.42, 0, 0.66)
@@ -211,22 +245,22 @@ func _crawl(progress: float) -> void:
 		var hand_forward := ((bend - start).lerp(end - bend, hand_progress)).normalized()
 		var hand_right := Vector3.UP.cross(hand_forward)
 		var palm := hand_path + hand_forward * 0.37 + hand_right * side * 0.39 + Vector3.UP * (_swing(phase) * 0.18)
-		var stair_palm := Vector3(1.04 if i == 0 else 2.55, 1.06, -0.05)
-		var settle := smoothstep(0.0, 0.24, progress + float(i) * 0.03)
-		palms.append(stair_palm.lerp(palm, settle))
+		var settle := smoothstep(float(i) * 0.085, 0.24 + float(i) * 0.085, phase_progress)
+		var drop_arc := sin(settle * PI) * 0.16
+		palms.append(stair_palms[i].lerp(palm, settle) + Vector3(-side * drop_arc, 0, drop_arc * 0.3))
 		normals[i] = Vector3(-side, 0, 0).lerp(Vector3.UP, settle)
 		var foot_forward := ((bend - start).lerp(end - bend, foot_progress)).normalized()
 		var foot := foot_path - foot_forward * 0.51 + Vector3.UP.cross(foot_forward) * side * 0.32
 		foot.y = (_stair_height(foot.z) if foot.x > 1.07 and foot.x < 2.52 else 0.0) + _swing(phase + 0.5) * 0.13
-		feet.append(foot)
+		feet.append(stair_feet[i].lerp(foot, smoothstep(0.08, 0.36, phase_progress)))
 	var shoulders := at + forward * 0.16 + Vector3.UP * (0.70 + sin(strides * TAU) * 0.026)
 	var pelvis := at - forward * 0.58 + Vector3.UP * 0.62
-	last_palms = palms
-	last_feet = feet
-	last_shoulders = shoulders
-	last_pelvis = pelvis
-	_pose(shoulders, pelvis, palms, normals, feet, 3.65 + progress * 2.10)
-	_play_contact(strides * 2.0, palms[floori(strides * 2.0) % 2], 0.96)
+	var transfer := smoothstep(0.0, 0.38, phase_progress)
+	shoulders = (stair_shoulders + Vector3.UP * (sin(1.65 * 2.5) * 0.012)).lerp(shoulders, transfer)
+	pelvis = stair_pelvis.lerp(pelvis, transfer)
+	_pose(shoulders, pelvis, palms, normals, feet, lerpf(4.2275, 5.75, phase_progress))
+	if phase_progress >= 0.26:
+		_play_contact(strides * 2.0, palms[floori(strides * 2.0) % 2], 0.96)
 
 
 func _contact(phase: float) -> float:
@@ -250,21 +284,34 @@ func _play_contact(phase: float, point: Vector3, pitch: float) -> void:
 
 func _pose(shoulders: Vector3, pelvis: Vector3, palms: Array[Vector3], normals: Array[Vector3], feet: Array[Vector3],
 		elapsed: float, reveal: float = 0.0) -> void:
+	if reveal == 0.0 and elapsed <= 5.75:
+		last_palms = palms
+		last_feet = feet
+		last_shoulders = shoulders
+		last_pelvis = pelvis
+		last_normals = normals
 	var eye := to_local(player.camera.global_position)
 	var local_palms: Array[Vector3] = [palms[0] - creature.position, palms[1] - creature.position]
 	var local_feet: Array[Vector3] = [feet[0] - creature.position, feet[1] - creature.position]
 	creature.pose_contacts(shoulders - creature.position, pelvis - creature.position, eye - creature.position,
 		local_palms, normals, local_feet, elapsed, reveal)
-	player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.22, 0.2)
+	player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.22, _camera_response(5.5))
+
+
+func _camera_response(rate: float) -> float:
+	return 1.0 - exp(-rate * get_process_delta_time())
 
 
 func _lean(amount: float) -> void:
 	_final_pose(amount, amount * 0.52)
 	creature.set_jaw_offset(-0.006 * amount)
-	if amount > 0.35 and not has_node("FaceFill"):
+	if not has_node("FaceFill"):
 		var eye := to_local(player.camera.global_position)
-		_creature_light("FaceFill", eye + Vector3(-0.83, 0.51, -0.08), Color("#f0c9ac"), 1.48, 3.0)
-		_creature_light("FaceRim", eye + Vector3(0.65, 0.66, -1.48), Color("#8b9ecb"), 0.82, 3.0)
+		_creature_light("FaceFill", eye + Vector3(-0.83, 0.51, -0.08), Color("#f0c9ac"), 0.0, 3.0)
+		_creature_light("FaceRim", eye + Vector3(0.65, 0.66, -1.48), Color("#8b9ecb"), 0.0, 3.0)
+	var reveal := smoothstep(0.16, 0.92, amount)
+	$FaceFill.light_energy = 1.48 * reveal
+	$FaceRim.light_energy = 0.82 * reveal
 
 
 func _creature_light(title: String, at: Vector3, tint: Color, energy: float, reach: float) -> void:
@@ -287,7 +334,7 @@ func _final_pose(amount: float, elapsed: float) -> void:
 
 
 func _hold_face(elapsed: float, speaking: bool) -> void:
-	_final_pose(1.0, elapsed + (0.97 if speaking else 0.52))
+	_final_pose(1.0, (1.58 + elapsed * 0.42) if speaking else (0.52 + elapsed / CLOSE_HOLD * 1.06))
 	var opening := maxf(0.0, sin(elapsed * 19.0)) * exp(-elapsed * 0.82)
 	creature.set_jaw_offset(-0.003 - 0.007 * opening if speaking else -0.006)
 
