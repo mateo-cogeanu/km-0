@@ -140,6 +140,46 @@ func _ready() -> void:
 					(report[name][0] / report[name][1] + c.position).snapped(Vector3.ONE * 0.01), report[name][2]])
 			print(" | ".join(line)))
 		check.start(1.0)
+	if OS.has_environment("KM0_PREVIEW_CLIPCHECK"):
+		# Skin a sample of the body on the CPU each frame and report how deep
+		# it sinks into the stairs or the floor, worst point per half second.
+		var worst := [0.0, "", Vector3.ZERO]
+		var clock := [0.0]
+		get_tree().process_frame.connect(func() -> void:
+			var c: Node3D = house.creature
+			if not c or not c.visible or not c.posed.has("HandL"):
+				return
+			var mi := c.find_child("Continuous skin", true, false) as MeshInstance3D
+			var rig: Skeleton3D = c.rig
+			var arrays := mi.mesh.surface_get_arrays(0)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
+			var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
+			var poses := {}
+			for v in range(0, verts.size(), 11):
+				var p := Vector3.ZERO
+				var top := 0
+				for k in 4:
+					var w := weights[v * 4 + k]
+					if w > 0.0:
+						var bi := bones[v * 4 + k]
+						if not poses.has(bi):
+							poses[bi] = rig.get_bone_global_pose(rig.find_bone(mi.skin.get_bind_name(bi))) * mi.skin.get_bind_pose(bi)
+						p += w * (poses[bi] * verts[v])
+						if w > weights[v * 4 + top]:
+							top = k
+				p = house.to_local(c.to_global(p))
+				var depth: float = house.ground_height(p.x, p.z) - p.y
+				if depth > worst[0]:
+					worst[0] = depth
+					worst[1] = mi.skin.get_bind_name(bones[v * 4 + top])
+					worst[2] = p
+			clock[0] += 1.0 / 30.0
+			if clock[0] >= 0.5:
+				if worst[0] > 0.01:
+					print("CLIP t=%.1f depth=%.2f bone=%s at=%s" % [Time.get_ticks_msec() / 1000.0, worst[0], worst[1], (worst[2] as Vector3).snapped(Vector3.ONE * 0.01)])
+				worst[0] = 0.0
+				clock[0] = 0.0)
 	if OS.has_environment("KM0_PREVIEW_DEBUG"):
 		var timer := Timer.new()
 		add_child(timer)

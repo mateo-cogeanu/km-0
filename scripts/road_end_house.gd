@@ -48,6 +48,9 @@ const CRAWL_STRIDES := 6.0
 # The tall stairwell wall the creature climbs down, from the landing to where
 # the wall ends at the foot of the stairs.
 const WALL_X := 2.55
+# The stairs' footprint across the room.
+const STAIR_LEFT := 1.095
+const STAIR_RIGHT := 2.505
 const WALL_NORMAL := Vector3.LEFT
 const WALL_STANDOFF := 0.27
 const WALL_START_Z := -3.1
@@ -310,7 +313,7 @@ func _descend(progress: float) -> void:
 func _wall_point(z: float) -> Vector3:
 	## The line the creature's belly follows down the wall: high above the
 	## steps at first, closer to them near the bottom.
-	var height := lerpf(1.5, 0.95, smoothstep(-1.4, WALL_END_Z, z))
+	var height := lerpf(1.55, 1.12, smoothstep(-1.4, WALL_END_Z, z))
 	return Vector3(WALL_X, _stair_line(z) + height, z)
 
 
@@ -327,6 +330,31 @@ func _wall_side(z: float) -> Vector3:
 	## Across the wall: the creature's right, pointing up the wall.
 	var heading := _wall_heading(z)
 	return Vector3(0, heading.z, -heading.y)
+
+
+func ground_height(x: float, z: float) -> float:
+	## Height of whatever is underfoot inside the house: a stair tread or the floor.
+	if x < STAIR_LEFT or x > STAIR_RIGHT:
+		return 0.0
+	return _stair_height(z)
+
+
+func _ground_under(point: Vector3, reach: float) -> float:
+	## Highest surface under a hand or foot, so it rests on a step rather than
+	## sinking into its edge.
+	var top := 0.0
+	for dx in [-reach, 0.0, reach]:
+		for dz in [-reach, 0.0, reach]:
+			top = maxf(top, ground_height(point.x + dx, point.z + dz))
+	return top
+
+
+func _ground_smooth(point: Vector3) -> float:
+	## Ground under the body, eased across step edges so it glides down them.
+	var total := 0.0
+	for dz in [-0.3, -0.15, 0.0, 0.15, 0.3]:
+		total += _ground_under(point + Vector3(0, 0, dz), 0.22)
+	return total / 5.0
 
 
 func _stair_line(z: float) -> float:
@@ -386,22 +414,30 @@ func _crawl(phase_progress: float) -> void:
 		var hand_right := Vector3.UP.cross(hand_forward)
 		# Hands reach high and slap down; the swing arc overshoots forward.
 		var lift := _swing(phase)
-		var palm := hand_path + hand_forward * (0.24 + lift * 0.06) + hand_right * side * (0.38 + lift * 0.05) + Vector3.UP * (lift * 0.2)
+		var palm := hand_path + hand_forward * (0.24 + lift * 0.06) + hand_right * side * (0.38 + lift * 0.05)
+		palm.y = _ground_under(palm, 0.1) + lift * 0.2
 		var settle := smoothstep(float(i) * 0.085, 0.24 + float(i) * 0.085, phase_progress)
 		var drop_arc := sin(settle * PI) * 0.16
-		palms.append(stair_palms[i].lerp(palm, settle) + stair_normals[i] * drop_arc + Vector3.UP * drop_arc * 0.4)
+		var reach_down := stair_palms[i].lerp(palm, settle) + stair_normals[i] * drop_arc + Vector3.UP * drop_arc * 0.4
+		# On the way from the wall to a tread, pass over the step edges, not through them.
+		reach_down.y = maxf(reach_down.y, _ground_under(reach_down, 0.14) + 0.02 + (1.0 - settle) * 0.08)
+		palms.append(reach_down)
 		normals[i] = stair_normals[i].lerp(Vector3.UP, settle).normalized()
 		var foot_forward := ((bend - start).lerp(end - bend, foot_progress)).normalized()
 		var foot := foot_path - foot_forward * 0.5 + Vector3.UP.cross(foot_forward) * side * 0.3
-		foot.y = (_stair_height(foot.z) if foot.x > 1.07 and foot.x < 2.52 else 0.0) + _swing(phase + 0.5) * 0.13
+		foot.y = _ground_under(foot, 0.1) + _swing(phase + 0.5) * 0.13
 		var foot_settle := smoothstep(0.04 + float(i) * 0.05, 0.22 + float(i) * 0.05, phase_progress)
-		feet.append(stair_feet[i].lerp(foot, foot_settle) + stair_foot_normals[i] * sin(foot_settle * PI) * 0.12)
+		var step_down := stair_feet[i].lerp(foot, foot_settle) + stair_foot_normals[i] * sin(foot_settle * PI) * 0.12
+		step_down.y = maxf(step_down.y, _ground_under(step_down, 0.14) + (1.0 - foot_settle) * 0.08)
+		feet.append(step_down)
 		foot_normals[i] = stair_foot_normals[i].lerp(Vector3.UP, foot_settle).normalized()
 	# The chest drops onto each planted hand and rolls toward it.
 	var plant := absf(sin(strides * TAU))
 	var sway := sin(strides * TAU) * 0.04
-	var shoulders := at + forward * 0.16 + right * sway + Vector3.UP * (0.70 - plant * 0.035 + freeze * 0.05)
-	var pelvis := at - forward * 0.58 - right * sway * 0.6 + Vector3.UP * (0.62 + plant * 0.012)
+	var shoulders := at + forward * 0.16 + right * sway
+	shoulders.y = _ground_smooth(shoulders) + 0.70 - plant * 0.035 + freeze * 0.05
+	var pelvis := at - forward * 0.58 - right * sway * 0.6
+	pelvis.y = _ground_smooth(pelvis) + 0.62 + plant * 0.012
 	# Climbs down off the wall, hands first, and turns belly-down on the floor.
 	var transfer := smoothstep(0.0, 0.24, phase_progress)
 	var held := Vector3(0, -0.14, 0.1)
