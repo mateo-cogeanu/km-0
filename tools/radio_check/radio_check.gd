@@ -1,5 +1,6 @@
 extends Node
-## Records a few seconds of a radio voice, clean and through the radio bus.
+## Records a few seconds of a radio voice, clean and through the radio bus, into
+## the folder in KM0_RADIO_CHECK_DIR. It plays out loud while it records.
 
 const Radio := preload("res://scripts/road_radio.gd")
 
@@ -19,5 +20,5 @@ func _ready() -> void:
 		await get_tree().create_timer(6.0).timeout
 		record.set_recording_active(false)
 		speaker.stop()
-		record.get_recording().save_to_wav("/private/tmp/claude-501/-Users-mateocogeanu-km-0/e3451267-ae12-4e01-ab91-404095614e3d/scratchpad/radio_%s.wav" % pass_name)
+		record.get_recording().save_to_wav(OS.get_environment("KM0_RADIO_CHECK_DIR").path_join("radio_%s.wav") % pass_name)
 	get_tree().quit()
