@@ -885,6 +885,9 @@ func _handle_interaction() -> void:
 	if radio and radio.is_in_group("stranger"):
 		radio.get_parent().talk(self)
 		return
+	if radio and radio.is_in_group("cabin_door"):
+		radio.get_parent().get_parent().toggle_door()
+		return
 	if radio and radio.is_in_group("road_radio"):
 		if is_instance_valid(listening_radio) and listening_radio != radio:
 			listening_radio.stop_listening()
@@ -1414,6 +1417,8 @@ func _interaction_text() -> String:
 		return "" if target.get_parent().opened else "E  Search %s" % target.get_parent().title()
 	if near and target.is_in_group("stranger"):
 		return "E  Talk"
+	if near and target.is_in_group("cabin_door"):
+		return "E  Close door" if target.get_parent().get_parent().door_open else "E  Open door"
 	if target.is_in_group("shack_interactable"):
 		return "Hold left mouse and drag  Move %s" % ("shutter" if target.name == "GarageDoorTarget" else "door")
 	if target is Area3D and car:

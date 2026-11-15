@@ -7,6 +7,7 @@ const Shapes := preload("res://scripts/prop_shapes.gd")
 const PlayerBody := preload("res://scripts/player_body.gd")
 const Supply := preload("res://scripts/supply_item.gd")
 const Style := preload("res://scripts/menu_style.gd")
+const DOOR_SOUND := preload("res://assets/audio/ending/door_open.wav")
 
 const LOCATION := Vector3(46.0, 0.0, 660.0)
 ## The door faces back towards the road and the workshop.
@@ -59,6 +60,9 @@ var voices := {}
 var talk_spot: Area3D
 var refused := false
 var ask_after := false
+var door_hinge: Node3D
+var door_target: Area3D
+var door_open := false
 
 
 func _ready() -> void:
@@ -79,13 +83,15 @@ func _build_cabin() -> void:
 	var planks := Shapes.material(Color("#5e4a38"))
 	var dark := Shapes.material(Color("#2a2420"))
 	var floor_wood := Shapes.material(Color("#4a3c2f"))
-	Shapes.box(self, "Floor", Vector3(5.2, 0.12, 4.2), Vector3(0, 0.02, 0), floor_wood, true)
+	# Flush with the ground, so there is no step at the door.
+	Shapes.box(self, "Floor", Vector3(5.2, 0.12, 4.2), Vector3(0, -0.09, 0), floor_wood, true)
 	Shapes.box(self, "BackWall", Vector3(5.2, 2.6, 0.14), Vector3(0, 1.3, -2.05), planks, true)
 	for side in [-1.0, 1.0]:
 		Shapes.box(self, "SideWall", Vector3(0.14, 2.6, 4.2), Vector3(side * 2.55, 1.3, 0), planks, true)
-		# The front, either side of the doorway.
-		Shapes.box(self, "FrontWall", Vector3(2.1, 2.6, 0.14), Vector3(side * 1.5, 1.3, 2.05), planks, true)
-	Shapes.box(self, "Lintel", Vector3(0.9, 0.5, 0.14), Vector3(0, 2.35, 2.05), planks, true)
+		# The front, either side of a doorway wide and tall enough to walk through.
+		Shapes.box(self, "FrontWall", Vector3(1.9, 2.6, 0.14), Vector3(side * 1.6, 1.3, 2.05), planks, true)
+	Shapes.box(self, "Lintel", Vector3(1.3, 0.2, 0.14), Vector3(0, 2.5, 2.05), planks, true)
+	_build_door(planks, dark)
 	for i in range(9):
 		for side in [-1.0, 1.0]:
 			Shapes.box(self, "Seam", Vector3(0.02, 2.6, 0.02), Vector3(side * 2.63, 1.3, -1.9 + i * 0.47), dark)
@@ -143,12 +149,48 @@ func _build_cabin() -> void:
 		can.rotation.y = spot.x * 3.0
 
 
+func _build_door(planks: Material, dark: Material) -> void:
+	door_hinge = Node3D.new()
+	door_hinge.name = "DoorHinge"
+	add_child(door_hinge)
+	door_hinge.position = Vector3(-0.64, 0, 2.05)
+	Shapes.box(door_hinge, "Door", Vector3(1.26, 2.36, 0.06), Vector3(0.63, 1.2, 0), planks, true)
+	for y in [0.45, 1.95]:
+		Shapes.box(door_hinge, "DoorBrace", Vector3(1.2, 0.1, 0.02), Vector3(0.63, y, 0.04), dark)
+	Shapes.cylinder(door_hinge, "Knob", Vector3(1.12, 1.05, 0.06), Vector3.BACK, 0.035, 0.05, Shapes.material(Color("#7a6a4a"), 0.5, 0.4))
+	door_target = Area3D.new()
+	door_target.collision_layer = 8
+	door_target.collision_mask = 0
+	door_target.add_to_group("cabin_door")
+	door_hinge.add_child(door_target)
+	var hitbox := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.28, 2.38, 0.12)
+	hitbox.shape = shape
+	hitbox.position = Vector3(0.63, 1.2, 0)
+	door_target.add_child(hitbox)
+
+
+func toggle_door() -> void:
+	door_open = not door_open
+	var swing := create_tween()
+	swing.tween_property(door_hinge, "rotation:y", deg_to_rad(100.0) if door_open else 0.0, 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	var creak := AudioStreamPlayer3D.new()
+	creak.stream = DOOR_SOUND
+	creak.unit_size = 3.0
+	creak.volume_db = -6.0
+	add_child(creak)
+	creak.position = Vector3(0, 1.3, 2.05)
+	creak.play()
+	creak.finished.connect(creak.queue_free)
+
+
 func _build_stranger() -> void:
 	stranger = PlayerBody.new()
 	stranger.name = "Stranger"
 	add_child(stranger)
 	stranger.build(false)
-	stranger.position = Vector3(0.55, PlayerBody.FEET + 0.08, -0.7)
+	stranger.position = Vector3(0.55, PlayerBody.FEET - 0.03, -0.7)
 	# Older, in a worn flannel coat and work trousers.
 	var recolor := {"Jacket": Color("#5a2a22"), "Jeans": Color("#5b5240"), "Hair": Color("#7a7670")}
 	for mesh: MeshInstance3D in stranger.find_children("*", "MeshInstance3D", true, false):
