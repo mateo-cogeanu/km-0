@@ -5,6 +5,12 @@ const EYE := preload("res://assets/characters/road_eye.gdshader")
 const SKIN := preload("res://assets/characters/road_skin.gdshader")
 const LIGHT_LAYER := 1 << 18
 const SIDES := ["L", "R"]
+# Shared with Sources/make_road_creature.py, which builds the rest pose to these lengths.
+const HEAD_OFFSET := Vector3(0, 0.16, 0.36)
+const UPPER_ARM := 0.73
+const FOREARM := 0.78
+const THIGH := 0.69
+const SHIN := 0.65
 
 var head: Node3D
 var jaw: Node3D
@@ -13,6 +19,8 @@ var rig: Skeleton3D
 var indices: Dictionary[String, int] = {}
 var rest: Dictionary[String, Transform3D] = {}
 var posed: Dictionary[String, Transform3D] = {}
+## Extra head roll in radians, set while the creature stops to study you.
+var tilt := 0.0
 
 
 func _ready() -> void:
@@ -49,20 +57,18 @@ func _ready() -> void:
 
 func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Array[Vector3], normals: Array[Vector3],
 		soles: Array[Vector3], elapsed: float, reveal: float = 0.0) -> void:
-	var spine := (shoulders - pelvis).normalized()
-	head.position = shoulders + Vector3(0, 0.10, 0.28)
+	head.position = shoulders + HEAD_OFFSET
 	var forward := (gaze - head.position).normalized()
 	if absf(forward.dot(Vector3.UP)) < 0.98:
 		head.basis = Basis.looking_at(forward, Vector3.UP, true)
 	var inspect := smoothstep(5.45, 6.22, elapsed) * (1.0 - smoothstep(6.75, 7.26, elapsed))
 	var jerk := _twitch(elapsed - 1.52) * -0.65 + _twitch(elapsed - 6.29)
-	head.rotate_object_local(Vector3.BACK, 0.045 * sin(elapsed * 1.45) + inspect * 0.24 + jerk * (0.16 + reveal * 0.025))
+	head.rotate_object_local(Vector3.BACK, 0.045 * sin(elapsed * 1.45) + inspect * 0.24 + jerk * (0.16 + reveal * 0.025) + tilt)
 	head.rotate_object_local(Vector3.RIGHT, jerk * 0.061)
 
 	_aim_bone("Torso", pelvis, shoulders, rest["Neck"].origin)
 	_aim_bone("Neck", shoulders, head.position - head.basis.z * 0.105, rest["Head"].origin)
-	var face_basis := (head.basis * rest["Head"].basis).scaled_local(Vector3.ONE * 0.86)
-	_set_bone("Head", Transform3D(face_basis, head.position - head.basis.z * 0.105))
+	_set_bone("Head", Transform3D(head.basis * rest["Head"].basis, head.position - head.basis.z * 0.105))
 	_pose_jaw()
 	for i in SIDES.size():
 		var suffix: String = SIDES[i]
@@ -74,13 +80,13 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 		hand.position = palms[i] + normal * 0.023
 		var wrist := hand.position - bearing * 0.057 + normal * 0.064
 		var shoulder := shoulders + Vector3(side * 0.193, 0.0, 0.0)
-		var elbow := _joint(shoulder, wrist, Vector3(side * 0.91, -0.20, -0.65), 0.73, 0.78)
+		var elbow := _joint(shoulder, wrist, Vector3(side * 0.91, -0.20, -0.65), UPPER_ARM, FOREARM)
 		_aim_bone("UpperArm" + suffix, shoulder, elbow, rest["Forearm" + suffix].origin)
 		_aim_bone("Forearm" + suffix, elbow, wrist, rest["Hand" + suffix].origin)
 		_set_bone("Hand" + suffix, Transform3D(hand.basis * rest["Hand" + suffix].basis, wrist))
 		var ankle := soles[i] + Vector3(0, 0.106, -0.04)
 		var hip := pelvis + Vector3(side * 0.116, 0.0, 0.0)
-		var knee := _joint(hip, ankle, Vector3(side * 0.83, 0.18, 0.74), 0.69, 0.65)
+		var knee := _joint(hip, ankle, Vector3(side * 0.83, 0.18, 0.74), THIGH, SHIN)
 		_aim_bone("Thigh" + suffix, hip, knee, rest["Shin" + suffix].origin)
 		_aim_bone("Shin" + suffix, knee, ankle, rest["Foot" + suffix].origin)
 		_set_bone("Foot" + suffix, Transform3D(rest["Foot" + suffix].basis, ankle))

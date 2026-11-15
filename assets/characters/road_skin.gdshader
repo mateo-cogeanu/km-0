@@ -25,9 +25,10 @@ void vertex() {
 
 void fragment() {
 	float cloud = 0.69 * skin_noise(skin_position * 7.5) + 0.31 * skin_noise(skin_position * 21.0);
-	float patches = smoothstep(0.18, 0.78, cloud);
-	ALBEDO = mix(vec3(0.21, 0.16, 0.16), vec3(0.48, 0.39, 0.34), patches);
-	ROUGHNESS = mix(0.86, 0.69, patches);
+	// Keep the mottling faint so the whole body reads as one even, pale skin.
+	float patches = smoothstep(0.2, 0.8, cloud);
+	ALBEDO = mix(vec3(0.40, 0.34, 0.31), vec3(0.50, 0.43, 0.39), patches);
+	ROUGHNESS = mix(0.8, 0.72, patches);
 	SPECULAR = 0.26;
 
 	// Surface gradients add pores without relying on UVs or changing the silhouette.

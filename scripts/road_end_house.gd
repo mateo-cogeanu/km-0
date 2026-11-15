@@ -41,6 +41,9 @@ var stair_pelvis := Vector3.ZERO
 
 const STAIR_TIME := 7.7
 const CRAWL_TIME := 7.0
+const CRAWL_STRIDES := 6.0
+## Fraction of the crawl covered before it stops with a hand in the air.
+const CRAWL_PAUSE_AT := 0.47
 const LEAN_TIME := 2.25
 const CLOSE_HOLD := 3.1
 const INTRO_QUESTION_CUE := 1.07
@@ -315,14 +318,18 @@ func _stair_hold(seconds: float) -> void:
 
 
 func _crawl(phase_progress: float) -> void:
-	var progress := smoothstep(0.15, 1.0, phase_progress)
+	# Approach, freeze with a hand raised and the head cocked, then scuttle.
+	var progress := _crawl_distance(phase_progress)
+	var freeze := smoothstep(0.4, 0.46, phase_progress) * (1.0 - smoothstep(0.58, 0.62, phase_progress))
+	creature.tilt = freeze * 0.38 + _twitch_at(phase_progress, 0.5) * 0.12
 	var eye := to_local(player.camera.global_position)
 	var end := Vector3(eye.x, 0, eye.z - 1.03)
 	var bend := Vector3(1.42, 0, 0.66)
 	var start := Vector3(walk_start.x, 0, walk_start.z)
-	var at := start.lerp(bend, progress).lerp(bend.lerp(end, progress), progress)
+	var strides := progress * CRAWL_STRIDES
+	var at := _crawl_path(start, bend, end, progress)
 	var forward := (bend - start).lerp(end - bend, progress).normalized()
-	var strides := progress * 4.0
+	var right := Vector3.UP.cross(forward)
 	creature.position = at
 	var palms: Array[Vector3] = []
 	var normals: Array[Vector3] = [Vector3.UP, Vector3.UP]
@@ -330,13 +337,15 @@ func _crawl(phase_progress: float) -> void:
 	for i in range(2):
 		var side := -1.0 if i == 0 else 1.0
 		var phase := strides + i * 0.5
-		var hand_progress := clampf((_contact(phase) + 0.12) / 4.0, 0, 1)
-		var hand_path := start.lerp(bend, hand_progress).lerp(bend.lerp(end, hand_progress), hand_progress)
-		var foot_progress := clampf((_contact(phase + 0.5) - 0.42) / 4.0, 0, 1)
-		var foot_path := start.lerp(bend, foot_progress).lerp(bend.lerp(end, foot_progress), foot_progress)
+		var hand_progress := clampf((_contact(phase) + 0.12) / CRAWL_STRIDES, 0, 1)
+		var hand_path := _crawl_path(start, bend, end, hand_progress)
+		var foot_progress := clampf((_contact(phase + 0.5) - 0.42) / CRAWL_STRIDES, 0, 1)
+		var foot_path := _crawl_path(start, bend, end, foot_progress)
 		var hand_forward := ((bend - start).lerp(end - bend, hand_progress)).normalized()
 		var hand_right := Vector3.UP.cross(hand_forward)
-		var palm := hand_path + hand_forward * 0.37 + hand_right * side * 0.39 + Vector3.UP * (_swing(phase) * 0.18)
+		# Hands reach high and slap down; the swing arc overshoots forward.
+		var lift := _swing(phase)
+		var palm := hand_path + hand_forward * (0.37 + lift * 0.06) + hand_right * side * (0.40 + lift * 0.05) + Vector3.UP * (lift * 0.24)
 		var settle := smoothstep(float(i) * 0.085, 0.24 + float(i) * 0.085, phase_progress)
 		var drop_arc := sin(settle * PI) * 0.16
 		palms.append(stair_palms[i].lerp(palm, settle) + Vector3(-side * drop_arc, 0, drop_arc * 0.3))
@@ -345,14 +354,31 @@ func _crawl(phase_progress: float) -> void:
 		var foot := foot_path - foot_forward * 0.51 + Vector3.UP.cross(foot_forward) * side * 0.32
 		foot.y = (_stair_height(foot.z) if foot.x > 1.07 and foot.x < 2.52 else 0.0) + _swing(phase + 0.5) * 0.13
 		feet.append(stair_feet[i].lerp(foot, smoothstep(0.08, 0.36, phase_progress)))
-	var shoulders := at + forward * 0.16 + Vector3.UP * (0.70 + sin(strides * TAU) * 0.026)
-	var pelvis := at - forward * 0.58 + Vector3.UP * 0.62
+	# The chest drops onto each planted hand and rolls toward it.
+	var plant := absf(sin(strides * TAU))
+	var sway := sin(strides * TAU) * 0.04
+	var shoulders := at + forward * 0.16 + right * sway + Vector3.UP * (0.70 - plant * 0.035 + freeze * 0.05)
+	var pelvis := at - forward * 0.58 - right * sway * 0.6 + Vector3.UP * (0.62 + plant * 0.012)
 	var transfer := smoothstep(0.0, 0.38, phase_progress)
 	shoulders = (stair_shoulders + Vector3.UP * (sin(1.65 * 2.5) * 0.012)).lerp(shoulders, transfer)
 	pelvis = stair_pelvis.lerp(pelvis, transfer)
 	_pose(shoulders, pelvis, palms, normals, feet, lerpf(4.2275, 5.75, phase_progress))
 	if phase_progress >= 0.26:
-		_play_contact(strides * 2.0, palms[floori(strides * 2.0) % 2], 0.96)
+		_play_contact(strides * 2.0, palms[floori(strides * 2.0) % 2], 0.96 + (0.08 if phase_progress > 0.6 else 0.0))
+
+
+func _crawl_path(start: Vector3, bend: Vector3, end: Vector3, t: float) -> Vector3:
+	return start.lerp(bend, t).lerp(bend.lerp(end, t), t)
+
+
+func _crawl_distance(t: float) -> float:
+	## Time to distance: a measured approach, a dead stop, then a fast rush.
+	return smoothstep(0.15, 0.46, t) * CRAWL_PAUSE_AT + smoothstep(0.58, 1.0, t) * (1.0 - CRAWL_PAUSE_AT)
+
+
+func _twitch_at(t: float, at: float) -> float:
+	var local := (t - at) * CRAWL_TIME
+	return smoothstep(0.0, 0.04, local) * (1.0 - smoothstep(0.06, 0.22, local))
 
 
 func _contact(phase: float) -> float:
@@ -419,7 +445,7 @@ func _creature_light(title: String, at: Vector3, tint: Color, energy: float, rea
 
 func _final_pose(amount: float, elapsed: float) -> void:
 	var eye := to_local(player.camera.global_position)
-	var shoulders := last_shoulders.lerp(eye + Vector3(0, -0.40, -0.82), amount)
+	var shoulders := last_shoulders.lerp(eye + Vector3(0, -0.46, -0.90), amount)
 	var pelvis := last_pelvis.lerp(last_pelvis + Vector3.UP * 0.12, amount)
 	var normals: Array[Vector3] = [Vector3.UP, Vector3.UP]
 	_pose(shoulders, pelvis, last_palms, normals, last_feet, 5.75 + elapsed, amount)
