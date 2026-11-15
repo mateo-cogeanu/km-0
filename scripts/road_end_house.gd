@@ -251,7 +251,7 @@ func _pose(shoulders: Vector3, pelvis: Vector3, palms: Array[Vector3], normals: 
 
 func _lean(amount: float) -> void:
 	_final_pose(amount, amount * 0.52)
-	creature.jaw.position.y = -0.006 * amount
+	creature.set_jaw_offset(-0.006 * amount)
 	if amount > 0.35 and not creature.has_node("FaceFill"):
 		var fill := OmniLight3D.new()
 		fill.name = "FaceFill"
@@ -273,7 +273,7 @@ func _final_pose(amount: float, elapsed: float) -> void:
 func _hold_face(elapsed: float, speaking: bool) -> void:
 	_final_pose(1.0, elapsed + (0.97 if speaking else 0.52))
 	var opening := maxf(0.0, sin(elapsed * 19.0)) * exp(-elapsed * 0.82)
-	creature.jaw.position.y = -0.003 - 0.007 * opening if speaking else -0.006
+	creature.set_jaw_offset(-0.003 - 0.007 * opening if speaking else -0.006)
 
 
 func _deliver_line() -> void:
