@@ -142,7 +142,7 @@ func _ready() -> void:
 		check.start(1.0)
 	if OS.has_environment("KM0_PREVIEW_CLIPCHECK"):
 		# Skin a sample of the body on the CPU each frame and report how deep
-		# it sinks into the stairs or the floor, worst point per half second.
+		# it sinks into the stairs, the floor or the walls, worst point per half second.
 		var worst := [0.0, "", Vector3.ZERO]
 		var clock := [0.0]
 		get_tree().process_frame.connect(func() -> void:
@@ -169,7 +169,7 @@ func _ready() -> void:
 						if w > weights[v * 4 + top]:
 							top = k
 				p = house.to_local(c.to_global(p))
-				var depth: float = house.ground_height(p.x, p.z) - p.y
+				var depth: float = maxf(house.ground_height(p.x, p.z) - p.y, house.wall_depth(p))
 				if depth > worst[0]:
 					worst[0] = depth
 					worst[1] = mi.skin.get_bind_name(bones[v * 4 + top])
@@ -177,7 +177,7 @@ func _ready() -> void:
 			clock[0] += 1.0 / 30.0
 			if clock[0] >= 0.5:
 				if worst[0] > 0.01:
-					print("CLIP t=%.1f depth=%.2f bone=%s at=%s" % [Time.get_ticks_msec() / 1000.0, worst[0], worst[1], (worst[2] as Vector3).snapped(Vector3.ONE * 0.01)])
+					print("CLIP t=%.1f pos=%s depth=%.2f bone=%s at=%s" % [Time.get_ticks_msec() / 1000.0, house.creature.position.snapped(Vector3.ONE * 0.01), worst[0], worst[1], (worst[2] as Vector3).snapped(Vector3.ONE * 0.01)])
 				worst[0] = 0.0
 				clock[0] = 0.0)
 	if OS.has_environment("KM0_PREVIEW_DEBUG"):

@@ -22,6 +22,10 @@ var rest: Dictionary[String, Transform3D] = {}
 var posed: Dictionary[String, Transform3D] = {}
 ## Extra head roll in radians, set while the creature stops to study you.
 var tilt := 0.0
+## Optional: takes a joint and the limb root it hangs from, in this node's
+## space, and returns the joint moved out of any wall on the root's side.
+## Elbows and knees swing around their limb to stay clear.
+var keep_clear := Callable()
 var torso_length := 0.744
 var neck_length := 0.3
 var rest_spine := Vector3.BACK
@@ -103,8 +107,9 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 		var shoulder := shoulders + body * Vector3(side * 0.193, 0.0, 0.0)
 		var wrist := _reach(shoulder, palms[i] + normal * 0.087 - hand.basis.z * 0.057, UPPER_ARM + FOREARM)
 		hand.position = wrist + hand.basis.z * 0.057 - normal * 0.064
-		# Elbows splay out and back from the body.
-		var elbow := _joint(shoulder, wrist, body * Vector3(side * 0.91, -0.20, -0.65), UPPER_ARM, FOREARM)
+		# Elbows splay out and back from the body, arched away from the surface
+		# it clings to so they never fold into it.
+		var elbow := _clear_joint(shoulder, wrist, body * Vector3(side * 0.91, 0.3, -0.65), UPPER_ARM, FOREARM)
 		_aim_bone("UpperArm" + suffix, shoulder, elbow, rest["Forearm" + suffix].origin, body)
 		_aim_bone("Forearm" + suffix, elbow, wrist, rest["Hand" + suffix].origin, body)
 		_set_bone("Hand" + suffix, Transform3D(hand.basis * rest["Hand" + suffix].basis, wrist))
@@ -112,7 +117,7 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 		var foot_basis := _contact_basis(sole_normal, heading)
 		var hip := pelvis + body * Vector3(side * 0.116, 0.0, 0.0)
 		var ankle := _reach(hip, soles[i] + sole_normal * 0.106 - foot_basis.z * 0.04, THIGH + SHIN)
-		var knee := _joint(hip, ankle, body * Vector3(side * 0.9, 0.1, 0.6), THIGH, SHIN)
+		var knee := _clear_joint(hip, ankle, body * Vector3(side * 0.9, 0.35, 0.6), THIGH, SHIN)
 		_aim_bone("Thigh" + suffix, hip, knee, rest["Shin" + suffix].origin, body)
 		_aim_bone("Shin" + suffix, knee, ankle, rest["Foot" + suffix].origin, body)
 		_set_bone("Foot" + suffix, Transform3D(foot_basis * rest["Foot" + suffix].basis, ankle))
@@ -172,6 +177,23 @@ func _set_bone(label: String, target: Transform3D) -> void:
 
 func _twitch(elapsed: float) -> float:
 	return smoothstep(0, 0.042, elapsed) * (1.0 - smoothstep(0.064, 0.24, elapsed))
+
+
+func _clear_joint(start: Vector3, end: Vector3, bend: Vector3, first: float, second: float) -> Vector3:
+	## Like _joint, but turns the bend around the limb until the joint is out of
+	## the walls.
+	var joint := _joint(start, end, bend, first, second)
+	if not keep_clear.is_valid():
+		return joint
+	var lean := bend
+	for attempt in 12:
+		var clear: Vector3 = keep_clear.call(joint, start)
+		if clear.is_equal_approx(joint):
+			break
+		# Lean the bend further the way the wall pushed, until the joint is clear.
+		lean = (joint - start).slide((end - start).normalized()).normalized() + (clear - joint).normalized() * 0.5
+		joint = _joint(start, end, lean, first, second)
+	return joint
 
 
 func _joint(start: Vector3, end: Vector3, bend: Vector3, first: float, second: float) -> Vector3:

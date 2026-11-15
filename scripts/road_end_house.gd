@@ -41,6 +41,7 @@ var stair_shoulders := Vector3.ZERO
 var stair_pelvis := Vector3.ZERO
 var stair_foot_normals: Array[Vector3] = []
 var stair_normals: Array[Vector3] = []
+var walls: Array[AABB] = []
 
 const STAIR_TIME := 7.7
 const CRAWL_TIME := 7.0
@@ -58,6 +59,12 @@ const WALL_END_Z := -0.85
 # Palms stop this far back so the long fingers stay on the plaster too.
 const WALL_EDGE_Z := -0.36
 const WALL_STRIDES := 7.0
+# Feet stay this far in front of the back wall at the top of the climb.
+const BACK_WALL_Z := -3.25
+# Hands and feet keep this far from the stairwell walls while between them.
+const WALL_MARGIN := 0.13
+# Room kept between an elbow or knee and a wall.
+const JOINT_CLEARANCE := 0.09
 ## Fraction of the crawl covered before it stops with a hand in the air.
 const CRAWL_PAUSE_AT := 0.47
 const LEAN_TIME := 2.25
@@ -192,6 +199,37 @@ func _open_door() -> void:
 
 func _wall(at: Vector3, size: Vector3) -> void:
 	Shapes.box(self, "Wall", size, at, plaster, true)
+	walls.append(AABB(at - size * 0.5, size))
+
+
+func _clear_of_walls(point: Vector3, root: Vector3) -> Vector3:
+	## Push a creature joint (in the creature's space) out of the walls, back
+	## toward the side its limb root is on, with room for the flesh around it.
+	var at := point + creature.position
+	var from := root + creature.position
+	for box: AABB in walls:
+		var grown := box.grow(JOINT_CLEARANCE)
+		# Out through the wall's face, never around its end; a joint that went
+		# right through to the far side is pulled back too.
+		var axis := 0 if box.size.x < box.size.z else 2
+		var across := 2 - axis
+		if at.y < grown.position.y or at.y > grown.end.y or at[across] < grown.position[across] or at[across] > grown.end[across]:
+			continue
+		if from[axis] < box.get_center()[axis]:
+			at[axis] = minf(at[axis], grown.position[axis])
+		else:
+			at[axis] = maxf(at[axis], grown.end[axis])
+	return at - creature.position
+
+
+func wall_depth(point: Vector3) -> float:
+	## How far a point is inside the nearest wall, or 0 when it is clear of them.
+	var depth := 0.0
+	for box: AABB in walls:
+		if box.has_point(point):
+			var inside := (point - box.position).min(box.end - point)
+			depth = maxf(depth, minf(inside.x, minf(inside.y, inside.z)))
+	return depth
 
 
 func _lamp(at: Vector3, energy: float, reach: float) -> void:
@@ -226,6 +264,7 @@ func _on_entry(body: Node3D) -> void:
 		sky_fill.light_cull_mask &= ~Creature.LIGHT_LAYER
 	creature = Creature.new()
 	add_child(creature)
+	creature.keep_clear = _clear_of_walls
 	creature.position = Vector3(1.80, 2.70, -3.36)
 	creature.hide()
 	_creature_light("StairLight", Vector3(2.0, 3.41, -0.65), Color("#dfb99a"), 1.45, 4.8)
@@ -304,7 +343,7 @@ func _descend(progress: float) -> void:
 		palms.append(_on_wall(_wall_point(palm_z) + _wall_side(palm_z) * side * 0.4) + WALL_NORMAL * lift * 0.14)
 		var foot_phase := phase + 0.5
 		var foot_lift := _swing(foot_phase)
-		var foot_z := minf(WALL_START_Z + (_contact(foot_phase) - 0.95) * step, WALL_EDGE_Z)
+		var foot_z := clampf(WALL_START_Z + (_contact(foot_phase) - 0.95) * step, BACK_WALL_Z, WALL_EDGE_Z)
 		feet.append(_on_wall(_wall_point(foot_z) + _wall_side(foot_z) * side * 0.32) + WALL_NORMAL * foot_lift * 0.12)
 	_pose(center + spine * 0.372, center - spine * 0.372, palms, normals, feet, progress * 3.65, 0.0, normals, WALL_NORMAL)
 	_play_contact(stride * 2.0, palms[mini(1, floori(stride * 2.0) % 2)], 0.76)
@@ -392,7 +431,7 @@ func _crawl(phase_progress: float) -> void:
 	creature.tilt = freeze * 0.38 + _twitch_at(phase_progress, 0.5) * 0.12
 	var eye := to_local(player.camera.global_position)
 	var end := Vector3(eye.x, 0, eye.z - 1.03)
-	var bend := Vector3(1.42, 0, 0.66)
+	var bend := Vector3(1.72, 0, 0.82)
 	var start := Vector3(walk_start.x, 0, walk_start.z)
 	var strides := progress * CRAWL_STRIDES
 	var at := _crawl_path(start, bend, end, progress)
@@ -415,19 +454,23 @@ func _crawl(phase_progress: float) -> void:
 		# Hands reach high and slap down; the swing arc overshoots forward.
 		var lift := _swing(phase)
 		var palm := hand_path + hand_forward * (0.24 + lift * 0.06) + hand_right * side * (0.38 + lift * 0.05)
+		palm = _between_walls(palm)
 		palm.y = _ground_under(palm, 0.1) + lift * 0.2
 		var settle := smoothstep(float(i) * 0.085, 0.24 + float(i) * 0.085, phase_progress)
 		var drop_arc := sin(settle * PI) * 0.16
 		var reach_down := stair_palms[i].lerp(palm, settle) + stair_normals[i] * drop_arc + Vector3.UP * drop_arc * 0.4
 		# On the way from the wall to a tread, pass over the step edges, not through them.
+		reach_down = _between_walls(reach_down)
 		reach_down.y = maxf(reach_down.y, _ground_under(reach_down, 0.14) + 0.02 + (1.0 - settle) * 0.08)
 		palms.append(reach_down)
 		normals[i] = stair_normals[i].lerp(Vector3.UP, settle).normalized()
 		var foot_forward := ((bend - start).lerp(end - bend, foot_progress)).normalized()
 		var foot := foot_path - foot_forward * 0.5 + Vector3.UP.cross(foot_forward) * side * 0.3
+		foot = _between_walls(foot)
 		foot.y = _ground_under(foot, 0.1) + _swing(phase + 0.5) * 0.13
 		var foot_settle := smoothstep(0.04 + float(i) * 0.05, 0.22 + float(i) * 0.05, phase_progress)
 		var step_down := stair_feet[i].lerp(foot, foot_settle) + stair_foot_normals[i] * sin(foot_settle * PI) * 0.12
+		step_down = _between_walls(step_down)
 		step_down.y = maxf(step_down.y, _ground_under(step_down, 0.14) + (1.0 - foot_settle) * 0.08)
 		feet.append(step_down)
 		foot_normals[i] = stair_foot_normals[i].lerp(Vector3.UP, foot_settle).normalized()
@@ -447,6 +490,14 @@ func _crawl(phase_progress: float) -> void:
 	_pose(shoulders, pelvis, palms, normals, feet, lerpf(4.2275, 5.75, phase_progress), 0.0, foot_normals, back)
 	if phase_progress >= 0.26:
 		_play_contact(strides * 2.0, palms[floori(strides * 2.0) % 2], 0.96 + (0.08 if phase_progress > 0.6 else 0.0))
+
+
+func _between_walls(point: Vector3) -> Vector3:
+	## Keep a hand or foot off the stairwell walls until it is past their end.
+	var inside := 1.0 - smoothstep(-0.2, 0.1, point.z)
+	var clamped := point
+	clamped.x = clampf(point.x, STAIR_LEFT + WALL_MARGIN, WALL_X - WALL_MARGIN)
+	return point.lerp(clamped, inside)
 
 
 func _crawl_path(start: Vector3, bend: Vector3, end: Vector3, t: float) -> Vector3:
