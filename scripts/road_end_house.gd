@@ -10,6 +10,11 @@ const STEP := preload("res://assets/audio/ending/step.wav")
 const DRY_TICKS := preload("res://assets/audio/ending/dry_ticks.wav")
 const RAPID_CLICKS := preload("res://assets/audio/ending/rapid_clicks.wav")
 const THROAT_RATTLE := preload("res://assets/audio/ending/throat_rattle.wav")
+const CLOCK_TICK := preload("res://assets/audio/ending/clock_tick.wav")
+const HOUSE_HUM := preload("res://assets/audio/ending/house_hum.wav")
+const FLICKER := preload("res://assets/audio/ending/flicker.wav")
+const CRACK := preload("res://assets/audio/ending/crack.wav")
+const HIT := preload("res://assets/audio/ending/hit.wav")
 
 var boards := Shapes.material(Color("#675545"))
 var floorboards := Shapes.material(Color("#504236"))
@@ -42,8 +47,47 @@ var stair_pelvis := Vector3.ZERO
 var stair_foot_normals: Array[Vector3] = []
 var stair_normals: Array[Vector3] = []
 var walls: Array[AABB] = []
+var lamps: Array[OmniLight3D] = []
+var lamp_energy: Array[float] = []
+## Scales every light in the house, for the flickers.
+var light_level := 1.0
+var interior: Environment
+var ambience: Array[AudioStreamPlayer3D] = []
+var sting: AudioStreamPlayer
+var elbow_cracked := false
+var twist_cracked := false
+# Hiding and moving between the walls once the lights come back.
+var stalking := false
+var stalk_spots: Array[Dictionary] = []
+var stalk_index := -1
+var stalk_seen := 0.0
+var stalk_unseen := 0.0
+var stalk_found := false
+var stalk_wait := 0.0
+var stalk_clock := 0.0
+## Whether posing the creature also turns your head toward it.
+var camera_follow := true
+## Which way you face it at the end, and which way its back faced before.
+var face_basis := Basis()
+var face_back := Vector3.UP
+var face_close := 0.0
+var shake := 0.0
+var fake_end: Control
+var fake_tilt: Control
+var fake_black: ColorRect
+var fake_card: Control
+var fake_twisted := false
 
 const STAIR_TIME := 7.7
+## How far into the crawl it freezes before the lights go.
+const VANISH_AT := 0.53
+const FREEZE_AT := 0.44
+const RUSH_TIME := 0.3
+# Looking straight at it keeps it still; it moves only while unwatched.
+const WATCHED_ANGLE := 0.82
+const MOVE_AFTER_LOOK_AWAY := 0.55
+const LOST_TIMEOUT := 6.5
+const STARE_TIMEOUT := 4.0
 const CRAWL_TIME := 7.0
 const CRAWL_STRIDES := 6.0
 # The tall stairwell wall the creature climbs down, from the landing to where
@@ -241,6 +285,8 @@ func _lamp(at: Vector3, energy: float, reach: float) -> void:
 	light.light_cull_mask &= ~Creature.LIGHT_LAYER
 	add_child(light)
 	light.position = at
+	lamps.append(light)
+	lamp_energy.append(energy)
 
 
 func _on_entry(body: Node3D) -> void:
@@ -250,7 +296,7 @@ func _on_entry(body: Node3D) -> void:
 	player = body
 	player.lock_for_ending(to_global(Vector3(0, 1.03, 5.62)))
 	var world_environment := get_tree().current_scene.get_node("WorldEnvironment") as WorldEnvironment
-	var interior := world_environment.environment.duplicate() as Environment
+	interior = world_environment.environment.duplicate() as Environment
 	interior.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	interior.ambient_light_color = Color("#a6a7b4")
 	interior.ambient_light_energy = 0.19
@@ -267,12 +313,19 @@ func _on_entry(body: Node3D) -> void:
 	creature.keep_clear = _clear_of_walls
 	creature.position = Vector3(1.80, 2.70, -3.36)
 	creature.hide()
-	_creature_light("StairLight", Vector3(2.0, 3.41, -0.65), Color("#dfb99a"), 1.45, 4.8)
+	# Lit low, so it reads mostly as an outline until its face is close.
+	_creature_light("StairLight", Vector3(2.0, 3.41, -0.65), Color("#dfb99a"), 0.95, 4.8)
 	_creature_light("StairRim", Vector3(2.33, 2.45, -3.27), Color("#8b9fc8"), 0.86, 4.2)
 	voice = _speaker(2.4)
 	footfall = _speaker(4.5)
 	creature_sound = _speaker(2.8)
 	creature_sound.volume_db = -7.0
+	sting = AudioStreamPlayer.new()
+	sting.volume_db = -3.0
+	add_child(sting)
+	# An ordinary, quiet house first: a clock and the hum of the wiring.
+	ambience.append(_loop(CLOCK_TICK, Vector3(-3.3, 2.05, -1.3), -15.0))
+	ambience.append(_loop(HOUSE_HUM, Vector3(-2.4, 1.0, -3.2), -21.0))
 	sequence = create_tween()
 	sequence.tween_interval(0.95)
 	sequence.tween_callback(_speak.bind(HELLO, "You: Hello?", player.camera.global_position + player.camera.global_basis.z * 0.15))
@@ -302,9 +355,43 @@ func _begin_descent() -> void:
 	sequence.tween_callback(_start_crawl)
 	sequence.tween_method(_stair_hold, 0.0, 0.48, 0.48)
 	sequence.tween_callback(_play_creature_sound.bind(RAPID_CLICKS))
-	sequence.tween_method(_stair_hold, 0.48, 1.65, 1.17)
-	sequence.tween_method(_crawl, 0.0, 1.0, CRAWL_TIME)
-	sequence.tween_method(_lean, 0.0, 1.0, LEAN_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	sequence.tween_method(_stair_hold, 0.48, 1.9, 1.42)
+	sequence.tween_method(_crawl, 0.0, FREEZE_AT, FREEZE_AT * CRAWL_TIME)
+	# Everything goes quiet the moment it stops.
+	sequence.tween_callback(_stop_ambience)
+	sequence.tween_method(_crawl, FREEZE_AT, VANISH_AT, (VANISH_AT - FREEZE_AT) * CRAWL_TIME)
+	sequence.tween_interval(1.15)
+	sequence.tween_callback(_play_flicker)
+	for beat: Array in [[0.0, 0.07], [1.0, 0.12], [0.0, 0.05], [1.0, 0.34]]:
+		sequence.tween_callback(_set_lights.bind(beat[0]))
+		sequence.tween_interval(beat[1])
+	sequence.tween_callback(_play_flicker)
+	sequence.tween_callback(_set_lights.bind(0.0))
+	sequence.tween_interval(0.12)
+	sequence.tween_callback(creature.hide)
+	sequence.tween_interval(0.5)
+	sequence.tween_callback(_set_lights.bind(1.0))
+	sequence.tween_interval(1.35)
+	sequence.tween_callback(_begin_stalk)
+
+
+func _final_approach() -> void:
+	## The last flicker: in the dark it gets onto the wall right beside you.
+	stalking = false
+	camera_follow = false
+	player.end_ending_look()
+	for speaker: Node in [creature_sound, footfall, voice]:
+		speaker.stop()
+	sequence = create_tween()
+	sequence.tween_callback(_set_lights.bind(0.0))
+	sequence.tween_callback(creature.hide)
+	sequence.tween_interval(0.95)
+	sequence.tween_callback(_place_at.bind(stalk_spots.size() - 1))
+	sequence.tween_callback(_set_lights.bind(1.0))
+	sequence.tween_method(_turn_to_creature, 0.0, 1.0, 0.42)
+	sequence.tween_method(_turn_to_creature, 1.0, 1.0, 0.55)
+	sequence.tween_callback(_start_rush)
+	sequence.tween_method(_lean, 0.0, 1.0, RUSH_TIME).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	sequence.tween_method(_hold_face.bind(false), 0.0, 0.76, 0.76)
 	sequence.tween_callback(_play_creature_sound.bind(RAPID_CLICKS))
 	sequence.tween_method(_hold_face.bind(false), 0.76, CLOSE_HOLD, CLOSE_HOLD - 0.76)
@@ -315,7 +402,7 @@ func _begin_descent() -> void:
 	sequence.tween_method(_hold_face.bind(true), FINAL_WORDS_CUE, line_end, line_end - FINAL_WORDS_CUE)
 	sequence.tween_callback(caption.set_text.bind(""))
 	sequence.tween_method(_hold_face.bind(true), line_end, line_end + 0.65, 0.65)
-	sequence.tween_callback(_show_end)
+	sequence.tween_callback(_show_fake_end)
 
 
 func _listen_toward_stairs(progress: float) -> void:
@@ -420,6 +507,12 @@ func _stair_hold(seconds: float) -> void:
 	var breath := sin(seconds * 2.5) * 0.012
 	# Hangs on the wall at the foot of the stairs, head lowering toward you.
 	var lean := Vector3(0, -0.14, 0.1) * smoothstep(0.4, 1.6, seconds)
+	# The head keeps turning, much further than a neck should let it, then
+	# snaps back.
+	creature.tilt = smoothstep(0.5, 1.45, seconds) * 1.95 if seconds < 1.6 else 0.0
+	if seconds >= 1.6 and not twist_cracked:
+		twist_cracked = true
+		_play_at(CRACK, creature.head.global_position, 0.9)
 	_pose(stair_shoulders + lean + WALL_NORMAL * breath, stair_pelvis + lean * 0.3, stair_palms, stair_normals, stair_feet,
 		3.65 + seconds * 0.35, 0.0, stair_foot_normals, WALL_NORMAL)
 
@@ -429,6 +522,11 @@ func _crawl(phase_progress: float) -> void:
 	var progress := _crawl_distance(phase_progress)
 	var freeze := smoothstep(0.4, 0.46, phase_progress) * (1.0 - smoothstep(0.58, 0.62, phase_progress))
 	creature.tilt = freeze * 0.38 + _twitch_at(phase_progress, 0.5) * 0.12
+	# For one stride the right elbow bends the wrong way, then pops back.
+	creature.elbow_flip[1] = smoothstep(0.27, 0.33, phase_progress) if phase_progress < 0.37 else 0.0
+	if phase_progress >= 0.37 and not elbow_cracked:
+		elbow_cracked = true
+		_play_at(CRACK, to_global(last_palms[1]) if last_palms.size() > 1 else creature.global_position, 1.08)
 	var eye := to_local(player.camera.global_position)
 	var end := Vector3(eye.x, 0, eye.z - 1.03)
 	var bend := Vector3(1.72, 0, 0.82)
@@ -548,7 +646,10 @@ func _pose(shoulders: Vector3, pelvis: Vector3, palms: Array[Vector3], normals: 
 	var local_feet: Array[Vector3] = [feet[0] - creature.position, feet[1] - creature.position]
 	creature.pose_contacts(shoulders - creature.position, pelvis - creature.position, eye - creature.position,
 		local_palms, normals, local_feet, elapsed, reveal, foot_normals, back)
-	player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.22, _camera_response(5.5))
+	if camera_follow:
+		player.aim_ending_camera(creature.head.global_position + Vector3.UP * 0.22, _camera_response(5.5))
+	if shake > 0.0:
+		player.camera.rotate_object_local(Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-0.4, 0.4)).normalized(), shake)
 
 
 func _camera_response(rate: float) -> float:
@@ -560,11 +661,12 @@ func _lean(amount: float) -> void:
 	creature.set_jaw_offset(-0.006 * amount)
 	if not has_node("FaceFill"):
 		var eye := to_local(player.camera.global_position)
-		_creature_light("FaceFill", eye + Vector3(-0.83, 0.51, -0.08), Color("#f0c9ac"), 0.0, 3.0)
-		_creature_light("FaceRim", eye + Vector3(0.65, 0.66, -1.48), Color("#8b9ecb"), 0.0, 3.0)
+		_creature_light("FaceFill", eye + face_basis * Vector3(-0.83, 0.51, -0.08), Color("#f0c9ac"), 0.0, 3.0)
+		_creature_light("FaceRim", eye + face_basis * Vector3(0.65, 0.66, -1.48), Color("#8b9ecb"), 0.0, 3.0)
+	# Its face is only properly lit once it is right in front of you.
 	var reveal := smoothstep(0.16, 0.92, amount)
-	$FaceFill.light_energy = 1.48 * reveal
-	$FaceRim.light_energy = 0.82 * reveal
+	$FaceFill.light_energy = 1.48 * reveal * light_level
+	$FaceRim.light_energy = 0.82 * reveal * light_level
 
 
 func _creature_light(title: String, at: Vector3, tint: Color, energy: float, reach: float) -> void:
@@ -575,24 +677,26 @@ func _creature_light(title: String, at: Vector3, tint: Color, energy: float, rea
 	light.light_energy = energy
 	light.omni_range = reach
 	light.light_cull_mask = Creature.LIGHT_LAYER
+	light.set_meta("energy", energy)
 	add_child(light)
 
 
 func _final_pose(amount: float, elapsed: float) -> void:
 	var eye := to_local(player.camera.global_position)
-	var shoulders := last_shoulders.lerp(eye + Vector3(0, -0.46, -0.90), amount)
+	var shoulders := last_shoulders.lerp(eye + face_basis * Vector3(0, -0.46 + 0.07 * face_close, -0.90 + 0.4 * face_close), amount)
 	# The body follows the shoulders up; the hands leave the floor and creep up
 	# either side of your view instead of the arms being dragged.
-	var pelvis := last_pelvis.lerp(shoulders + Vector3(0, -0.42, -0.6), amount)
+	var pelvis := last_pelvis.lerp(shoulders + face_basis * Vector3(0, -0.42, -0.6), amount)
 	var rise := smoothstep(0.25, 1.0, amount)
 	var palms: Array[Vector3] = []
 	var normals: Array[Vector3] = []
 	for i in range(2):
 		var side := -1.0 if i == 0 else 1.0
-		var grip := eye + Vector3(side * (0.42 + 0.02 * sin(elapsed * 1.7 + i)), -0.6, -0.66)
+		var grip := eye + face_basis * Vector3(side * (0.42 + 0.02 * sin(elapsed * 1.7 + i)), -0.6 + 0.1 * face_close, -0.66 + 0.25 * face_close)
 		palms.append(last_palms[i].lerp(grip, rise) + Vector3.UP * sin(rise * PI) * 0.12)
-		normals.append(Vector3.UP.lerp(Vector3(0, 0.25, -1).normalized(), rise))
-	_pose(shoulders, pelvis, palms, normals, last_feet, 5.75 + elapsed, amount)
+		normals.append(last_normals[i].lerp(face_basis * Vector3(0, 0.25, -1).normalized(), rise).normalized())
+	_pose(shoulders, pelvis, palms, normals, last_feet, 5.75 + elapsed, amount, last_foot_normals,
+		face_back.slerp(Vector3.UP, smoothstep(0.0, 0.7, amount)))
 
 
 func _hold_face(elapsed: float, speaking: bool) -> void:
@@ -601,6 +705,7 @@ func _hold_face(elapsed: float, speaking: bool) -> void:
 	var index := floori(sample)
 	var opening := lerpf(FINAL_JAW[index], FINAL_JAW[mini(index + 1, FINAL_JAW.size() - 1)], sample - index) / 255.0
 	creature.set_jaw_offset(-0.003 - 0.007 * opening if speaking else -0.006)
+	shake = maxf(0.0, shake - get_process_delta_time() * 0.05)
 
 
 func _deliver_line() -> void:
@@ -622,8 +727,9 @@ func _speaker(distance: float) -> AudioStreamPlayer3D:
 	return speaker
 
 
-func _speak(stream: AudioStream, line: String, at: Vector3) -> void:
+func _speak(stream: AudioStream, line: String, at: Vector3, pitch: float = 1.0) -> void:
 	voice.global_position = at
+	voice.pitch_scale = pitch
 	voice.stream = stream
 	voice.play()
 	caption.text = line
@@ -652,6 +758,7 @@ func _show_end() -> void:
 	black.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	caption.hide()
 	var button := Style.button("Main menu", roundi(23 * GameSettings.ui_scale))
+	button.name = "EndButton"
 	button.theme = Style.make_theme()
 	black.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -677,3 +784,309 @@ func _return_to_menu() -> void:
 	if NetworkManager.is_online():
 		NetworkManager.leave_lobby()
 	get_tree().change_scene_to_file("res://scenes/menu.tscn")
+
+
+func _process(delta: float) -> void:
+	if not interior:
+		return
+	for i in lamps.size():
+		lamps[i].light_energy = lamp_energy[i] * light_level
+	for title in ["StairLight", "StairRim", "StalkLight"]:
+		var light := get_node_or_null(title) as OmniLight3D
+		if light:
+			light.light_energy = light.get_meta("energy", light.light_energy) * light_level
+	interior.ambient_light_energy = 0.19 * lerpf(0.18, 1.0, light_level)
+	if stalking:
+		_stalk(delta)
+
+
+func _set_lights(level: float) -> void:
+	light_level = level
+
+
+func _play_flicker() -> void:
+	_play_at(FLICKER, to_global(Vector3(1.25, 2.9, -1.5)), randf_range(0.95, 1.05))
+
+
+func _loop(stream: AudioStreamWAV, at: Vector3, volume: float) -> AudioStreamPlayer3D:
+	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	stream.loop_begin = 0
+	stream.loop_end = stream.data.size() / 2
+	var speaker := _speaker(3.0)
+	speaker.volume_db = volume
+	speaker.stream = stream
+	speaker.position = at
+	speaker.play()
+	return speaker
+
+
+func _stop_ambience() -> void:
+	for speaker in ambience:
+		speaker.stop()
+
+
+func _play_at(stream: AudioStream, at: Vector3, pitch: float = 1.0) -> void:
+	## A one-off sound at a spot, without cutting off whatever else is playing.
+	var speaker := _speaker(2.6)
+	speaker.global_position = at
+	speaker.pitch_scale = pitch
+	speaker.stream = stream
+	speaker.play()
+	speaker.finished.connect(speaker.queue_free)
+
+
+func _begin_stalk() -> void:
+	## The room is empty. You can look around now; it is somewhere in here.
+	creature.tilt = 0.0
+	creature.elbow_flip[0] = 0.0
+	creature.elbow_flip[1] = 0.0
+	camera_follow = false
+	player.begin_ending_look()
+	var eye := to_local(player.camera.global_position)
+	var front := Vector3(0, 0, -1)
+	# Down the side wall toward the front of the house, then onto the front
+	# wall, and finally right beside you.
+	stalk_spots = [
+		{"center": Vector3(3.41, 2.75, 0.2), "normal": Vector3.LEFT, "heading": Vector3(0, -1, 0.5).normalized()},
+		{"center": Vector3(3.41, 2.05, 2.35), "normal": Vector3.LEFT, "heading": Vector3(0, -0.55, 1).normalized()},
+		{"center": Vector3(2.35, 2.3, 3.52), "normal": front, "heading": Vector3(-1, -0.4, 0).normalized()},
+		{"center": Vector3(maxf(eye.x + 1.3, 1.6), eye.y - 0.3, 3.52), "normal": front, "heading": Vector3(-1, 0.12, 0).normalized()},
+	]
+	var light := OmniLight3D.new()
+	light.name = "StalkLight"
+	light.light_color = Color("#9fb0d6")
+	light.omni_range = 3.2
+	light.light_cull_mask = Creature.LIGHT_LAYER
+	light.set_meta("energy", 0.55)
+	add_child(light)
+	var ceiling := create_tween()
+	var clicks := _speaker(2.8)
+	clicks.volume_db = -5.0
+	clicks.stream = RAPID_CLICKS
+	clicks.position = Vector3(1.6, 4.9, -1.6)
+	ceiling.tween_callback(clicks.play)
+	ceiling.tween_callback(caption.set_text.bind("[Clicking, across the ceiling]"))
+	ceiling.tween_property(clicks, "position", Vector3(2.9, 4.6, 2.6), 1.6).set_trans(Tween.TRANS_SINE)
+	ceiling.tween_callback(caption.set_text.bind(""))
+	ceiling.tween_interval(1.1)
+	# Your own voice again, from behind you, a little too low.
+	var behind := to_global(stalk_spots[2]["center"] + Vector3(0, -0.6, -0.3))
+	ceiling.tween_callback(_speak.bind(HELLO, "[Your voice, behind you] Hello?", behind, 0.93))
+	ceiling.tween_interval(INTRO_QUESTION_CUE / 0.93)
+	ceiling.tween_callback(caption.set_text.bind("[Your voice, behind you] Anybody there?"))
+	ceiling.tween_interval((HELLO.get_length() - INTRO_QUESTION_CUE) / 0.93)
+	ceiling.tween_callback(caption.set_text.bind(""))
+	ceiling.tween_callback(clicks.queue_free)
+	ceiling.tween_callback(func() -> void:
+		stalk_index = -1
+		stalk_clock = 0.0
+		stalking = true)
+
+
+func _stalk(delta: float) -> void:
+	## It never moves while you look straight at it. Look away and it is
+	## somewhere else, closer. Stare too long and the lights go instead.
+	stalk_clock += delta
+	if stalk_index < 0:
+		# Show up first wherever you are not looking.
+		if not _watching(stalk_spots[0]["center"]) or stalk_clock > 3.0:
+			_place_at(0)
+			_play_at(STEP, to_global(stalk_spots[0]["center"]), 0.7)
+		return
+	if _watching(creature.head.global_position, true):
+		stalk_seen += delta
+		stalk_unseen = 0.0
+		stalk_found = true
+	else:
+		stalk_unseen += delta
+		# Breathing, only while nobody is looking.
+		_wall_pose(stalk_spots[stalk_index], stalk_clock)
+	var last := stalk_index >= stalk_spots.size() - 2
+	if stalk_seen > STARE_TIMEOUT:
+		if last:
+			_final_approach()
+		else:
+			_flicker_move()
+	elif (stalk_found and stalk_unseen > MOVE_AFTER_LOOK_AWAY) or stalk_unseen > LOST_TIMEOUT:
+		if last:
+			_final_approach()
+		elif not _watching(stalk_spots[stalk_index + 1]["center"]) or stalk_unseen > LOST_TIMEOUT + 2.5:
+			_place_at(stalk_index + 1)
+			_play_at(STEP, to_global(stalk_spots[stalk_index]["center"]), 0.66 + stalk_index * 0.04)
+
+
+func _flicker_move() -> void:
+	stalking = false
+	var blink := create_tween()
+	blink.tween_callback(_play_flicker)
+	blink.tween_callback(_set_lights.bind(0.0))
+	blink.tween_interval(0.32)
+	blink.tween_callback(_place_at.bind(stalk_index + 1))
+	blink.tween_callback(_set_lights.bind(1.0))
+	blink.tween_callback(func() -> void: stalking = true)
+
+
+func _watching(point: Vector3, global: bool = false) -> bool:
+	## Whether you are looking more or less straight at a point.
+	var at := point if global else to_global(point)
+	var camera: Camera3D = player.camera
+	var toward := (at - camera.global_position).normalized()
+	return camera.is_position_in_frustum(at) and toward.dot(-camera.global_basis.z) > WATCHED_ANGLE
+
+
+func _place_at(index: int) -> void:
+	stalk_index = index
+	stalk_seen = 0.0
+	stalk_unseen = 0.0
+	stalk_found = false
+	var spot := stalk_spots[index]
+	var light := get_node_or_null("StalkLight") as OmniLight3D
+	if light:
+		var eye := to_local(player.camera.global_position)
+		light.position = spot["center"].lerp(eye, 0.45) + Vector3.UP * 0.6
+		light.set_meta("energy", 0.75 if index == stalk_spots.size() - 1 else 0.55)
+	_wall_pose(spot, stalk_clock)
+	creature.show()
+
+
+func _wall_pose(spot: Dictionary, seconds: float) -> void:
+	## Flat against a wall, limbs splayed, head toward heading, face toward you.
+	var normal: Vector3 = spot["normal"]
+	var heading: Vector3 = spot["heading"]
+	var across := normal.cross(heading).normalized()
+	var wall: Vector3 = spot["center"]
+	var center := wall + normal * (WALL_STANDOFF + 0.06 + sin(seconds * 2.3) * 0.012)
+	creature.position = wall + normal * 0.4 - Vector3.UP * 1.0
+	var palms: Array[Vector3] = []
+	var feet: Array[Vector3] = []
+	var normals: Array[Vector3] = [normal, normal]
+	for i in range(2):
+		var side := -1.0 if i == 0 else 1.0
+		# One hand reaches further than the other.
+		palms.append(wall + heading * (0.78 if i == 0 else 0.5) + across * side * 0.44)
+		feet.append(wall - heading * 0.62 + across * side * 0.34)
+	_pose(center + heading * 0.372, center - heading * 0.372, palms, normals, feet, 4.3 + sin(seconds) * 0.05, 0.0, normals, normal)
+
+
+func _turn_to_creature(amount: float) -> void:
+	player.aim_ending_camera(creature.head.global_position, lerpf(_camera_response(9.0), 1.0, amount * amount))
+
+
+func _start_rush() -> void:
+	## Off the wall and straight into your face.
+	var eye := to_local(player.camera.global_position)
+	var toward := (to_local(creature.head.global_position) - eye) * Vector3(1, 0, 1)
+	face_basis = Basis.looking_at(toward.normalized(), Vector3.UP)
+	face_back = stalk_spots[-1]["normal"]
+	camera_follow = true
+	shake = 0.035
+	sting.stream = HIT
+	sting.play()
+
+
+func _show_fake_end() -> void:
+	## A calm, ordinary end card. It is not over.
+	camera_follow = false
+	caption.hide()
+	fake_end = Control.new()
+	fake_end.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(fake_end)
+	fake_end.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	fake_black = ColorRect.new()
+	fake_black.color = Color(0, 0, 0, 0)
+	fake_end.add_child(fake_black)
+	fake_black.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	fake_tilt = Control.new()
+	fake_tilt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fake_end.add_child(fake_tilt)
+	fake_tilt.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	fake_tilt.pivot_offset = get_viewport().get_visible_rect().size * 0.5
+	var card := VBoxContainer.new()
+	card.alignment = BoxContainer.ALIGNMENT_CENTER
+	card.add_theme_constant_override("separation", roundi(18 * GameSettings.ui_scale))
+	fake_tilt.add_child(card)
+	card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for line: Array in [["KM0", 64], ["Thank you for playing.", 25], ["You made it to the end of the road.", 19]]:
+		var label := Style.label(line[0], roundi(line[1] * GameSettings.ui_scale))
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.add_child(label)
+	var gap := Control.new()
+	gap.custom_minimum_size.y = 24 * GameSettings.ui_scale
+	card.add_child(gap)
+	var button := Style.button("Main menu", roundi(23 * GameSettings.ui_scale))
+	button.name = "ThanksButton"
+	button.theme = Style.make_theme()
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.custom_minimum_size = Vector2(196, 50) * GameSettings.ui_scale
+	card.add_child(button)
+	button.pressed.connect(_fake_twist)
+	fake_card = card
+	card.modulate.a = 0.0
+	var fade := create_tween()
+	fade.tween_property(fake_black, "color:a", 1.0, 0.7)
+	fade.tween_property(card, "modulate:a", 1.0, 0.9)
+	fade.tween_callback(func() -> void:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		button.grab_focus())
+	fade.tween_interval(4.6)
+	fade.tween_callback(_fake_twist)
+
+
+func _fake_twist() -> void:
+	## The card tips, the dark thins, and it was there behind it all along.
+	if fake_twisted:
+		return
+	fake_twisted = true
+	var button := fake_card.get_node_or_null("ThanksButton") as Button
+	if button:
+		button.disabled = true
+		button.release_focus()
+	face_close = 0.0
+	var face_light := get_node_or_null("FaceFill") as OmniLight3D
+	if face_light:
+		face_light.light_color = Color("#d98a78")
+	var face_rim := get_node_or_null("FaceRim") as OmniLight3D
+	if face_rim:
+		face_rim.light_energy = 0.0
+	_play_creature_sound(THROAT_RATTLE)
+	var twist := create_tween()
+	twist.tween_property(fake_tilt, "rotation", deg_to_rad(2.6), 1.7).set_trans(Tween.TRANS_SINE)
+	twist.parallel().tween_property(fake_black, "color:a", 0.6, 1.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	twist.parallel().tween_property(fake_card, "modulate", Color(0.55, 0.5, 0.5, 0.85), 1.7)
+	twist.parallel().tween_method(_behind_card, 0.0, 1.0, 1.7)
+	twist.tween_interval(0.4)
+	twist.tween_callback(func() -> void:
+		fake_black.color.a = 0.0
+		fake_card.hide()
+		sting.stream = HIT
+		sting.play()
+		shake = 0.04)
+	twist.tween_method(_lunge, 0.0, 1.0, 0.16).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	twist.tween_method(_lunge, 1.0, 1.0, 0.22)
+	twist.tween_callback(func() -> void:
+		fake_black.color.a = 1.0
+		creature.hide()
+		_set_lights(0.0))
+	twist.tween_interval(1.8)
+	twist.tween_callback(func() -> void:
+		fake_end.hide()
+		_show_end())
+
+
+func _behind_card(amount: float) -> void:
+	face_close = 0.0
+	_final_pose(1.0, 2.2 + amount * 0.3)
+	creature.set_jaw_offset(-0.006 - 0.002 * amount)
+	var face_light := get_node_or_null("FaceFill") as OmniLight3D
+	if face_light:
+		face_light.light_energy = 0.9 * amount
+
+
+func _lunge(amount: float) -> void:
+	face_close = amount
+	_final_pose(1.0, 2.5)
+	creature.set_jaw_offset(-0.008 - 0.004 * amount)
+	shake = maxf(0.0, shake - get_process_delta_time() * 0.06)
+	var face_light := get_node_or_null("FaceFill") as OmniLight3D
+	if face_light:
+		face_light.light_energy = 1.6

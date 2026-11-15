@@ -22,6 +22,8 @@ var rest: Dictionary[String, Transform3D] = {}
 var posed: Dictionary[String, Transform3D] = {}
 ## Extra head roll in radians, set while the creature stops to study you.
 var tilt := 0.0
+## 0 to 1 per side (left, right): how far each elbow is bent the wrong way.
+var elbow_flip: Array[float] = [0.0, 0.0]
 ## Optional: takes a joint and the limb root it hangs from, in this node's
 ## space, and returns the joint moved out of any wall on the root's side.
 ## Elbows and knees swing around their limb to stay clear.
@@ -109,7 +111,8 @@ func pose_contacts(shoulders: Vector3, pelvis: Vector3, gaze: Vector3, palms: Ar
 		hand.position = wrist + hand.basis.z * 0.057 - normal * 0.064
 		# Elbows splay out and back from the body, arched away from the surface
 		# it clings to so they never fold into it.
-		var elbow := _clear_joint(shoulder, wrist, body * Vector3(side * 0.91, 0.3, -0.65), UPPER_ARM, FOREARM)
+		var bend := Vector3(side * 0.91, 0.3, -0.65).lerp(Vector3(side * 0.35, 0.75, 0.95), elbow_flip[i])
+		var elbow := _clear_joint(shoulder, wrist, body * bend, UPPER_ARM, FOREARM)
 		_aim_bone("UpperArm" + suffix, shoulder, elbow, rest["Forearm" + suffix].origin, body)
 		_aim_bone("Forearm" + suffix, elbow, wrist, rest["Hand" + suffix].origin, body)
 		_set_bone("Hand" + suffix, Transform3D(hand.basis * rest["Hand" + suffix].basis, wrist))

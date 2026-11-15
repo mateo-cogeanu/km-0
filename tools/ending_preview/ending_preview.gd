@@ -29,6 +29,27 @@ class PreviewPlayer extends Node3D:
 		var target := camera.global_transform.looking_at(at)
 		camera.global_basis = camera.global_basis.slerp(target.basis, clampf(amount, 0.0, 1.0))
 
+	# KM0_PREVIEW_LOOK stands in for the mouse while the ending lets you look
+	# around: it glances at the creature, then away, over and over.
+	var ending_look := false
+	var house: Node3D
+	var look_clock := 0.0
+
+	func begin_ending_look() -> void:
+		ending_look = true
+
+	func end_ending_look() -> void:
+		ending_look = false
+
+	func _process(delta: float) -> void:
+		if not ending_look or not OS.has_environment("KM0_PREVIEW_LOOK"):
+			return
+		look_clock += delta
+		var target := Vector3(-2.0, 1.6, -2.4)
+		if fmod(look_clock, 3.0) < 1.4 and house.creature.visible:
+			target = house.creature.head.global_position
+		aim_ending_camera(target, 1.0 - exp(-6.0 * delta))
+
 
 func _ready() -> void:
 	view.size = Vector2i(960, 540)
@@ -56,13 +77,14 @@ func _ready() -> void:
 	scene.add_child(house)
 	house.door_open = true
 	var player := PreviewPlayer.new()
+	player.house = house
 	scene.add_child(player)
 	player.position = Vector3(0, 1.03, 2.2)
 	player.camera.make_current()
 	house.call_deferred("_on_entry", player)
 	# Stop at the end card so the preview never reaches the menu or a save.
 	get_tree().node_added.connect(func(node: Node) -> void:
-		if node is Button:
+		if node is Button and node.name == "EndButton":
 			get_tree().quit())
 	# KM0_PREVIEW_CAMERA="x,y,z,tx,ty,tz" watches from a fixed spot instead of
 	# through the player's eyes.

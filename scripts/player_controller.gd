@@ -49,6 +49,8 @@ var radio_caption: PanelContainer
 var radio_caption_label: Label
 var listening_radio: Area3D
 var ending_locked := false
+## While locked for the ending, the mouse may still turn the head.
+var ending_look := false
 var ending_return_position := Vector3.ZERO
 var push_send_elapsed := 0.0
 var refuel_network_amount := 0.0
@@ -170,6 +172,9 @@ func _sync_player_name(value: String) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if ending_locked and ending_look and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		_turn_head(event.relative)
+		return
 	if ending_locked or not is_multiplayer_authority() or gameplay_ui_open():
 		return
 	if is_instance_valid(active_vehicle):
@@ -184,14 +189,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		var scaled_sensitivity := mouse_sensitivity * GameSettings.mouse_sensitivity_scale
-		rotate_y(-event.relative.x * scaled_sensitivity)
-		look_rotation_x = clamp(
-			look_rotation_x - event.relative.y * scaled_sensitivity,
-			deg_to_rad(-max_look_angle),
-			deg_to_rad(max_look_angle)
-		)
-		head.rotation.x = look_rotation_x
+		_turn_head(event.relative)
 
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -279,6 +277,32 @@ func lock_for_ending(return_position: Vector3) -> void:
 	if is_instance_valid(held_object):
 		_drop_held_object()
 	$HUD.hide()
+
+
+func _turn_head(relative: Vector2) -> void:
+	var scaled_sensitivity := mouse_sensitivity * GameSettings.mouse_sensitivity_scale
+	rotate_y(-relative.x * scaled_sensitivity)
+	look_rotation_x = clamp(
+		look_rotation_x - relative.y * scaled_sensitivity,
+		deg_to_rad(-max_look_angle),
+		deg_to_rad(max_look_angle)
+	)
+	head.rotation.x = look_rotation_x
+
+
+func begin_ending_look() -> void:
+	## Hand the camera back to the mouse from wherever the ending left it.
+	var forward := -camera.global_basis.z
+	global_rotation.y = atan2(-forward.x, -forward.z)
+	look_rotation_x = clampf(asin(clampf(forward.y, -1.0, 1.0)), deg_to_rad(-max_look_angle), deg_to_rad(max_look_angle))
+	head.rotation.x = look_rotation_x
+	camera.basis = Basis()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	ending_look = true
+
+
+func end_ending_look() -> void:
+	ending_look = false
 
 
 func aim_ending_camera(at: Vector3, amount: float) -> void:
