@@ -1,5 +1,6 @@
 extends "res://scripts/shack.gd"
 
+const LenVan := preload("res://scripts/len_van.gd")
 const Garage := preload("res://scripts/abandoned_building.gd")
 const Shapes := preload("res://scripts/prop_shapes.gd")
 const FUEL := preload("res://scenes/fuel_canister.tscn")
@@ -121,6 +122,11 @@ func _add_broadcast_stop() -> void:
 	var broadcast := RoadRadio.Broadcast.WORKSHOP
 	if stop_index == -5:
 		broadcast = RoadRadio.Broadcast.FIRST_GARAGE
+		var van := LenVan.new()
+		van.name = "LensVan"
+		van.position = Vector3(-6.25, 0, 5.25)
+		van.rotation.y = -0.12
+		add_child(van)
 	elif block == -2:
 		broadcast = RoadRadio.Broadcast.WAYSIDE
 	elif block == -3:

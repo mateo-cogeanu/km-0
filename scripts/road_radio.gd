@@ -13,23 +13,28 @@ const RECORDINGS := [
 const LINES := [
 	[
 		[0.55, "County to the east road crews. Anyone still on the channel?"],
-		[5.138, "County, this is the first garage. We’ve got three cars out front. I’m still waiting on their drivers."],
-		[13.103, "Copy that. I’ll keep the channel open."],
+		[5.138, "County, first garage. Three cars out front. Nobody’s come back for them."],
+		[11.594, "Ruth at the sheds. I’m still here. Let me know if Len calls in."],
+		[16.665, "Copy that. I’ll keep the channel open."],
 	],
 	[
 		[0.55, "I left the kettle on for Len. He said he’d be five minutes."],
 		[4.997, "Did he make it past the sheds?"],
-		[7.631, "His van’s here. The keys are still in it."],
+		[7.629, "His van’s here. Driver’s door open. The keys are still in it."],
 	],
 	[
-		[0.55, "East sheds to county. I can see the relay tower from here. Red light’s still on."],
-		[6.93, "Have you heard from the night crew?"],
-		[9.499, "Just their six o’clock check-in. I’ve heard it twice now."],
+		[0.55, "East sheds to county. The red lamp on the tower’s still on."],
+		[5.04, "Have you heard from the night crew?"],
+		[7.48, "Night crew, Mick speaking. Six o’clock. All clear at the east sheds."],
+		[12.656, "[A short cough]"],
+		[13.536, "That was Mick. I’ve been standing next to his empty truck since five."],
 	],
 	[
-		[0.55, "County, we got the relay back up."],
-		[3.639, "How many checked in?"],
-		[5.671, "I have six names on the sheet. Only one of them’s answered since dark."],
+		[0.55, "County, the relay’s back up. Can you hear this?"],
+		[4.823, "Night crew, Mick speaking. Six o’clock. All clear at the east sheds."],
+		[9.999, "[A short cough]"],
+		[10.879, "There. Same cough. Same time."],
+		[14.355, "Mick? Say something else."],
 	],
 	[
 		[0.55, "County channel, for anyone still on the east road. The house on the right, where the pavement runs out. That’s where we’ve been waiting."],
