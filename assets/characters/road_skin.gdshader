@@ -32,7 +32,7 @@ void fragment() {
 	SPECULAR = 0.26;
 
 	// Surface gradients add pores without relying on UVs or changing the silhouette.
-	float height = skin_noise(skin_position * 128.0) * 0.0011;
+	float height = skin_noise(skin_position * 70.0) * 0.00025;
 	vec3 dx = dFdx(VERTEX);
 	vec3 dy = dFdy(VERTEX);
 	vec3 across = cross(dy, NORMAL);

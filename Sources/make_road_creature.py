@@ -219,13 +219,13 @@ def build_skin():
             t = r / 6
             y = chest.y - 0.16 + t * 0.31
             fall = 1.0 - ((y - chest.y) / 0.225) ** 2
-            span = 0.162 * sqrt(max(fall, 0.05)) + 0.001
-            height = 0.125 * sqrt(max(fall, 0.05)) + 0.001
+            span = 0.162 * sqrt(max(fall, 0.05)) - 0.002
+            height = 0.125 * sqrt(max(fall, 0.05)) - 0.002
             pts = []
             for n in range(9):
                 a = 0.55 - n / 8 * 1.95
                 pts.append(Vector((side * span * cos(a), y + n * 0.007, chest.z + height * sin(a))))
-            f.chain(pts, [0.0068] * len(pts), 0.016)
+            f.chain(pts, [0.0058] * len(pts), 0.03)
     # Vertebrae ridge.
     top = [SHOULDERS + Vector((0, -0.06, 0.1)), chest + Vector((0, 0.0, 0.122)),
         SHOULDERS + Vector((0, 0.36, 0.07)), PELVIS + Vector((0, -0.1, 0.08)), PELVIS + Vector((0, 0.08, 0.078))]
@@ -233,7 +233,7 @@ def build_skin():
         s = i / 21 * (len(top) - 1)
         j = min(int(s), len(top) - 2)
         at = top[j].lerp(top[j + 1], s - j)
-        f.ellipsoid(at, (0.013, 0.01, 0.011), 0.016)
+        f.ellipsoid(at, (0.012, 0.01, 0.01), 0.022)
     # Long neck with tendons.
     neck_base = SHOULDERS + Vector((0, -0.05, 0.04))
     neck_top = HEAD_BONE + Vector((0, -0.03, -0.045))
@@ -320,9 +320,9 @@ def assign_skin_materials(skin):
             continue
         depth = c.y - face_y(c.x)
         band = abs(c.z - smile_z(c.x)) - smile_height(c.x)
-        if depth > 0.0 and band < 0.0:
+        if 0.0 < depth < 0.06 and band < 0.0:
             poly.material_index = 2 if depth < 0.012 else 1
-        elif depth > 0.0 and Vector((c.x / 0.07, (c.y - FACE.y + 0.035) / 0.05, (c.z - SMILE_Z - 0.012) / 0.052)).length < 1.05:
+        elif depth > 0.025 and Vector((c.x / 0.07, (c.y - FACE.y + 0.035) / 0.05, (c.z - SMILE_Z - 0.012) / 0.052)).length < 1.05:
             poly.material_index = 1
 
 
