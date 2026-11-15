@@ -60,6 +60,9 @@ const LINES := [
 	],
 ]
 
+const RADIO_BUS := &"Radio"
+const VOICE_VOLUME := 0.0
+
 var broadcast := Broadcast.WORKSHOP
 var voice: AudioStreamPlayer3D
 var carrier: AudioStreamPlayer3D
@@ -97,10 +100,48 @@ func _ready() -> void:
 	box.size = Vector3(0.41, 0.185, 0.265)
 	hitbox.shape = box
 	add_child(hitbox)
-	voice = _make_player(RECORDINGS[broadcast], -4.0)
+	voice = _make_player(RECORDINGS[broadcast], VOICE_VOLUME)
+	voice.bus = _radio_bus()
 	carrier = _make_player(_carrier_sound(), -18.0 - broadcast * 0.9)
 	voice.finished.connect(stop_listening)
 	set_process(false)
+
+
+static func _radio_bus() -> StringName:
+	## A bus that makes clean recordings sound like a cheap speaker on a weak
+	## signal: no lows or highs, overdriven, slightly honky.
+	if AudioServer.get_bus_index(RADIO_BUS) >= 0:
+		return RADIO_BUS
+	var index := AudioServer.bus_count
+	AudioServer.add_bus(index)
+	AudioServer.set_bus_name(index, RADIO_BUS)
+	AudioServer.set_bus_send(index, AudioServer.get_bus_name(0))
+	var low_cut := AudioEffectHighPassFilter.new()
+	low_cut.cutoff_hz = 380.0
+	low_cut.db = AudioEffectFilter.FILTER_24DB
+	AudioServer.add_bus_effect(index, low_cut)
+	var honk := AudioEffectEQ6.new()
+	honk.set_band_gain_db(2, 5.0)
+	honk.set_band_gain_db(3, 3.0)
+	AudioServer.add_bus_effect(index, honk)
+	var drive := AudioEffectDistortion.new()
+	drive.mode = AudioEffectDistortion.MODE_OVERDRIVE
+	drive.pre_gain = 6.0
+	drive.drive = 0.5
+	drive.keep_hf_hz = 2400.0
+	drive.post_gain = -7.0
+	AudioServer.add_bus_effect(index, drive)
+	var high_cut := AudioEffectLowPassFilter.new()
+	high_cut.cutoff_hz = 3100.0
+	high_cut.resonance = 0.75
+	high_cut.db = AudioEffectFilter.FILTER_24DB
+	AudioServer.add_bus_effect(index, high_cut)
+	var squash := AudioEffectCompressor.new()
+	squash.threshold = -18.0
+	squash.ratio = 6.0
+	squash.gain = 3.0
+	AudioServer.add_bus_effect(index, squash)
+	return RADIO_BUS
 
 
 func _make_player(stream: AudioStream, volume: float) -> AudioStreamPlayer3D:
@@ -117,6 +158,10 @@ func _process(_delta: float) -> void:
 	if not is_instance_valid(listener) or not listener.can_listen_to_radio(global_position):
 		stop_listening()
 		return
+	# Reception drifts: now and then the voice sinks under the carrier.
+	var elapsed := voice.get_playback_position()
+	var drift := pow(maxf(0.0, sin(elapsed * 0.83 + broadcast) * sin(elapsed * 0.31 + broadcast * 2.0)), 3.0)
+	voice.volume_db = VOICE_VOLUME - drift * 9.0 + sin(elapsed * 23.0) * drift * 1.5
 	var playback := voice.get_playback_position()
 	var captions: Array = LINES[broadcast]
 	var line := "Carrier signal…"

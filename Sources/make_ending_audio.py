@@ -95,21 +95,131 @@ for i in range(count):
     crack[i] += 0.4 * low[i] * exp(-i / (0.02 * RATE))
 write("crack", crack, 0.8)
 
-# The hit: a dry slap right at your ear, a body thump under it, and a short
-# rasping shriek that cuts off. Loud but capped well below clipping.
-count = int(1.1 * RATE)
-hit = [0.0] * count
-slap = band(noise(int(0.05 * RATE), 51), 700, 9000)
-add(hit, 0, [s * exp(-i / (0.006 * RATE)) for i, s in enumerate(slap)], 1.0)
-for i in range(int(0.4 * RATE)):
+# The hit, in stereo. A rushing intake as it closes the distance, then the
+# impact: a hard slap and a sub drop. Over it, a screaming throat made of several
+# detuned voices a tritone apart, raw and slightly overdriven, that chokes off
+# into a small room. Loud but capped well below clipping.
+from math import cos, tanh
+
+
+def resonator(samples, freq, q):
+    """RBJ band-pass, constant peak gain."""
+    w = 2 * pi * freq / RATE
+    alpha = sin(w) / (2 * q)
+    b0, b2 = alpha, -alpha
+    a0, a1, a2 = 1 + alpha, -2 * cos(w), 1 - alpha
+    x1 = x2 = y1 = y2 = 0.0
+    out = []
+    for x in samples:
+        y = (b0 * x + b2 * x2 - a1 * y1 - a2 * y2) / a0
+        x2, x1, y2, y1 = x1, x, y1, y
+        out.append(y)
+    return out
+
+
+def drift(count, seed, rate):
+    """Slow random wobble between -1 and 1."""
+    rng = Random(seed)
+    value = target = 0.0
+    out = []
+    for i in range(count):
+        if i % int(RATE / rate) == 0:
+            target = rng.uniform(-1, 1)
+        value += (target - value) * 0.002
+        out.append(value)
+    return out
+
+
+def write_stereo(name, left, right, gain):
+    peak = max(max(map(abs, left)), max(map(abs, right))) or 1.0
+    samples = array("h")
+    for l, r in zip(left, right):
+        samples.append(round(l * 32767 * gain / peak))
+        samples.append(round(r * 32767 * gain / peak))
+    if byteorder != "little":
+        samples.byteswap()
+    with wave.open(str(OUT / (name + ".wav")), "wb") as stream:
+        stream.setparams((2, 2, RATE, 0, "NONE", "not compressed"))
+        stream.writeframes(samples.tobytes())
+
+
+IMPACT = 0.11
+SCREAM_END = 1.08
+count = int(1.75 * RATE)
+left = [0.0] * count
+right = [0.0] * count
+
+# Intake: noise whose brightness and level climb into the impact.
+rush = noise(int(IMPACT * RATE), 61)
+low = 0.0
+for i, x in enumerate(rush):
     t = i / RATE
-    hit[i] += 0.9 * sin(2 * pi * (70 - 30 * t) * t) * exp(-t * 11)
-rasp = band(noise(count, 52), 900, 5200)
-for i in range(count):
+    progress = t / IMPACT
+    cutoff = 400 * (6000 / 400) ** progress
+    low += (1 - exp(-2 * pi * cutoff / RATE)) * (x - low)
+    level = 0.55 * progress ** 3
+    left[i] += level * low
+    right[i] += level * low * 0.9
+
+# Impact: a hard broadband slap, a body thud and a falling sub.
+start = int(IMPACT * RATE)
+slap = band(noise(int(0.03 * RATE), 62), 500, 10000)
+thud = band(noise(int(0.25 * RATE), 63), 50, 420)
+phase = 0.0
+for i in range(int(0.6 * RATE)):
     t = i / RATE
-    if t < 0.025:
-        continue
-    shape = min(1.0, (t - 0.025) / 0.03) * exp(-(t - 0.025) * 3.2) * (1.0 if t < 0.85 else max(0.0, 1 - (t - 0.85) / 0.05))
-    tone = sin(2 * pi * 1170 * t + 3 * sin(2 * pi * 37 * t)) + 0.7 * sin(2 * pi * 1655 * t) + 0.5 * sin(2 * pi * 2310 * t)
-    hit[i] += shape * (0.28 * tone + 0.55 * rasp[i])
-write("hit", hit, 0.89)
+    k = start + i
+    value = 0.0
+    if i < len(slap):
+        value += 1.1 * slap[i] * exp(-t / 0.005)
+    if i < len(thud):
+        value += 0.9 * thud[i] * exp(-t * 16)
+    phase += 2 * pi * (95 * exp(-t * 4) + 32) / RATE
+    value += tanh(2.5 * sin(phase)) * 0.75 * exp(-t * 5.5)
+    left[k] += value
+    right[k] += value
+
+# The scream.
+voice_start = start + int(0.004 * RATE)
+length = int((SCREAM_END - IMPACT) * RATE)
+wobble = drift(length, 64, 14)
+for ratio, pan, level, seed in [(1.0, -0.25, 1.0, 71), (1.031, 0.3, 0.8, 72), (0.7071, 0.05, 0.6, 73), (1.414, -0.1, 0.32, 74)]:
+    jitter = drift(length, seed, 30)
+    hiss = noise(length, seed + 10)
+    source = []
+    phase = 0.0
+    smooth = 0.0
+    for i in range(length):
+        t = i / RATE
+        f0 = ratio * 640 * (1 - 0.2 * min(1.0, t / 0.9)) * (1 + 0.028 * sin(2 * pi * 7.3 * t + seed) + 0.02 * wobble[i] + 0.015 * jitter[i])
+        phase = (phase + f0 / RATE) % 1.0
+        saw = 2 * phase - 1
+        smooth += 0.55 * (saw - smooth)
+        # Breath rides on each pulse, which makes it rasp.
+        source.append(smooth + 0.55 * hiss[i] * (0.4 + 0.6 * (phase < 0.35)))
+    throat = [0.0] * length
+    for freq, q, gain in [(850, 6, 1.0), (1250, 7, 0.7), (2850, 9, 0.5), (3600, 10, 0.25)]:
+        for i, y in enumerate(resonator(source, freq * (1 + 0.04 * (ratio - 1)), q)):
+            throat[i] += gain * y
+    for i in range(length):
+        t = i / RATE
+        attack = min(1.0, t / 0.012)
+        strain = 1.0 - 0.3 * min(1.0, t / 0.5) + 0.25 * max(0.0, (t - 0.55) / 0.42)
+        choke = max(0.0, min(1.0, (length - i) / (0.022 * RATE)))
+        value = tanh(2.4 * throat[i]) * attack * strain * choke * level * 0.62
+        k = voice_start + i
+        left[k] += value * (1 - pan)
+        right[k] += value * (1 + pan)
+
+# A small room, so the choke is not a digital edge.
+for channel, delays in [(left, [0.0297, 0.0371, 0.0411, 0.0437]), (right, [0.0311, 0.0353, 0.0423, 0.0451])]:
+    dry = channel[:]
+    for delay in delays:
+        offset = int(delay * RATE)
+        comb = [0.0] * count
+        for i in range(offset, count):
+            comb[i] = dry[i - offset] + 0.72 * comb[i - offset]
+        for i in range(count):
+            channel[i] += 0.09 * comb[i]
+
+write_stereo("hit", left, right, 0.89)

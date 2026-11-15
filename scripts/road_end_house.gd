@@ -369,7 +369,11 @@ func _begin_descent() -> void:
 	sequence.tween_callback(_set_lights.bind(0.0))
 	sequence.tween_interval(0.12)
 	sequence.tween_callback(creature.hide)
-	sequence.tween_interval(0.5)
+	# In the dark, something fast skitters off toward the far wall.
+	sequence.tween_interval(0.4)
+	for step: Array in [[Vector3(1.9, 0.1, 1.2), 1.05, 0.16], [Vector3(2.6, 0.4, 1.4), 1.12, 0.13], [Vector3(3.2, 1.2, 1.1), 1.2, 0.12], [Vector3(3.4, 2.3, 0.8), 1.3, 0.85]]:
+		sequence.tween_callback(func() -> void: _play_at(STEP, to_global(step[0]), step[1]))
+		sequence.tween_interval(step[2])
 	sequence.tween_callback(_set_lights.bind(1.0))
 	sequence.tween_interval(1.35)
 	sequence.tween_callback(_begin_stalk)
@@ -385,7 +389,7 @@ func _final_approach() -> void:
 	sequence = create_tween()
 	sequence.tween_callback(_set_lights.bind(0.0))
 	sequence.tween_callback(creature.hide)
-	sequence.tween_interval(0.95)
+	sequence.tween_interval(2.3)
 	sequence.tween_callback(_place_at.bind(stalk_spots.size() - 1))
 	sequence.tween_callback(_set_lights.bind(1.0))
 	sequence.tween_method(_turn_to_creature, 0.0, 1.0, 0.42)
@@ -795,7 +799,7 @@ func _process(delta: float) -> void:
 		var light := get_node_or_null(title) as OmniLight3D
 		if light:
 			light.light_energy = light.get_meta("energy", light.light_energy) * light_level
-	interior.ambient_light_energy = 0.19 * lerpf(0.18, 1.0, light_level)
+	interior.ambient_light_energy = 0.19 * lerpf(0.06, 1.0, light_level)
 	if stalking:
 		_stalk(delta)
 
@@ -920,7 +924,7 @@ func _flicker_move() -> void:
 	var blink := create_tween()
 	blink.tween_callback(_play_flicker)
 	blink.tween_callback(_set_lights.bind(0.0))
-	blink.tween_interval(0.32)
+	blink.tween_interval(1.0)
 	blink.tween_callback(_place_at.bind(stalk_index + 1))
 	blink.tween_callback(_set_lights.bind(1.0))
 	blink.tween_callback(func() -> void: stalking = true)
