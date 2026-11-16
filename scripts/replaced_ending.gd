@@ -6,6 +6,7 @@ extends Node
 const RoadRadio := preload("res://scripts/road_radio.gd")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const Style := preload("res://scripts/menu_style.gd")
+const Cinematic := preload("res://scripts/ending_cinematic.gd")
 const CLICK := preload("res://assets/audio/player/flashlight_click.wav")
 const YOUR_WORDS := preload("res://assets/audio/radio/you.wav")
 const COUGH := preload("res://assets/audio/radio/mick_cough.wav")
@@ -138,37 +139,19 @@ func _build_captions() -> void:
 
 func _end_card() -> void:
 	caption_label = null
-	var black := ColorRect.new()
-	black.color = Color.BLACK
-	black.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	layer.add_child(black)
-	black.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var card := VBoxContainer.new()
-	card.alignment = BoxContainer.ALIGNMENT_CENTER
-	card.add_theme_constant_override("separation", 22)
-	card.modulate.a = 0.0
-	layer.add_child(card)
-	card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for line: Array in [["Somebody always comes.", 40],
-			["Far back along the road, a pair of headlights turned toward the house at the end of it.", 20],
-			["The kettle's on.", 20], ["THE END", 30]]:
-		var label := Style.label(line[0], roundi(line[1] * GameSettings.ui_scale))
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD
-		label.add_theme_color_override("font_color", Color("#c9c2b4"))
-		card.add_child(label)
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	var cinematic: Control = Cinematic.create("replaced")
+	layer.add_child(cinematic)
 	var button := Style.button("Main menu", roundi(22 * GameSettings.ui_scale))
 	button.name = "EndButton"
 	button.theme = Style.make_theme()
-	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.pressed.connect(func() -> void:
 		TripSave.save_trip()
 		get_tree().paused = false
 		if NetworkManager.is_online():
 			NetworkManager.leave_lobby()
 		get_tree().change_scene_to_file("res://scenes/menu.tscn"))
-	card.add_child(button)
+	cinematic.set_card([["Somebody always comes.", 40],
+			["Far back along the road, a pair of headlights turned toward the house at the end of it.", 20],
+			["The kettle's on.", 20], ["THE END", 30]], button)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var fade := create_tween()
-	fade.tween_interval(1.5)
-	fade.tween_property(card, "modulate:a", 1.0, 2.5)

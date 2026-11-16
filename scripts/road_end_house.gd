@@ -180,7 +180,15 @@ const FINAL_JAW := [
 ]
 
 
+## Built only as scenery, e.g. for the ending cinematics: no triggers, no ending.
+var prop_only := false
+
+
 func _ready() -> void:
+	if prop_only:
+		_build_house()
+		set_process(false)
+		return
 	add_to_group("road_end_house")
 	revisit = seen
 	_build_house()
@@ -1265,23 +1273,16 @@ func _build_overlay() -> void:
 
 
 func _show_end() -> void:
-	var black := ColorRect.new()
-	black.color = Color.BLACK
-	overlay.add_child(black)
-	black.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	caption.hide()
+	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	var cinematic: Control = preload("res://scripts/ending_cinematic.gd").create("house")
+	overlay.add_child(cinematic)
 	var button := Style.button("Main menu", roundi(23 * GameSettings.ui_scale))
 	button.name = "EndButton"
 	button.theme = Style.make_theme()
-	black.add_child(button)
-	button.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	button.offset_left = -98 * GameSettings.ui_scale
-	button.offset_right = 98 * GameSettings.ui_scale
-	button.offset_top = -25 * GameSettings.ui_scale
-	button.offset_bottom = 25 * GameSettings.ui_scale
 	button.pressed.connect(_return_to_menu)
+	cinematic.set_card([["The headlights stayed on until the battery died.", 22], ["THE END", 30]], button)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	button.grab_focus()
 
 
 func _return_to_menu() -> void:

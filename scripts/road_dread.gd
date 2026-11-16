@@ -9,6 +9,7 @@ const MODEL := preload("res://assets/characters/player.glb")
 const Notes := preload("res://scripts/story_notes.gd")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const Style := preload("res://scripts/menu_style.gd")
+const Cinematic := preload("res://scripts/ending_cinematic.gd")
 ## How far back past the start of the road the calls come, and where you are free.
 const CALL_AT := [1400.0, 1700.0]
 const FREE_AT := 1950.0
@@ -183,41 +184,33 @@ func _escape(player: Node3D) -> void:
 	RoadEndHouse.story["escaped"] = true
 	var layer := CanvasLayer.new()
 	layer.layer = 20
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(layer)
 	var white := ColorRect.new()
 	white.color = Color(1, 0.98, 0.94, 0)
 	white.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(white)
 	white.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var card := VBoxContainer.new()
-	card.alignment = BoxContainer.ALIGNMENT_CENTER
-	card.add_theme_constant_override("separation", 22)
-	card.modulate.a = 0.0
-	layer.add_child(card)
-	card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for line: Array in [["You kept going.", 40], ["Past the workshop, past where the road began, the radio finally went quiet.", 20],
-			["For the first time in days it was only the engine, and the wind, and nobody's voice but your own.", 20], ["THE END", 30]]:
-		var label := Style.label(line[0], roundi(line[1] * GameSettings.ui_scale))
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD
-		label.add_theme_color_override("font_color", Color("#3a342c"))
-		card.add_child(label)
-	var button := Style.button("Main menu", roundi(22 * GameSettings.ui_scale))
-	button.name = "EndButton"
-	button.theme = Style.make_theme()
-	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	button.pressed.connect(func() -> void:
-		TripSave.save_trip()
-		get_tree().paused = false
-		if NetworkManager.is_online():
-			NetworkManager.leave_lobby()
-		get_tree().change_scene_to_file("res://scenes/menu.tscn"))
-	card.add_child(button)
 	var fade := create_tween()
 	fade.tween_property(white, "color:a", 1.0, 5.0).set_trans(Tween.TRANS_SINE)
 	fade.tween_callback(func() -> void:
-		AudioServer.set_bus_mute(0, false)
 		if player.has_method("lock_for_ending"):
 			player.lock_for_ending(player.global_position)
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE)
-	fade.tween_property(card, "modulate:a", 1.0, 2.0)
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		# Morning, somewhere past all of it.
+		var cinematic: Control = Cinematic.create("free")
+		layer.add_child(cinematic)
+		var button := Style.button("Main menu", roundi(22 * GameSettings.ui_scale))
+		button.name = "EndButton"
+		button.theme = Style.make_theme()
+		button.pressed.connect(func() -> void:
+			TripSave.save_trip()
+			get_tree().paused = false
+			if NetworkManager.is_online():
+				NetworkManager.leave_lobby()
+			get_tree().change_scene_to_file("res://scenes/menu.tscn"))
+		cinematic.set_card([["You kept going.", 40],
+				["Past the workshop, past where the road began, the radio finally went quiet.", 20],
+				["For the first time in days it was only the engine, and the wind, and nobody's voice but your own.", 20],
+				["THE END", 30]], button)
+		white.queue_free())
