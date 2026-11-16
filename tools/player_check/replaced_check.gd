@@ -29,7 +29,7 @@ func _ready() -> void:
 	print("tip before: ", player._interaction_text())
 	player._handle_interaction()
 	await _frames(30)
-	print("tip listening: ", player._interaction_text())
+	print("tip listening: ", player._interaction_text(), " | caption: ", radio.caption, " | broadcast playing: ", radio.voice.playing, " | static: ", radio.carrier.playing)
 	player._handle_interaction()
 	var dir := OS.get_environment("KM0_CHECK_DIR")
 	var shots := {120: "speaking", 900: "reply", 1300: "cough"}

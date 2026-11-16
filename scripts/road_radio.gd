@@ -97,6 +97,8 @@ var listener: Node3D
 var caption := ""
 var echo: AudioStreamPlayer3D
 var echo_at := -1.0
+## After the house there is nothing on the radios but an open line, waiting.
+var open_line := false
 const YOUR_VOICE := preload("res://assets/audio/ending/anybody.wav")
 
 
@@ -190,6 +192,8 @@ func _process(_delta: float) -> void:
 	if not is_instance_valid(listener) or not listener.can_listen_to_radio(global_position):
 		stop_listening()
 		return
+	if open_line:
+		return
 	# Reception drifts: now and then the voice sinks under the carrier.
 	var elapsed := voice.get_playback_position()
 	# Sometimes, under the broadcast, it is your own voice.
@@ -219,6 +223,17 @@ func toggle_listening(player: Node3D) -> void:
 		stop_listening()
 		return
 	listener = player
+	dial.emission_enabled = true
+	if preload("res://scripts/road_end_house.gd").seen:
+		open_line = true
+		caption = "[Static. The line is open.]"
+		listener.show_radio_caption(self, caption)
+		carrier.volume_db = -11.0
+		carrier.play()
+		set_process(true)
+		return
+	open_line = false
+	carrier.volume_db = -18.0 - broadcast * 0.9
 	echo_at = randf_range(9.0, maxf(10.0, RECORDINGS[broadcast].get_length() - 6.0)) if randf() < 0.3 else -1.0
 	caption = "Carrier signal…"
 	listener.show_radio_caption(self, caption)
@@ -242,6 +257,7 @@ func stop_listening() -> void:
 		listener.clear_radio_caption(self)
 	listener = null
 	caption = ""
+	open_line = false
 	voice.stop()
 	carrier.stop()
 	echo.stop()
