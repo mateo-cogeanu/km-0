@@ -1698,15 +1698,12 @@ func _light_flare() -> void:
 	strike.tween_callback(_play_creature_sound.bind(SHRIEK))
 	strike.tween_method(_collapse, 0.0, 1.0, 0.75).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	strike.tween_callback(_play_at.bind(STEP, to_global(_floor_spot()), 0.55))
-	for twitch in 3:
-		strike.tween_callback(func() -> void: creature.jitter = 1.0)
-		strike.tween_interval(0.18)
-		strike.tween_callback(func() -> void: creature.jitter = 0.0)
-		strike.tween_interval(0.5 + twitch * 0.35)
+	strike.tween_method(_death_throes, 0.0, 1.0, 2.6)
 	strike.tween_callback(func() -> void:
 		eyes_dead = true
-		creature.tilt = 0.4
+		creature.jitter = 0.0
 		camera_follow = false
+		_collapse(1.0)
 		player.begin_ending_look())
 	# Still. The flare fizzes. Nothing moves for a long time.
 	strike.tween_interval(7.5)
@@ -1734,31 +1731,58 @@ func _floor_spot() -> Vector3:
 	return spot["center"] + spot["normal"] * 0.78
 
 
-func _collapse(t: float) -> void:
-	## Off the wall and face down on the floor, limbs flung out.
+func _collapse(t: float, spasm: float = 0.0) -> void:
+	## Off the wall and down, then sprawled flat and limp: legs out, one arm
+	## flung wide, the other thrown past its head and bent the wrong way, the
+	## head lolled onto the floor, jaw hanging.
 	var spot: Dictionary = stalk_spots[-1]
 	var heading: Vector3 = (spot["heading"] as Vector3) * Vector3(1, 0, 1)
 	heading = heading.normalized()
 	var across := Vector3.UP.cross(heading).normalized()
 	var rest_at := _floor_spot()
-	rest_at.y = 0.24
-	var lying_shoulders := rest_at + heading * 0.372
-	var lying_pelvis := rest_at - heading * 0.372
+	var flat := Vector3(rest_at.x, 0.0, rest_at.z)
+	var lying_shoulders := flat + heading * 0.372 + Vector3.UP * 0.15
+	var lying_pelvis := flat - heading * 0.372 + Vector3.UP * 0.14
 	var arc := Vector3.UP * sin(t * PI) * 0.25
 	var shoulders := skit_shoulders.lerp(lying_shoulders, t) + arc
 	var pelvis := skit_pelvis.lerp(lying_pelvis, t) + arc * 0.6
 	var palms: Array[Vector3] = []
 	var feet: Array[Vector3] = []
+	var palm_normals: Array[Vector3] = []
+	var foot_normals: Array[Vector3] = []
+	var normal: Vector3 = spot["normal"]
 	for i in 2:
 		var side := -1.0 if i == 0 else 1.0
-		var palm_down := Vector3(rest_at.x, 0.0, rest_at.z) + heading * 0.55 + across * side * 0.45
-		var foot_down := Vector3(rest_at.x, 0.0, rest_at.z) - heading * 0.7 + across * side * 0.38
+		var palm_down := flat + (heading * 0.35 + across * side * 0.95 if i == 0 else heading * 1.1 + across * side * 0.3)
+		palm_down.y = 0.075 if i == 0 else 0.085
+		var foot_down := flat - heading * 1.3 + across * side * 0.34
+		foot_down.y = 0.05
+		# Last nerves firing: a hand or a foot jerks off the floor.
+		palm_down.y += spasm * (0.07 if i == 0 else 0.0)
+		foot_down.y += spasm * (0.0 if i == 0 else 0.09)
 		palms.append(skit_palms[i].lerp(palm_down, smoothstep(0.2, 1.0, t)))
 		feet.append(skit_feet[i].lerp(foot_down, smoothstep(0.3, 1.0, t)))
-	var normal: Vector3 = spot["normal"]
-	var normals: Array[Vector3] = [normal.lerp(Vector3.UP, t).normalized(), normal.lerp(Vector3.UP, t).normalized()]
+		# Hands and feet rolled onto their sides, the way nothing alive rests.
+		palm_normals.append(normal.lerp((Vector3.UP * 0.35 + across * side).normalized(), t).normalized())
+		foot_normals.append(normal.lerp((Vector3.UP * 0.3 + across * side * 0.8 - heading * 0.4).normalized(), t).normalized())
 	creature.position = Vector3(rest_at.x, 0, rest_at.z)
-	_pose(shoulders, pelvis, palms, normals, feet, 4.3, 0.0, normals, normal.slerp(Vector3.UP, t))
+	# The head turns away from you and drops to the floor.
+	var eye := to_local(player.camera.global_position)
+	var away := -1.0 if across.dot(eye - flat) > 0.0 else 1.0
+	gaze_target = flat + heading * 0.9 + across * away * 1.2 + Vector3.DOWN * 0.6
+	gaze_mix = smoothstep(0.3, 1.0, t)
+	creature.tilt = lerpf(0.0, 1.05 * away, smoothstep(0.4, 1.0, t)) + spasm * 0.15
+	creature.elbow_flip[1] = smoothstep(0.5, 1.0, t)
+	_pose(shoulders, pelvis, palms, palm_normals, feet, 4.3, 0.0, foot_normals, normal.slerp(Vector3.UP, t))
+	creature.set_jaw_offset(-0.011 * smoothstep(0.5, 1.0, t))
+
+
+func _death_throes(t: float) -> void:
+	## A few spasms, each weaker, then nothing.
+	var spasm := 0.0
+	for hit: Vector3 in [Vector3(0.08, 0.14, 1.0), Vector3(0.42, 0.47, 0.6), Vector3(0.74, 0.77, 0.3)]:
+		spasm = maxf(spasm, smoothstep(hit.x, hit.x + 0.015, t) * (1.0 - smoothstep(hit.x + 0.02, hit.y, t)) * hit.z)
+	_collapse(1.0, spasm)
 
 
 func _burst_start() -> void:
@@ -1769,6 +1793,8 @@ func _burst_start() -> void:
 	face_back = Vector3.UP
 	eyes_dead = false
 	eye_open = 0.0
+	gaze_mix = 0.0
+	creature.elbow_flip[1] = 0.0
 	creature.tilt = 0.0
 	creature.jitter = 1.0
 	creature.show()
