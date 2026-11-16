@@ -287,60 +287,105 @@ def add_oriented_ellipsoid(f, center, radii, rotation, k):
     f.add(sdf, c - reach, c + reach, k)
 
 
+def head_field():
+    """Skull, face, jaw and neck: the surface hair and beard grow from."""
+    f = Field((-0.13, -0.14, 1.6), (0.13, 0.17, 2.03))
+    # Neck, with a hint of an Adam's apple.
+    f.capsule((0, -0.015, 1.62), (0, -0.006, 1.8), 0.058, 0.052, 0.03)
+    f.ellipsoid((0, 0.043, 1.735), (0.012, 0.01, 0.014), 0.012)
+    # Skull and the mass of the face.
+    f.ellipsoid((0, -0.012, 1.905), (0.077, 0.095, 0.088), 0.03)
+    f.ellipsoid((0, 0.035, 1.852), (0.066, 0.068, 0.075), 0.035)
+    # Jaw: from each angle below the ear round to the chin.
+    for side in (-1, 1):
+        f.capsule((side * 0.056, -0.004, 1.81), (side * 0.03, 0.06, 1.783), 0.022, 0.02, 0.025)
+    f.capsule((-0.03, 0.06, 1.783), (0.03, 0.06, 1.783), 0.02, 0.02, 0.02)
+    f.ellipsoid((0, 0.073, 1.779), (0.022, 0.016, 0.016), 0.015)
+    # Cheekbones and a continuous brow ridge.
+    for side in (-1, 1):
+        f.ellipsoid((side * 0.05, 0.063, 1.86), (0.022, 0.02, 0.015), 0.018)
+    f.capsule((-0.05, 0.08, 1.898), (0.05, 0.08, 1.898), 0.008, 0.008, 0.022)
+    return f
+
+
 def build_head():
-    f = Field((-0.13, -0.14, 1.6), (0.13, 0.16, 2.03))
-    f.capsule((0, -0.012, 1.62), (0, 0.0, 1.8), 0.064, 0.055, 0.03)
-    # Skull, cheeks and jaw, chin.
-    f.ellipsoid((0, -0.008, 1.875), (0.083, 0.098, 0.105), 0.04)
-    f.ellipsoid((0, 0.03, 1.835), (0.07, 0.075, 0.07), 0.04)
-    f.ellipsoid((0, 0.066, 1.786), (0.034, 0.024, 0.022), 0.03)
+    f = head_field()
+    # Eye sockets under the brow.
     for side in (-1, 1):
-        f.ellipsoid((side * 0.05, 0.06, 1.835), (0.026, 0.022, 0.02), 0.02)
-        f.ellipsoid((side * 0.054, 0.02, 1.795), (0.024, 0.04, 0.02), 0.025)
-    # Brow, nose, lips.
-    f.ellipsoid((0, 0.083, 1.9), (0.066, 0.018, 0.014), 0.02)
-    f.capsule((0, 0.095, 1.888), (0, 0.121, 1.846), 0.009, 0.016, 0.01)
-    f.ellipsoid((0, 0.118, 1.846), (0.014, 0.012, 0.011), 0.008)
+        f.ellipsoid((side * 0.032, 0.094, 1.877), (0.019, 0.013, 0.012), 0.01, subtract=True)
+        # Lids wrapping the eye.
+        f.ellipsoid((side * 0.032, 0.0865, 1.8855), (0.0165, 0.011, 0.0058), 0.003)
+        f.ellipsoid((side * 0.032, 0.0858, 1.869), (0.0145, 0.0088, 0.0038), 0.003)
+    # Nose: bridge, tip, the wings either side, and nostrils.
+    f.capsule((0, 0.091, 1.888), (0, 0.111, 1.851), 0.0075, 0.011, 0.01)
+    f.ellipsoid((0, 0.113, 1.848), (0.012, 0.0115, 0.0115), 0.008)
     for side in (-1, 1):
-        f.ellipsoid((side * 0.013, 0.108, 1.844), (0.01, 0.01, 0.008), 0.008)
-    f.ellipsoid((0, 0.092, 1.818), (0.023, 0.01, 0.006), 0.006)
-    f.ellipsoid((0, 0.088, 1.806), (0.02, 0.009, 0.006), 0.006)
-    # Eye sockets, then ears.
+        f.ellipsoid((side * 0.0118, 0.103, 1.846), (0.0088, 0.0085, 0.007), 0.006)
+        f.ellipsoid((side * 0.0068, 0.109, 1.8405), (0.0035, 0.0036, 0.0026), 0.002, subtract=True)
+    # Mouth: upper and lower lip, parted by a thin line.
+    f.ellipsoid((0, 0.0955, 1.822), (0.021, 0.0062, 0.005), 0.007)
+    f.ellipsoid((0, 0.093, 1.81), (0.018, 0.0068, 0.0058), 0.007)
+    f.ellipsoid((0, 0.099, 1.8158), (0.02, 0.005, 0.001), 0.002, subtract=True)
+    # Ears, close to the head, with the bowl cut in.
     for side in (-1, 1):
-        f.ellipsoid((side * 0.033, 0.094, 1.874), (0.019, 0.014, 0.012), 0.012, subtract=True)
-        # Heavy upper lids, so the eyes sit back under the brow.
-        f.ellipsoid((side * 0.033, 0.089, 1.882), (0.017, 0.011, 0.0065), 0.004)
-        f.ellipsoid((side * 0.033, 0.088, 1.866), (0.015, 0.009, 0.004), 0.004)
-        f.ellipsoid((side * 0.084, -0.004, 1.86), (0.012, 0.024, 0.031), 0.012)
-        f.ellipsoid((side * 0.09, -0.004, 1.86), (0.006, 0.014, 0.019), 0.006, subtract=True)
-    # Wider jaw and cheekbones so the face reads as a grown man's.
-    f.ellipsoid((0, 0.035, 1.8), (0.064, 0.06, 0.04), 0.03)
-    for side in (-1, 1):
-        f.ellipsoid((side * 0.05, 0.068, 1.858), (0.02, 0.014, 0.012), 0.015)
+        f.ellipsoid((side * 0.078, -0.006, 1.87), (0.0105, 0.021, 0.029), 0.01)
+        f.ellipsoid((side * 0.083, -0.003, 1.868), (0.005, 0.012, 0.017), 0.005, subtract=True)
     obj = f.mesh("Head skin")
-    finish(obj, 0.25)
+    finish(obj, 0.3)
+    return obj
+
+
+def grown_layer(name, region, thickness, ratio, extra=None):
+    """A thin layer lying on the head's surface, kept only inside region (a
+    Field whose negative side is where the layer belongs)."""
+    head = head_field()
+    # Lifted just off the skin, so the two surfaces never fight.
+    shell = np.abs(head.d - (thickness * 0.5 + 0.0015)) - thickness * 0.5
+    layer = Field((-0.13, -0.14, 1.6), (0.13, 0.17, 2.03))
+    layer.d = np.maximum(shell, region.d)
+    if extra:
+        extra(layer)
+    obj = layer.mesh(name)
+    finish(obj, ratio)
     return obj
 
 
 def build_hair():
-    """Short hair: a cap over the skull, cut away over the face and ears."""
-    f = Field((-0.12, -0.14, 1.78), (0.12, 0.14, 2.02))
-    f.ellipsoid((0, -0.011, 1.879), (0.087, 0.102, 0.108), 0.015)
-    f.ellipsoid((0, 0.036, 1.948), (0.068, 0.05, 0.03), 0.02)
-    # Cut out the face, the ears, and the neck below the hairline.
-    f.ellipsoid((0, 0.125, 1.835), (0.12, 0.1, 0.098), 0.025, subtract=True)
+    """Short hair lying close to the skull, a natural hairline, eyebrows."""
+    region = Field((-0.13, -0.14, 1.6), (0.13, 0.17, 2.03))
+    region.d[:] = 0.25
+    # Where hair grows: the top and back of the skull, down to the ears.
+    region.ellipsoid((0, -0.03, 1.935), (0.1, 0.13, 0.085), 0.02)
+    region.ellipsoid((0, 0.11, 1.85), (0.115, 0.085, 0.085), 0.02, subtract=True)
     for side in (-1, 1):
-        f.ellipsoid((side * 0.09, 0.0, 1.835), (0.03, 0.04, 0.045), 0.015, subtract=True)
-    f.capsule((0, -0.02, 1.7), (0, -0.04, 1.81), 0.11, 0.1, 0.03, subtract=True)
-    obj = f.mesh("Hair")
-    finish(obj, 0.3)
-    return obj
+        region.ellipsoid((side * 0.085, 0.0, 1.85), (0.03, 0.05, 0.048), 0.015, subtract=True)
+
+    def brows(layer):
+        layer.ellipsoid((0, 0.025, 1.975), (0.05, 0.05, 0.016), 0.02)
+        for side in (-1, 1):
+            layer.capsule((side * 0.014, 0.095, 1.8955), (side * 0.049, 0.088, 1.8935), 0.0055, 0.0042, 0.003)
+
+    return grown_layer("Hair", region, 0.006, 0.6, brows)
+
+
+def build_beard():
+    """A short grey beard along the jaw and over the lip, only on the stranger."""
+    region = Field((-0.13, -0.14, 1.6), (0.13, 0.17, 2.03))
+    region.d[:] = 0.25
+    region.ellipsoid((0, 0.04, 1.796), (0.082, 0.088, 0.044), 0.015)
+    # A light moustache over the lip.
+    region.ellipsoid((0, 0.1, 1.829), (0.024, 0.02, 0.006), 0.006)
+    # Bare cheeks, a clear mouth, and nothing down the neck.
+    region.ellipsoid((0, 0.1, 1.853), (0.082, 0.07, 0.026), 0.012, subtract=True)
+    region.ellipsoid((0, 0.11, 1.8155), (0.023, 0.03, 0.0088), 0.003, subtract=True)
+    region.capsule((0, -0.02, 1.62), (0, 0.02, 1.765), 0.075, 0.05, 0.01, subtract=True)
+    return grown_layer("Beard", region, 0.0032, 0.6)
 
 
 def build_eyes():
     eyes = []
     for side in (-1, 1):
-        for title, radius, at in (("Eye", 0.0105, (side * 0.033, 0.081, 1.873)), ("Iris", 0.0062, (side * 0.032, 0.0905, 1.873))):
+        for title, radius, at in (("Eye", 0.0115, (side * 0.032, 0.0795, 1.877)), ("Iris", 0.0056, (side * 0.032, 0.0902, 1.877))):
             bm = bmesh.new()
             bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=10, radius=radius)
             mesh = bpy.data.meshes.new(title)
@@ -408,12 +453,14 @@ def beyond_wrist(p, side):
     return (p - wrist).dot(along)
 
 
-def paint(body, head, hair, hands, eyes):
+def paint(body, head, hair, beard, hands, eyes):
     jacket = material("Jacket", (0.16, 0.18, 0.13), 0.86)
     jeans = material("Jeans", (0.1, 0.12, 0.17), 0.9)
     boots = material("Boots", (0.075, 0.058, 0.045), 0.55)
-    skin = material("Skin", (0.62, 0.46, 0.37), 0.55)
-    hair_mat = material("Hair", (0.06, 0.045, 0.032), 0.75)
+    skin = material("Skin", (0.4, 0.25, 0.18), 0.84)
+    lips = material("Lips", (0.44, 0.25, 0.21), 0.7)
+    beard_mat = material("Beard", (0.24, 0.22, 0.2), 0.95)
+    hair_mat = material("Hair", (0.06, 0.045, 0.032), 0.93)
     eye = material("Eye white", (0.78, 0.75, 0.7), 0.25)
     iris = material("Iris", (0.06, 0.07, 0.05), 0.15)
     for mat in (jacket, jeans, boots, skin):
@@ -432,7 +479,15 @@ def paint(body, head, hair, hands, eyes):
         else:
             poly.material_index = 0
     head.data.materials.append(skin)
+    head.data.materials.append(lips)
+    for poly in head.data.polygons:
+        c = poly.center
+        upper = Vector(((c.x) / 0.021, (c.y - 0.097) / 0.009, (c.z - 1.822) / 0.0062)).length
+        lower = Vector(((c.x) / 0.018, (c.y - 0.094) / 0.0095, (c.z - 1.809) / 0.0072)).length
+        if min(upper, lower) < 1.15 and c.y > 0.09:
+            poly.material_index = 1
     hair.data.materials.append(hair_mat)
+    beard.data.materials.append(beard_mat)
     for obj in hands:
         obj.data.materials.append(skin)
     for obj in eyes:
@@ -566,8 +621,9 @@ def main():
     hands = build_hands()
     head = build_head()
     hair = build_hair()
+    beard = build_beard()
     eyes = build_eyes()
-    paint(body, head, hair, hands, eyes)
+    paint(body, head, hair, beard, hands, eyes)
     rig = build_rig()
     skin_body(body, rig)
     smooth_weights(body)
@@ -576,6 +632,7 @@ def main():
         smooth_weights(obj)
     skin_head(head, rig)
     attach(hair, rig, "Head")
+    attach(beard, rig, "Head")
     for eye in eyes:
         attach(eye, rig, "Head")
     bpy.ops.wm.save_as_mainfile(filepath=str(BLEND))

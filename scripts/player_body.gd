@@ -48,6 +48,15 @@ func build(own_view: bool) -> void:
 		_prepare_fingers(side)
 	for mesh: GeometryInstance3D in model.find_children("*", "GeometryInstance3D", true, false):
 		mesh.layers = BODY_LAYER
+		# Skin and hair are matte: no sky mirrored in them.
+		if mesh is MeshInstance3D:
+			for surface in (mesh as MeshInstance3D).mesh.get_surface_count():
+				var finish := (mesh as MeshInstance3D).mesh.surface_get_material(surface) as BaseMaterial3D
+				if finish and finish.resource_name in ["Skin", "Lips", "Hair", "Beard"]:
+					finish.metallic_specular = 0.18
+		# Only the stranger wears the beard.
+		if String(mesh.name).begins_with("Beard"):
+			mesh.visible = false
 		var title := String(mesh.name)
 		if own_view and (title.begins_with("Head") or title.begins_with("Hair") or title.begins_with("Eye") or title.begins_with("Iris")):
 			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY

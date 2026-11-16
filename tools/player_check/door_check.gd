@@ -37,6 +37,15 @@ func _ready() -> void:
 	player._handle_interaction()
 	await _frames(30)
 	print("talking: ", is_instance_valid(player.talking_to), " caption: ", cabin.caption.text if cabin.caption else "")
+	# A close look at his face.
+	player.global_position = cabin.to_global(Vector3(0.55, 1.06, 0.05))
+	player.look_at(cabin.to_global(Vector3(0.55, 1.06, -0.7)), Vector3.UP)
+	player.rotation.x = 0.0
+	player.rotation.z = 0.0
+	player.look_rotation_x = 0.12
+	player.head.rotation.x = 0.12
+	await _frames(40)
+	get_viewport().get_texture().get_image().save_png(OS.get_environment("KM0_CHECK_DIR").path_join("face.png"))
 	get_tree().quit()
 
 

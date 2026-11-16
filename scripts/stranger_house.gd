@@ -1,7 +1,8 @@
 extends Node3D
 ## A cabin back the way you came, past where the road starts. Someone who
-## followed the radio before you is holed up inside. He speaks with the
-## system's text-to-speech voices, and offers you a road flare.
+## followed the radio before you is holed up inside, and offers you a road
+## flare. His lines and yours are pre-recorded by Sources/make_stranger_voice.py
+## into assets/audio/stranger, named after the speaker and an MD5 of the line.
 
 const Shapes := preload("res://scripts/prop_shapes.gd")
 const PlayerBody := preload("res://scripts/player_body.gd")
@@ -56,7 +57,8 @@ var overlay: CanvasLayer
 var caption: Label
 var choices: HBoxContainer
 var line_timer := 0.0
-var voices := {}
+var mouth: AudioStreamPlayer3D
+var ears: AudioStreamPlayer
 var talk_spot: Area3D
 var refused := false
 var ask_after := false
@@ -68,6 +70,7 @@ var door_open := false
 func _ready() -> void:
 	_build_cabin()
 	_build_stranger()
+	_build_interior_light()
 	flare = Supply.new()
 	flare.kind = "flare"
 	flare.name = "Flare"
@@ -76,7 +79,13 @@ func _ready() -> void:
 	flare.freeze = true
 	flare.hide()
 	flare.collision_layer = 0
-	_pick_voices()
+	mouth = AudioStreamPlayer3D.new()
+	mouth.unit_size = 3.0
+	mouth.volume_db = 2.0
+	add_child(mouth)
+	ears = AudioStreamPlayer.new()
+	ears.volume_db = -2.0
+	add_child(ears)
 
 
 func _build_cabin() -> void:
@@ -149,6 +158,35 @@ func _build_cabin() -> void:
 		can.rotation.y = spot.x * 3.0
 
 
+func _build_interior_light() -> void:
+	## Inside, the sky doesn't reach: a dim, warm room lit by the lamp.
+	var inside := Area3D.new()
+	inside.name = "Inside"
+	inside.collision_layer = 0
+	inside.collision_mask = 4
+	add_child(inside)
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(4.9, 2.6, 3.9)
+	shape.shape = box
+	shape.position = Vector3(0, 1.3, 0)
+	inside.add_child(shape)
+	inside.body_entered.connect(func(body: Node3D) -> void:
+		if body.is_in_group("local_player") and "camera" in body:
+			var world := get_tree().current_scene.get_node_or_null("WorldEnvironment") as WorldEnvironment
+			if world:
+				var room := world.environment.duplicate() as Environment
+				room.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+				room.ambient_light_color = Color("#8a7766")
+				room.ambient_light_energy = 0.32
+				room.ambient_light_sky_contribution = 0.0
+				room.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
+				body.camera.environment = room)
+	inside.body_exited.connect(func(body: Node3D) -> void:
+		if body.is_in_group("local_player") and "camera" in body and not body.ending_locked:
+			body.camera.environment = null)
+
+
 func _build_door(planks: Material, dark: Material) -> void:
 	door_hinge = Node3D.new()
 	door_hinge.name = "DoorHinge"
@@ -195,6 +233,8 @@ func _build_stranger() -> void:
 	var recolor := {"Jacket": Color("#5a2a22"), "Jeans": Color("#5b5240"), "Hair": Color("#7a7670")}
 	for mesh: MeshInstance3D in stranger.find_children("*", "MeshInstance3D", true, false):
 		mesh.layers = 1
+		if String(mesh.name).begins_with("Beard"):
+			mesh.visible = true
 		for surface in mesh.mesh.get_surface_count():
 			var material := mesh.mesh.surface_get_material(surface)
 			if material and recolor.has(material.resource_name):
@@ -222,31 +262,6 @@ func _build_stranger() -> void:
 	var block := CollisionShape3D.new()
 	block.shape = capsule
 	solid.add_child(block)
-
-
-func _pick_voices() -> void:
-	## Two different system voices: one for him, one for you.
-	if not DisplayServer.has_feature(DisplayServer.FEATURE_TEXT_TO_SPEECH):
-		return
-	var found := DisplayServer.tts_get_voices_for_language("en")
-	if found.is_empty():
-		return
-	var preferred_him := ["Fred", "Ralph", "Daniel", "Rocko", "Reed", "Grandpa", "Eddy"]
-	var preferred_you := ["Alex", "Tom", "Aaron", "Samantha", "Evan", "Nathan"]
-	voices["him"] = _choose(found, preferred_him, found[0])
-	voices["you"] = _choose(found, preferred_you, found[mini(1, found.size() - 1)])
-	if voices["you"] == voices["him"] and found.size() > 1:
-		voices["you"] = found[1] if found[0] == voices["him"] else found[0]
-	DisplayServer.tts_set_utterance_callback(DisplayServer.TTS_UTTERANCE_ENDED, _on_spoken)
-
-
-func _choose(found: PackedStringArray, names: Array, fallback: String) -> String:
-	var voice_list := DisplayServer.tts_get_voices()
-	for wanted in names:
-		for entry: Dictionary in voice_list:
-			if String(entry.get("name", "")).begins_with(wanted) and found.has(entry.get("id", "")):
-				return entry["id"]
-	return fallback
 
 
 func _process(delta: float) -> void:
@@ -328,8 +343,8 @@ func _build_overlay() -> void:
 
 
 func _next_line() -> void:
-	if line_index >= 0 and DisplayServer.has_feature(DisplayServer.FEATURE_TEXT_TO_SPEECH):
-		DisplayServer.tts_stop()
+	mouth.stop()
+	ears.stop()
 	line_index += 1
 	if line_index >= lines.size():
 		if ask_after:
@@ -346,15 +361,15 @@ func _next_line() -> void:
 	var text: String = line[1]
 	caption.text = ("Stranger: " if speaker == "him" else "You: ") + text
 	line_timer = maxf(1.6, text.length() * 0.075) + 0.6
-	var voice: String = voices.get(speaker, "")
-	if not voice.is_empty():
-		DisplayServer.tts_speak(text, voice, 80, 0.88 if speaker == "him" else 1.0, 0.92 if speaker == "him" else 1.0, line_index)
-		line_timer += 4.0
-
-
-func _on_spoken(id: int) -> void:
-	if id == line_index and not choosing:
-		line_timer = minf(line_timer, 0.45)
+	var recording := "res://assets/audio/stranger/%s_%s.wav" % [speaker, text.md5_text().substr(0, 10)]
+	if ResourceLoader.exists(recording):
+		var stream: AudioStream = load(recording)
+		var player_for: Node = ears if speaker == "you" else mouth
+		if speaker == "him":
+			mouth.global_position = stranger.global_position + Vector3.UP * 0.8
+		player_for.stream = stream
+		player_for.play()
+		line_timer = stream.get_length() + 0.45
 
 
 func _offer_choice() -> void:
@@ -388,8 +403,8 @@ func _chose(take: bool) -> void:
 
 
 func _finish() -> void:
-	if DisplayServer.has_feature(DisplayServer.FEATURE_TEXT_TO_SPEECH):
-		DisplayServer.tts_stop()
+	mouth.stop()
+	ears.stop()
 	line_index = -1
 	choosing = false
 	if not flare.get_meta("given", false):
