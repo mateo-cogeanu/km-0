@@ -2,7 +2,7 @@
 
 importer="wav"
 type="AudioStreamWAV"
-uid="uid://cr67c8ii6del7"
+uid="uid://cp5o60u0my5r6"
 path="res://.godot/imported/tower.wav-9aa54f1fcbd57c96b940b1dc9ed66778.sample"
 
 [deps]
@@ -21,4 +21,4 @@ edit/normalize=false
 edit/loop_mode=0
 edit/loop_begin=0
 edit/loop_end=-1
-compress/mode=0
+compress/mode=2

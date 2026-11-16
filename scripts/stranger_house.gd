@@ -1,7 +1,7 @@
 extends Node3D
 ## A cabin back the way you came, past where the road starts. Someone who
 ## followed the radio before you is holed up inside, and offers you a road
-## flare. His lines and yours are pre-recorded by Sources/make_stranger_voice.py
+## flare. His lines and yours are pre-recorded by Sources/make_voices.py
 ## into assets/audio/stranger, named after the speaker and an MD5 of the line.
 
 const Shapes := preload("res://scripts/prop_shapes.gd")
@@ -14,7 +14,8 @@ const LOCATION := Vector3(46.0, 0.0, 660.0)
 ## The door faces back towards the road and the workshop.
 const TURN := PI
 
-## who ("him" or "you"), what is said, and an optional cue for the scene.
+## who ("him" or "you"), what is said, and an optional cue: "offer" holds out
+## the flare; "cough" means the recording starts with a cough.
 const MEETING := [
 	["him", "Whoa. Easy. Stay where I can see you."],
 	["you", "It's alright. I'm just driving."],
@@ -26,7 +27,7 @@ const MEETING := [
 	["you", "What was in there?"],
 	["him", "Something on the wall. Flat on the wall, like a spider. Smiling at me."],
 	["him", "And it talked. In my voice. It called out in my own voice."],
-	["him", "I ran. I don't know how far. I ended up here, and I haven't slept since."],
+	["him", "I ran. I don't know how far. I ended up here, and I haven't slept since.", "cough"],
 	["him", "You're going there. I can see it on you. You can't help it."],
 	["him", "So take this.", "offer"],
 	["him", "A road flare. It's the only thing I ever saw it flinch from. When it comes close, light it. Don't wait."],
@@ -40,7 +41,7 @@ const REFUSED := [
 	["him", "Your funeral. It'll be right here if you change your mind."],
 ]
 const AGAIN_GIVEN := [
-	["him", "Still here? Go on, then. I'm not going back there. Not ever."],
+	["him", "Still here? Go on, then. I'm not going back there. Not ever.", "cough"],
 ]
 const AGAIN_REFUSED := [
 	["him", "Changed your mind?", "offer"],
