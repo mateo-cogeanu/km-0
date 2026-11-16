@@ -49,6 +49,17 @@ func toggle() -> void:
 		player.clear_radio_caption(self)
 
 
+## The same calls the player makes on a station radio, so either can be the one
+## you are listening to.
+func stop_listening() -> void:
+	if on:
+		toggle()
+
+
+func toggle_listening(_player: Node3D) -> void:
+	toggle()
+
+
 func _pick() -> int:
 	## The broadcast for how far down the road you have got.
 	if RoadEndHouse.seen:
