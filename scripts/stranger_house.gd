@@ -83,14 +83,7 @@ func _ready() -> void:
 	_build_cabin()
 	_build_stranger()
 	_build_interior_light()
-	flare = Supply.new()
-	flare.kind = "flare"
-	flare.name = "Flare"
-	add_child(flare)
-	flare.position = Vector3(0.6, 1.0, -0.6)
-	flare.freeze = true
-	flare.hide()
-	flare.collision_layer = 0
+	_make_flare()
 	mouth = AudioStreamPlayer3D.new()
 	mouth.unit_size = 3.0
 	mouth.volume_db = 2.0
@@ -322,7 +315,7 @@ func _process(delta: float) -> void:
 		targets[1] = Vector3(0.18, 0.15, -0.5)
 	stranger.animate(delta, {"velocity": Vector3.ZERO, "on_floor": true, "pitch": pitch, "targets": targets,
 		"grip": [0.15, 1.0 if offering else 0.2], "step": 1.0})
-	if offering and stranger.posed.has("HandR"):
+	if offering and is_instance_valid(flare) and stranger.posed.has("HandR"):
 		var hand: Transform3D = stranger.posed["HandR"]
 		var palm: Vector3 = hand.origin.lerp((stranger.posed["Middle1R"] as Transform3D).origin, 0.5)
 		flare.global_position = stranger.global_transform * (stranger.to_rig.affine_inverse() * palm) - Vector3.UP * 0.12
@@ -333,13 +326,41 @@ func _process(delta: float) -> void:
 			_next_line()
 
 
+func _make_flare() -> void:
+	## The flare he holds out. Once it is yours it can be lit, dropped or rebuilt
+	## by a loaded save, so whether he gave it is kept in the story, not on it.
+	flare = Supply.new()
+	flare.kind = "flare"
+	flare.name = "Flare"
+	add_child(flare)
+	flare.position = Vector3(0.6, 1.0, -0.6)
+	flare.freeze = true
+	flare.hide()
+	flare.collision_layer = 0
+
+
+func _given() -> bool:
+	if RoadEndHouse.story.get("flare_given", false):
+		return true
+	return is_instance_valid(flare) and flare.get_meta("given", false)
+
+
+func _offered_flare() -> RigidBody3D:
+	if _given():
+		return null
+	if not is_instance_valid(flare) or flare.is_queued_for_deletion():
+		_make_flare()
+	return flare
+
+
 func talk(who: Node3D) -> void:
 	if line_index >= 0:
 		_next_line()
 		return
 	player = who
-	ask_after = not flare.get_meta("given", false)
-	if flare.get_meta("given", false):
+	refused = refused or RoadEndHouse.story.get("flare_refused", false)
+	ask_after = not _given()
+	if not ask_after:
 		lines = AGAIN_GIVEN.duplicate()
 	elif refused:
 		lines = AGAIN_REFUSED.duplicate()
@@ -395,8 +416,10 @@ func _next_line() -> void:
 		return
 	var line: Array = lines[line_index]
 	if line.size() > 2 and line[2] == "offer":
-		offering = true
-		flare.show()
+		var held := _offered_flare()
+		if held:
+			offering = true
+			held.show()
 	var speaker: String = line[0]
 	var text: String = line[1]
 	caption.text = (("Stranger: " if speaker == "him" else "You: ") + text) if GameSettings.subtitles else ""
@@ -426,7 +449,9 @@ func _chose(take: bool) -> void:
 	choosing = false
 	for button in choices.get_children():
 		button.queue_free()
-	if take:
+	if take and _offered_flare():
+		RoadEndHouse.story["flare_given"] = true
+		RoadEndHouse.story.erase("flare_refused")
 		flare.set_meta("given", true)
 		flare.freeze = false
 		flare.collision_layer = 16
@@ -435,8 +460,10 @@ func _chose(take: bool) -> void:
 		lines = TAKEN.duplicate()
 	else:
 		refused = true
+		RoadEndHouse.story["flare_refused"] = true
 		offering = false
-		flare.hide()
+		if is_instance_valid(flare):
+			flare.hide()
 		lines = REFUSED.duplicate()
 	line_index = -1
 	_next_line()
@@ -447,9 +474,10 @@ func _finish() -> void:
 	ears.stop()
 	line_index = -1
 	choosing = false
-	if not flare.get_meta("given", false):
+	if not _given():
 		offering = false
-		flare.hide()
+		if is_instance_valid(flare):
+			flare.hide()
 	if overlay:
 		overlay.queue_free()
 		overlay = null
