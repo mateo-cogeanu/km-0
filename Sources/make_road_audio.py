@@ -92,3 +92,24 @@ def write_wind():
 
 
 write_wind()
+
+
+def write_storm():
+    """A dust storm: a constant roar of air with grit hissing through it and
+    heavy gusts. Loops."""
+    duration = 12
+    roar = soften(noise(duration, 1101, 60, 420), 520)
+    grit = noise(duration, 1102, 1200, 5200)
+    gusts = [(1.5, 1.2, 0.8), (5.0, 1.8, 1.0), (8.6, 1.0, 0.7), (10.8, 1.4, 0.9)]
+    storm = []
+    for i, (low, high) in enumerate(zip(roar, grit)):
+        time = i / RATE
+        swell = 0.55
+        for center, width, strength in gusts:
+            distance = (time - center + duration / 2) % duration - duration / 2
+            swell += strength * exp(-0.5 * (distance / width) ** 2)
+        storm.append(swell * (low + 0.18 * swell * high))
+    write("dust_storm", [storm], 0.6)
+
+
+write_storm()

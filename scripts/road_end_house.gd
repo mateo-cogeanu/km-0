@@ -26,6 +26,8 @@ const SHRIEK := preload("res://assets/audio/ending/shriek.wav")
 ## Whether this trip has already been through the ending once. A second visit
 ## plays out differently.
 static var seen := false
+## Other story flags kept with the trip (e.g. "escaped").
+static var story := {}
 
 var boards := Shapes.material(Color("#675545"))
 var floorboards := Shapes.material(Color("#504236"))
@@ -312,7 +314,7 @@ func _build_exterior() -> void:
 	porch_light.light_color = Color("#f0c890")
 	porch_light.light_energy = 0.55
 	porch_light.omni_range = 4.0
-	porch_light.shadow_enabled = true
+	porch_light.shadow_enabled = GameSettings.lamp_shadows()
 	add_child(porch_light)
 	porch_light.position = Vector3(1.06, 2.0, 4.02)
 
@@ -351,6 +353,13 @@ func _build_interior() -> void:
 		Shapes.box(self, "InnerMullion", across * 0.025 + Vector3.UP * 0.74 + flat * 0.012, at + facing * 0.026, wood)
 		Shapes.box(self, "InnerMullion", across * 0.84 + Vector3.UP * 0.025 + flat * 0.012, at + facing * 0.026, wood)
 		Shapes.box(self, "InnerSill", across * 1.08 + Vector3.UP * 0.035 + flat * 0.09, at + facing * 0.045 + Vector3.DOWN * 0.465, wood)
+	# The County dispatcher came out here too.
+	var badge := preload("res://scripts/note_item.gd").new()
+	badge.note_id = "county_badge"
+	badge.position = Vector3(-0.7, 0.012, 1.25)
+	badge.rotation.y = 0.7
+	add_child(badge)
+	# Len's coat, his name on the tape.
 	# A worn rug.
 	Shapes.box(self, "Rug", Vector3(2.1, 0.008, 1.45), Vector3(0.25, 0.004, 0.55), Shapes.material(Color("#3e2522"), 0.0, 1.0))
 	Shapes.box(self, "RugField", Vector3(1.8, 0.009, 1.15), Vector3(0.25, 0.0045, 0.55), Shapes.material(Color("#523430"), 0.0, 1.0))
@@ -388,6 +397,15 @@ func _build_interior() -> void:
 	if not revisit:
 		Shapes.box(self, "Coat", Vector3(0.4, 1.0, 0.2), Vector3(-1.5, 1.18, 3.1), cloth)
 		Shapes.box(self, "CoatShoulders", Vector3(0.46, 0.08, 0.22), Vector3(-1.5, 1.68, 3.1), cloth)
+		var tape := Label3D.new()
+		tape.text = "LEN"
+		tape.font_size = 24
+		tape.pixel_size = 0.002
+		tape.modulate = Color("#b8b0a0")
+		tape.outline_size = 0
+		add_child(tape)
+		tape.position = Vector3(-1.5, 1.5, 2.995)
+		tape.rotation.y = PI
 	# Bare bulbs on cords for the room lamp and the one over the stairs.
 	for hang: Array in [[Vector3(-1.7, 2.33, 1.31), 2.53], [Vector3(1.25, 2.95, -1.5), 5.14]]:
 		var bulb_at: Vector3 = hang[0]
@@ -548,7 +566,7 @@ func _lamp(at: Vector3, energy: float, reach: float) -> void:
 	light.light_color = Color("#eed8b9")
 	light.light_energy = energy
 	light.omni_range = reach
-	light.shadow_enabled = true
+	light.shadow_enabled = GameSettings.lamp_shadows()
 	light.light_cull_mask &= ~Creature.LIGHT_LAYER
 	add_child(light)
 	light.position = at
@@ -642,7 +660,7 @@ func _begin_ending() -> void:
 	sequence.tween_interval(0.95)
 	sequence.tween_callback(_speak.bind(HELLO, "You: Hello?", player.camera.global_position + player.camera.global_basis.z * 0.15))
 	sequence.tween_interval(INTRO_QUESTION_CUE)
-	sequence.tween_callback(caption.set_text.bind("You: Anybody there?"))
+	sequence.tween_callback(_subtitle.bind("You: Anybody there?"))
 	sequence.tween_interval(HELLO.get_length() - INTRO_QUESTION_CUE)
 	sequence.tween_callback(caption.set_text.bind(""))
 	sequence.tween_interval(1.25)
@@ -747,7 +765,7 @@ func _finale(steps: Tween) -> void:
 	steps.tween_callback(_deliver_line)
 	var line_end := TRICKED.get_length() + 0.35
 	steps.tween_method(_hold_face.bind(true), 0.0, FINAL_WORDS_CUE, FINAL_WORDS_CUE)
-	steps.tween_callback(caption.set_text.bind("Creature: Tricked you too."))
+	steps.tween_callback(_subtitle.bind("Creature: Tricked you too."))
 	steps.tween_method(_hold_face.bind(true), FINAL_WORDS_CUE, line_end, line_end - FINAL_WORDS_CUE)
 	steps.tween_callback(caption.set_text.bind(""))
 	steps.tween_method(_hold_face.bind(true), line_end, line_end + 0.65, 0.65)
@@ -1208,11 +1226,26 @@ func _speaker(distance: float) -> AudioStreamPlayer3D:
 func _speak(stream: AudioStream, line: String, at: Vector3, pitch: float = 1.0) -> void:
 	if voice == null:
 		voice = _speaker(2.4)
+	voice.bus = GameSettings.voice_bus()
 	voice.global_position = at
 	voice.pitch_scale = pitch
 	voice.stream = stream
 	voice.play()
-	caption.text = line
+	_subtitle(line)
+
+
+func _subtitle(line: String) -> void:
+	## Spoken lines respect the subtitles setting; prompts always show.
+	caption.text = line if GameSettings.subtitles else ""
+
+
+func _scare(base_db: float) -> float:
+	## How loud a sting plays, softer with Reduce scares on.
+	return base_db - (12.0 if GameSettings.reduce_scares else 0.0)
+
+
+func _shake_by(amount: float) -> float:
+	return 0.0 if GameSettings.reduce_scares else amount
 
 
 func _build_overlay() -> void:
@@ -1366,7 +1399,7 @@ func _begin_stalk() -> void:
 	clicks.stream = RAPID_CLICKS
 	clicks.position = Vector3(1.6, 4.9, -1.6)
 	ceiling.tween_callback(clicks.play)
-	ceiling.tween_callback(caption.set_text.bind("[Clicking, across the ceiling]"))
+	ceiling.tween_callback(_subtitle.bind("[Clicking, across the ceiling]"))
 	ceiling.tween_property(clicks, "position", Vector3(2.9, 4.6, 2.6), 1.6).set_trans(Tween.TRANS_SINE)
 	ceiling.tween_callback(caption.set_text.bind(""))
 	ceiling.tween_interval(1.1)
@@ -1374,7 +1407,7 @@ func _begin_stalk() -> void:
 	var behind := to_global(stalk_spots[2]["center"] + Vector3(0, -0.6, -0.3))
 	ceiling.tween_callback(_speak.bind(HELLO, "[Your voice, behind you] Hello?", behind, 0.93))
 	ceiling.tween_interval(INTRO_QUESTION_CUE / 0.93)
-	ceiling.tween_callback(caption.set_text.bind("[Your voice, behind you] Anybody there?"))
+	ceiling.tween_callback(_subtitle.bind("[Your voice, behind you] Anybody there?"))
 	ceiling.tween_interval((HELLO.get_length() - INTRO_QUESTION_CUE) / 0.93)
 	ceiling.tween_callback(caption.set_text.bind(""))
 	ceiling.tween_callback(clicks.queue_free)
@@ -1482,8 +1515,9 @@ func _start_rush() -> void:
 	face_basis = Basis.looking_at(toward.normalized(), Vector3.UP)
 	face_back = stalk_spots[-1]["normal"]
 	camera_follow = true
-	shake = 0.035
+	shake = _shake_by(0.035)
 	sting.stream = HIT
+	sting.volume_db = _scare(-3.0)
 	sting.play()
 	creature.jitter = 0.85
 	var narrow := create_tween()
@@ -1568,8 +1602,9 @@ func _fake_twist() -> void:
 		fake_black.color.a = 0.0
 		fake_card.hide()
 		sting.stream = HIT
+		sting.volume_db = _scare(-3.0)
 		sting.play()
-		shake = 0.04)
+		shake = _shake_by(0.04))
 	twist.tween_method(_lunge, 0.0, 1.0, 0.16).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	twist.tween_method(_lunge, 1.0, 1.0, 0.22)
 	twist.tween_callback(func() -> void:
@@ -1679,7 +1714,7 @@ func _light_flare() -> void:
 	flare_light.light_color = Color("#ff4a2a")
 	flare_light.light_energy = 3.2
 	flare_light.omni_range = 8.0
-	flare_light.shadow_enabled = true
+	flare_light.shadow_enabled = GameSettings.lamp_shadows()
 	flare_hand.add_child(flare_light)
 	flare_light.position.y = 0.12
 	_play_at(FLARE_STRIKE, player.camera.global_position, 1.0)
@@ -1800,17 +1835,17 @@ func _burst_start() -> void:
 	camera_follow = true
 	_set_lights(1.0)
 	sting.stream = HIT
-	sting.volume_db = 0.0
+	sting.volume_db = _scare(0.0)
 	sting.play()
 	_play_creature_sound(SHRIEK)
-	shake = 0.07
+	shake = _shake_by(0.07)
 	if flash == null:
 		flash = ColorRect.new()
 		flash.color = Color(0.6, 0.05, 0.03, 0.0)
 		flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		overlay.add_child(flash)
 		flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	flash.color.a = 0.32
+	flash.color.a = 0.0 if GameSettings.reduce_scares else 0.32
 	var fade := create_tween()
 	fade.tween_property(flash, "color:a", 0.0, 0.35)
 

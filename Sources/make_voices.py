@@ -92,17 +92,20 @@ def write(path, audio):
 
 # The cabin -------------------------------------------------------------------
 
-def stranger(coughs_only=False):
-    """coughs_only re-records just the lines marked "cough"."""
+def stranger(mode="all"):
+    """mode "all" re-records everything, "coughs" only the lines marked cough,
+    "missing" only lines that have no recording yet."""
     script = (ROOT / "scripts/stranger_house.gd").read_text()
     out = ROOT / "assets/audio/stranger"
-    if not coughs_only:
+    if mode == "all":
         for old in out.glob("*.wav*"):
             old.unlink()
     for who, text, cue in re.findall(r'\["(him|you)", "((?:[^"\\]|\\.)*)"(?:, "(\w+)")?\]', script):
-        if coughs_only and cue != "cough":
+        if mode == "coughs" and cue != "cough":
             continue
         name = f"{who}_{hashlib.md5(text.encode()).hexdigest()[:10]}.wav"
+        if mode == "missing" and (out / name).exists():
+            continue
         line = say(text, who)
         if cue == "cough":
             line = np.concatenate([cough(who, "[cough] [cough] Sorry."), silence(0.2), line])
@@ -149,10 +152,17 @@ def ending():
     print("cues", question_cue, words_cue, "jaw frames", len(jaw))
 
 
+def escape():
+    """Your own voice calling after you as you leave it all behind."""
+    folder = ROOT / "assets/audio/ending"
+    write(folder / "escape_wait.wav", say("Wait. Wait! Where are you going?", "you"))
+    write(folder / "escape_back.wav", say("Come back. Please. The kettle's on.", "you"))
+
+
 # The radio ---------------------------------------------------------------------
 
-SPEAKERS = {"County": "county", "Ruth": "ruth", "Garage operator": "operator", "Mick": "mick"}
-BROADCASTS = ["workshop", "relay", "wayside", "tower", "last_stop"]
+SPEAKERS = {"County": "county", "Ruth": "ruth", "Garage operator": "operator", "Mick": "mick", "You": "you"}
+BROADCASTS = ["workshop", "relay", "wayside", "tower", "last_stop", "quiet", "you"]
 
 
 def radio():
@@ -175,6 +185,9 @@ def radio():
             if key not in takes:
                 # The same report twice is the same recording twice.
                 takes[key] = cough(SPEAKERS[speaker]) if words == "[Coughs]" else say(words, SPEAKERS[speaker])
+                if words == "[Coughs]":
+                    # Mick's one cough, kept on its own for the creature to reuse.
+                    write(ROOT / "assets/audio/radio/mick_cough.wav", takes[key])
             audio = takes[key]
             rows.append((round(clock, 3), text))
             pieces.append(audio)
@@ -200,4 +213,5 @@ def radio():
 if __name__ == "__main__":
     jobs = sys.argv[1:] or ["stranger", "ending", "radio"]
     for job in jobs:
-        {"stranger": stranger, "stranger-coughs": lambda: stranger(True), "ending": ending, "radio": radio}[job]()
+        {"stranger": stranger, "stranger-coughs": lambda: stranger("coughs"), "stranger-missing": lambda: stranger("missing"),
+         "ending": ending, "escape": escape, "radio": radio}[job]()

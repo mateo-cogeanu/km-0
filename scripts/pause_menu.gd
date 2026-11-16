@@ -26,6 +26,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		var player := get_tree().get_first_node_in_group("local_player")
 		if player and player.ending_locked:
 			return
+		if player and player.has_method("reading") and player.reading():
+			player.close_note()
+			get_viewport().set_input_as_handled()
+			return
 		if player and player.has_method("inventory_open") and player.inventory_open():
 			player.close_inventory()
 			get_viewport().set_input_as_handled()

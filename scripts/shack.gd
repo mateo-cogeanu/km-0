@@ -40,6 +40,12 @@ func _ready() -> void:
 			item.name = "Food_" + food[0]
 			item.position = food[1]
 			bench.add_child(item)
+		var note := preload("res://scripts/note_item.gd").new()
+		note.note_id = "len_shift"
+		note.name = "Note_len_shift"
+		note.position = Vector3(1.12, 0.972, -2.12)
+		note.rotation.y = 0.2
+		bench.add_child(note)
 		var bottle := Supply.new()
 		bottle.kind = "water"
 		bottle.name = "Water_bench"

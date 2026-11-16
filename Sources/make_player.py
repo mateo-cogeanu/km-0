@@ -200,36 +200,38 @@ def build_body():
         # Boots: a high ankle, a broad toe and a thick sole with a heel.
         f.capsule(ankle + Vector((0, 0, -0.04)), ankle + Vector((0, 0, 0.07)), 0.055, 0.05, 0.02)
         heel = Vector((ankle.x, -0.055, 0.045))
-        f.capsule(heel, toe, 0.05, 0.043, 0.04)
-        f.ellipsoid(toe + Vector((0, -0.01, 0.0)), (0.048, 0.06, 0.035), 0.03)
-        f.ellipsoid(Vector((ankle.x, 0.06, 0.016)), (0.058, 0.155, 0.018), 0.012)
+        f.capsule(heel, toe - Vector((0, 0.02, 0)), 0.045, 0.039, 0.035)
+        f.ellipsoid(toe + Vector((0, -0.03, 0.0)), (0.043, 0.052, 0.032), 0.03)
+        f.ellipsoid(Vector((ankle.x, 0.05, 0.016)), (0.052, 0.14, 0.017), 0.012)
         f.ellipsoid(Vector((ankle.x, -0.05, 0.022)), (0.052, 0.05, 0.022), 0.01)
     # Belt.
     f.ellipsoid((0, -0.005, HIP_Z + 0.105), (0.172, 0.12, 0.024), 0.008)
     # Jacket: belly, chest, shoulders, a hem that sits out a little, pockets.
     f.ellipsoid((0, -0.002, 1.19), (0.165, 0.11, 0.14), 0.06)
-    f.ellipsoid((0, 0.004, 1.4), (0.19, 0.122, 0.18), 0.06)
-    f.ellipsoid((0, -0.022, 1.42), (0.175, 0.11, 0.17), 0.05)
-    f.capsule((-0.155, -0.02, 1.555), (0.155, -0.02, 1.555), 0.068, 0.068, 0.05)
+    f.ellipsoid((0, 0.004, 1.4), (0.172, 0.112, 0.18), 0.07)
+    f.ellipsoid((0, -0.02, 1.42), (0.16, 0.102, 0.17), 0.06)
+    # Shoulders slope down from the neck instead of standing up like pads.
+    for side in (-1, 1):
+        f.capsule((side * 0.05, -0.015, 1.6), (side * 0.165, -0.02, 1.548), 0.055, 0.052, 0.05)
     f.ellipsoid((0, -0.004, 1.075), (0.178, 0.122, 0.035), 0.012)
     for side in (-1, 1):
         f.ellipsoid((side * 0.1, 0.104, 1.12), (0.055, 0.016, 0.05), 0.01)
-        f.ellipsoid((side * 0.09, 0.11, 1.42), (0.045, 0.012, 0.035), 0.008)
     # Neck under a raised collar, open at the front.
     f.capsule(NECK_BASE + Vector((0, 0, -0.06)), NECK_BASE + Vector((0, 0.008, 0.11)), 0.066, 0.061, 0.02)
-    f.torus((0, -0.012, 1.655), 0.08, 0.024, 0.02, squash=0.9)
-    f.torus((0, -0.02, 1.685), 0.074, 0.018, 0.02, squash=0.9)
+    f.torus((0, -0.012, 1.658), 0.08, 0.024, 0.02, squash=0.9)
+    f.torus((0, -0.018, 1.69), 0.077, 0.02, 0.02, squash=0.9)
+    f.torus((0, -0.022, 1.716), 0.075, 0.015, 0.015, squash=0.9)
     # The zip opening at the throat.
     f.capsule((0, 0.07, 1.6), (0, 0.075, 1.7), 0.018, 0.022, 0.01, subtract=True)
     # Sleeves with cuffs, then the hands.
     for side in (-1, 1):
         shoulder, elbow, wrist = arm(side)
-        f.ellipsoid(shoulder + Vector((side * 0.012, 0, 0.0)), (0.07, 0.072, 0.07), 0.04)
-        f.capsule(shoulder, elbow, 0.062, 0.049, 0.04)
-        f.ellipsoid(elbow, (0.05, 0.05, 0.05), 0.025)
-        f.capsule(elbow, wrist - (wrist - elbow).normalized() * 0.01, 0.048, 0.042, 0.03)
+        f.ellipsoid(shoulder + Vector((side * 0.006, 0, -0.01)), (0.058, 0.06, 0.06), 0.045)
+        f.capsule(shoulder, elbow, 0.052, 0.043, 0.04)
+        f.ellipsoid(elbow, (0.044, 0.044, 0.044), 0.025)
+        f.capsule(elbow, wrist - (wrist - elbow).normalized() * 0.01, 0.043, 0.038, 0.03)
         cuff = wrist - (wrist - elbow).normalized() * 0.012
-        f.capsule(cuff - (wrist - elbow).normalized() * 0.02, cuff, 0.046, 0.047, 0.006)
+        f.capsule(cuff - (wrist - elbow).normalized() * 0.02, cuff, 0.042, 0.043, 0.006)
     obj = f.mesh("Body")
     finish(obj, 0.12)
     return obj
@@ -291,7 +293,7 @@ def head_field():
     """Skull, face, jaw and neck: the surface hair and beard grow from."""
     f = Field((-0.13, -0.14, 1.6), (0.13, 0.17, 2.03))
     # Neck, with a hint of an Adam's apple.
-    f.capsule((0, -0.015, 1.62), (0, -0.006, 1.8), 0.058, 0.052, 0.03)
+    f.capsule((0, -0.015, 1.62), (0, -0.006, 1.8), 0.064, 0.057, 0.03)
     f.ellipsoid((0, 0.043, 1.735), (0.012, 0.01, 0.014), 0.012)
     # Skull and the mass of the face.
     f.ellipsoid((0, -0.012, 1.905), (0.077, 0.095, 0.088), 0.03)
@@ -468,7 +470,7 @@ def paint(body, head, hair, beard, hands, eyes):
     for poly in body.data.polygons:
         c = poly.center
         side = 1 if c.x > 0 else -1
-        if c.z > 1.705 or (c.z > 1.6 and abs(c.x) < 0.035 and c.y > 0.06):
+        if c.z > 1.735 or (c.z > 1.6 and abs(c.x) < 0.035 and c.y > 0.06):
             poly.material_index = 3
         elif c.z < 0.155:
             poly.material_index = 2
@@ -623,6 +625,9 @@ def main():
     hair = build_hair()
     beard = build_beard()
     eyes = build_eyes()
+    # A slightly bigger head, so it doesn't look perched on a long neck.
+    for obj in [head, hair, beard] + eyes:
+        obj.data.transform(Matrix.Translation((0, 0, 1.74)) @ Matrix.Scale(1.07, 4) @ Matrix.Translation((0, 0, -1.74)))
     paint(body, head, hair, beard, hands, eyes)
     rig = build_rig()
     skin_body(body, rig)

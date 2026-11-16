@@ -22,6 +22,14 @@ var camera_motion_value: Label
 var ui_scale_slider: HSlider
 var ui_scale_value: Label
 var show_fps_check: CheckBox
+var low_end_check: CheckBox
+var draw_option: OptionButton
+var voice_slider: HSlider
+var voice_value: Label
+var subtitles_check: CheckBox
+var fov_slider: HSlider
+var fov_value: Label
+var scares_check: CheckBox
 
 
 func _ready() -> void:
@@ -88,6 +96,28 @@ func _build_ui() -> void:
 		game_controls.show()
 	)
 
+	var preset_option := OptionButton.new()
+	preset_option.add_item("Choose…")
+	for value in GameSettings.PRESETS:
+		preset_option.add_item(value)
+	preset_option.item_selected.connect(func(index: int) -> void:
+		if index > 0:
+			GameSettings.apply_preset(index - 1)
+			_sync_from_settings()
+			preset_option.select(0))
+	_add_row(display_controls, "Quality preset", preset_option)
+
+	low_end_check = CheckBox.new()
+	low_end_check.text = "On"
+	low_end_check.toggled.connect(func(on: bool) -> void: GameSettings.set_option("low_end", on))
+	_add_row(display_controls, "Older computer mode", low_end_check)
+
+	draw_option = OptionButton.new()
+	for value in GameSettings.DRAW_OPTIONS:
+		draw_option.add_item(value)
+	draw_option.item_selected.connect(func(index: int) -> void: GameSettings.set_option("draw_distance", index))
+	_add_row(display_controls, "Draw distance", draw_option)
+
 	fps_option = OptionButton.new()
 	for value in GameSettings.FPS_OPTIONS:
 		fps_option.add_item(GameSettings.get_fps_label(value))
@@ -138,6 +168,32 @@ func _build_ui() -> void:
 	volume_value = Label.new()
 	volume_value.custom_minimum_size = Vector2(52.0, 0.0)
 	_add_slider_row(game_controls, "Master volume", volume_slider, volume_value)
+
+	voice_slider = _create_slider(0.0, 1.0, 0.01)
+	voice_value = Label.new()
+	voice_value.custom_minimum_size = Vector2(52.0, 0.0)
+	voice_slider.value_changed.connect(func(value: float) -> void:
+		voice_value.text = "%d%%" % roundi(value * 100.0)
+		GameSettings.set_option("voice_volume", value))
+	_add_slider_row(game_controls, "Voice volume", voice_slider, voice_value)
+
+	subtitles_check = CheckBox.new()
+	subtitles_check.text = "On"
+	subtitles_check.toggled.connect(func(on: bool) -> void: GameSettings.set_option("subtitles", on))
+	_add_row(game_controls, "Subtitles", subtitles_check)
+
+	fov_slider = _create_slider(60.0, 100.0, 1.0)
+	fov_value = Label.new()
+	fov_value.custom_minimum_size = Vector2(52.0, 0.0)
+	fov_slider.value_changed.connect(func(value: float) -> void:
+		fov_value.text = "%d°" % roundi(value)
+		GameSettings.set_option("fov", value))
+	_add_slider_row(game_controls, "Field of view", fov_slider, fov_value)
+
+	scares_check = CheckBox.new()
+	scares_check.text = "On"
+	scares_check.toggled.connect(func(on: bool) -> void: GameSettings.set_option("reduce_scares", on))
+	_add_row(game_controls, "Reduce scares", scares_check)
 
 	sensitivity_slider = _create_slider(0.35, 2.0, 0.05)
 	sensitivity_slider.value_changed.connect(_on_sensitivity_changed)
@@ -245,6 +301,14 @@ func _sync_from_settings() -> void:
 	ui_scale_slider.set_value_no_signal(GameSettings.ui_scale)
 	_update_ui_scale_label()
 	show_fps_check.button_pressed = GameSettings.show_fps
+	low_end_check.set_pressed_no_signal(GameSettings.low_end)
+	draw_option.select(GameSettings.draw_distance)
+	voice_slider.set_value_no_signal(GameSettings.voice_volume)
+	voice_value.text = "%d%%" % roundi(GameSettings.voice_volume * 100.0)
+	subtitles_check.set_pressed_no_signal(GameSettings.subtitles)
+	fov_slider.set_value_no_signal(GameSettings.fov)
+	fov_value.text = "%d°" % roundi(GameSettings.fov)
+	scares_check.set_pressed_no_signal(GameSettings.reduce_scares)
 
 
 func _on_fps_selected(index: int) -> void:

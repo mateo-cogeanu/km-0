@@ -6,6 +6,8 @@ const CabinWind := preload("res://scripts/cabin_wind.gd")
 const PlayerBody := preload("res://scripts/player_body.gd")
 const Vitals := preload("res://scripts/player_vitals.gd")
 const Inventory := preload("res://scripts/player_inventory.gd")
+const CarRadio := preload("res://scripts/car_radio.gd")
+const RoadEndHouseState := preload("res://scripts/road_end_house.gd")
 const STEPS := [
 	preload("res://assets/audio/player/step_1.wav"), preload("res://assets/audio/player/step_2.wav"),
 	preload("res://assets/audio/player/step_3.wav"), preload("res://assets/audio/player/step_4.wav"),
@@ -112,6 +114,12 @@ var drinking: RigidBody3D
 var drink_time := 0.0
 var pour_particles: GPUParticles3D
 var talking_to: Node
+var reader: Control
+var car_radio: Area3D
+var not_yours_wait := 200.0
+var not_yours: AudioStreamPlayer3D
+var reader_title: Label
+var reader_text: Label
 var remote_last := Vector3.ZERO
 
 @onready var head: Node3D = $Head
@@ -179,6 +187,10 @@ func _ready() -> void:
 	ui_sound = AudioStreamPlayer.new()
 	ui_sound.volume_db = -8.0
 	add_child(ui_sound)
+	car_radio = CarRadio.new()
+	car_radio.name = "CarRadio"
+	add_child(car_radio)
+	car_radio.setup(self)
 	var wind := CabinWind.new()
 	wind.name = "CabinWind"
 	add_child(wind)
@@ -198,6 +210,7 @@ func _process(delta: float) -> void:
 	_animate_body(delta)
 	if is_multiplayer_authority() and vitals:
 		_update_drinking(delta)
+		_cough_like_mick(delta)
 		if flashlight_on:
 			if not vitals.flashlight_running(delta):
 				set_flashlight(false, true)
@@ -267,6 +280,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if ending_locked and ending_look and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
 		get_tree().call_group("road_end_house", "try_door", self)
 		return
+	if reading() and event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_E, KEY_Q, KEY_ESCAPE]:
+		close_note()
+		get_viewport().set_input_as_handled()
+		return
 	if inventory_open() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
 		close_inventory()
 		get_viewport().set_input_as_handled()
@@ -285,6 +302,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Z:
 			_try_sleep("in the car")
+			get_viewport().set_input_as_handled()
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_T:
+			car_radio.toggle()
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
@@ -776,6 +796,9 @@ func _setup_fps_label() -> void:
 
 
 func _apply_ui_scale() -> void:
+	camera.fov = GameSettings.fov
+	if flashlight:
+		flashlight.shadow_enabled = GameSettings.lamp_shadows()
 	if radio_caption:
 		_layout_radio_caption()
 	var hud_scale := Vector2.ONE * GameSettings.ui_scale
@@ -882,12 +905,15 @@ func _handle_interaction() -> void:
 	if radio and radio.is_in_group("loot_container"):
 		radio.get_parent().open()
 		return
+	if radio and radio.is_in_group("note"):
+		read_note(radio.get_parent())
+		return
 	var touched := radio_hit.get("collider") as Node
 	if touched and touched.is_in_group("stranger"):
 		touched.get_parent().talk(self)
 		return
 	if radio and radio.is_in_group("cabin_door"):
-		radio.get_parent().get_parent().toggle_door()
+		radio.get_parent().get_parent().use_door(self)
 		return
 	if radio and radio.is_in_group("road_radio"):
 		if is_instance_valid(listening_radio) and listening_radio != radio:
@@ -1292,7 +1318,7 @@ func _raycast_exclusions() -> Array:
 func gameplay_ui_open() -> bool:
 	var world := get_tree().current_scene
 	var pause_menu := world.get_node_or_null("PauseMenu") if world else null
-	return (pause_menu != null and pause_menu.gameplay_ui_open()) or inventory_open() or is_instance_valid(talking_to)
+	return (pause_menu != null and pause_menu.gameplay_ui_open()) or inventory_open() or is_instance_valid(talking_to) or reading()
 
 
 func _create_interaction_tip() -> void:
@@ -1324,7 +1350,7 @@ func show_radio_caption(radio: Area3D, message: String) -> void:
 		radio_caption.add_child(radio_caption_label)
 		$HUD.add_child(radio_caption)
 	radio_caption_label.text = message
-	if message.is_empty():
+	if message.is_empty() or not GameSettings.subtitles:
 		radio_caption.hide()
 		return
 	_layout_radio_caption()
@@ -1372,7 +1398,7 @@ func _interaction_text() -> String:
 		if NetworkManager.is_online() and shared_seat > 0:
 			return "Mouse  Look around   ·   E  Exit"
 		var rest := "   ·   Z  Sleep" if vitals and vitals.can_sleep() else ""
-		return "C  Change camera   ·   L  Headlights   ·   E  Exit" + rest
+		return "C  Change camera   ·   L  Headlights   ·   T  Radio   ·   E  Exit" + rest
 	var hit := _crosshair_hit(vehicle_interact_distance)
 	var target := hit.get("collider") as Node3D
 	var car := _vehicle_from_target(target)
@@ -1418,6 +1444,8 @@ func _interaction_text() -> String:
 		return "" if target.get_parent().opened else "E  Search %s" % target.get_parent().title()
 	if near and target.is_in_group("stranger"):
 		return "E  Talk"
+	if near and target.is_in_group("note"):
+		return "E  Read %s" % target.get_parent().title().to_lower()
 	if near and target.is_in_group("cabin_door"):
 		return "E  Close door" if target.get_parent().get_parent().door_open else "E  Open door"
 	if target.is_in_group("shack_interactable"):
@@ -1953,3 +1981,84 @@ func use_up(item: RigidBody3D) -> void:
 	if inventory.items.has(item):
 		inventory.remove_at(inventory.items.find(item))
 	item.queue_free()
+
+
+# --- Reading ----------------------------------------------------------------------
+
+func reading() -> bool:
+	return reader != null and reader.visible
+
+
+func read_note(note: Node) -> void:
+	if reader == null:
+		reader = ColorRect.new()
+		(reader as ColorRect).color = Color(0, 0, 0, 0.55)
+		reader.mouse_filter = Control.MOUSE_FILTER_STOP
+		$HUD.add_child(reader)
+		reader.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		var paper := PanelContainer.new()
+		var look := StyleBoxFlat.new()
+		look.bg_color = Color("#d9cfb4")
+		look.set_content_margin_all(28)
+		look.shadow_size = 12
+		look.shadow_color = Color(0, 0, 0, 0.5)
+		paper.add_theme_stylebox_override("panel", look)
+		reader.add_child(paper)
+		paper.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		var column := VBoxContainer.new()
+		column.add_theme_constant_override("separation", 14)
+		paper.add_child(column)
+		reader_title = Label.new()
+		reader_title.add_theme_color_override("font_color", Color("#2e2a24"))
+		column.add_child(reader_title)
+		reader_text = Label.new()
+		reader_text.autowrap_mode = TextServer.AUTOWRAP_WORD
+		reader_text.custom_minimum_size.x = 460
+		reader_text.add_theme_color_override("font_color", Color("#3a342c"))
+		column.add_child(reader_text)
+		var hint := Label.new()
+		hint.text = "E or Esc to put it down"
+		hint.add_theme_color_override("font_color", Color(0.25, 0.22, 0.18, 0.7))
+		column.add_child(hint)
+	var ui := GameSettings.ui_scale
+	reader_title.add_theme_font_size_override("font_size", roundi(22 * ui))
+	reader_text.add_theme_font_size_override("font_size", roundi(17 * ui))
+	reader_text.custom_minimum_size.x = 460 * ui
+	reader_title.text = note.title()
+	reader_text.text = note.text()
+	note.mark_read()
+	reader.show()
+	var paper_node := reader.get_child(0) as Control
+	paper_node.size = Vector2.ZERO
+	_center_note.call_deferred(paper_node)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _center_note(paper: Control) -> void:
+	paper.size = paper.get_combined_minimum_size()
+	paper.position = (reader.size - paper.size) * 0.5
+
+
+func close_note() -> void:
+	if reader:
+		reader.hide()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _cough_like_mick(delta: float) -> void:
+	## After the house, now and then, you cough. It is Mick's cough, exactly.
+	if not RoadEndHouseState.seen or ending_locked:
+		return
+	not_yours_wait -= delta
+	if not_yours_wait > 0.0:
+		return
+	not_yours_wait = randf_range(170.0, 320.0)
+	if not_yours == null:
+		not_yours = AudioStreamPlayer3D.new()
+		not_yours.stream = load("res://assets/audio/radio/mick_cough.wav")
+		not_yours.unit_size = 1.5
+		not_yours.volume_db = -6.0
+		not_yours.bus = GameSettings.voice_bus()
+		camera.add_child(not_yours)
+		not_yours.position = Vector3(0, -0.1, -0.1)
+	not_yours.play()

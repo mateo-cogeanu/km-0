@@ -46,6 +46,14 @@ func _ready() -> void:
 	player.head.rotation.x = 0.12
 	await _frames(40)
 	get_viewport().get_texture().get_image().save_png(OS.get_environment("KM0_CHECK_DIR").path_join("face.png"))
+	player.global_position = cabin.to_global(Vector3(0.2, 1.06, 1.6))
+	player.look_at(cabin.to_global(Vector3(0.55, 1.06, -0.7)), Vector3.UP)
+	player.rotation.x = 0.0
+	player.rotation.z = 0.0
+	player.look_rotation_x = -0.1
+	player.head.rotation.x = -0.1
+	await _frames(40)
+	get_viewport().get_texture().get_image().save_png(OS.get_environment("KM0_CHECK_DIR").path_join("full.png"))
 	get_tree().quit()
 
 

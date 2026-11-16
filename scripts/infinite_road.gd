@@ -5,6 +5,7 @@ const Stop := preload("res://scripts/roadside_stop.gd")
 const Terrain := preload("res://scripts/roadside_terrain.gd")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const Dread := preload("res://scripts/road_dread.gd")
+const Weather := preload("res://scripts/weather.gd")
 const StrangerHouse := preload("res://scripts/stranger_house.gd")
 const ROAD_END := 9.0
 const HOUSE_APPROACH := -5200.0
@@ -43,6 +44,9 @@ func _ready() -> void:
 	# Local boxes keep collision broad-phase bounds close to the bodies using them.
 	ground_shape.size = Vector3(GROUND_TILE_SIZE + GROUND_OVERLAP, GROUND_DEPTH, GROUND_TILE_SIZE + GROUND_OVERLAP)
 	desert_ground = Shapes.box(self, "DesertHorizon", Vector3(2000.0, 0.06, 2000.0), Vector3(0, -0.105, 0), sand)
+	var weather := Weather.new()
+	weather.name = "Weather"
+	add_child(weather)
 	var dread := Dread.new()
 	dread.name = "RoadDread"
 	dread.road = self
@@ -143,7 +147,9 @@ func _collect_ground_tiles(at: Vector3, padding: int, wanted: Dictionary[Vector2
 
 func _collect_segments(z: float, wanted: Dictionary) -> void:
 	var center := floori(z / segment_length)
-	for index in range(center - keep_segments_ahead - 2, center + keep_segments_behind + 2):
+	var ahead: int = [4, keep_segments_ahead, keep_segments_ahead + 4][GameSettings.draw_distance]
+	var behind: int = [2, keep_segments_behind, keep_segments_behind + 2][GameSettings.draw_distance]
+	for index in range(center - ahead - 2, center + behind + 2):
 		wanted[index] = true
 
 

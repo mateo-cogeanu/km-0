@@ -10,6 +10,7 @@ const BATTERY := preload("res://assets/vehicles/parts/batterypack.glb")
 const BIKE_ENGINE := preload("res://assets/vehicles/parts/bike_engine.tscn")
 const Salvage := preload("res://scripts/roadside_salvage.gd")
 const SupplyItem := preload("res://scripts/supply_item.gd")
+const NoteItem := preload("res://scripts/note_item.gd")
 
 # The engine also identifies the original part when Continue replays swaps.
 # Keep existing profiles and their selection stable for saved stops.
@@ -189,10 +190,18 @@ func _add_broadcast_stop() -> void:
 		van.position = Vector3(-6.25, 0, 5.25)
 		van.rotation.y = -0.12
 		add_child(van)
+		# Len left in a hurry: notebook on the seat, the last page on the dash,
+		# his thermos still there.
+		_add_note(van, "len_log", Vector3(0.42, 0.915, -0.88), 0.3)
+		_add_note(van, "len_last", Vector3(-0.38, 1.124, -1.42), -0.2)
+		var flask := Shapes.material(Color("#3a5a48"), 0.5, 0.4)
+		Shapes.cylinder(van, "Thermos", Vector3(-0.42, 1.03, -0.82), Vector3.UP, 0.04, 0.24, flask, 12)
 	elif block == -2:
 		broadcast = RoadRadio.Broadcast.WAYSIDE
 	elif block == -3:
 		broadcast = RoadRadio.Broadcast.TOWER
+	elif block == -4:
+		broadcast = RoadRadio.Broadcast.QUIET
 	elif block == -5:
 		broadcast = RoadRadio.Broadcast.LAST_STOP
 	if broadcast == RoadRadio.Broadcast.WORKSHOP:
@@ -209,6 +218,24 @@ func _add_broadcast_stop() -> void:
 	if broadcast == RoadRadio.Broadcast.TOWER:
 		_build_relay_tower()
 		_add_relay_log()
+	match broadcast:
+		RoadRadio.Broadcast.WAYSIDE:
+			_add_note(self, "ruth_postcard", Vector3(-2.6, 0.992, 0.05), 0.4)
+		RoadRadio.Broadcast.TOWER:
+			_add_note(self, "mick_scrawl", Vector3(-2.15, 0.002, 0.45), 1.1)
+		RoadRadio.Broadcast.QUIET:
+			_add_note(self, "house_photo", Vector3(-2.6, 0.992, 0.05), -0.3)
+		RoadRadio.Broadcast.LAST_STOP:
+			_add_note(self, "county_log", Vector3(1.65, 0.972, -2.28), 0.15)
+
+
+func _add_note(parent: Node3D, id: String, at: Vector3, turn: float) -> void:
+	var note := NoteItem.new()
+	note.note_id = id
+	note.name = "Note_" + id
+	note.position = at
+	note.rotation.y = turn
+	parent.add_child(note)
 
 
 func _add_relay_log() -> void:

@@ -1,7 +1,7 @@
 extends Area3D
 
 const Shapes := preload("res://scripts/prop_shapes.gd")
-enum Broadcast { WORKSHOP, FIRST_GARAGE, WAYSIDE, TOWER, LAST_STOP }
+enum Broadcast { WORKSHOP, FIRST_GARAGE, WAYSIDE, TOWER, LAST_STOP, QUIET, YOU }
 
 const RECORDINGS := [
 	preload("res://assets/audio/radio/workshop.wav"),
@@ -9,6 +9,8 @@ const RECORDINGS := [
 	preload("res://assets/audio/radio/wayside.wav"),
 	preload("res://assets/audio/radio/tower.wav"),
 	preload("res://assets/audio/radio/last_stop.wav"),
+	preload("res://assets/audio/radio/quiet.wav"),
+	preload("res://assets/audio/radio/you.wav"),
 ]
 const LINES := [
 	[
@@ -36,9 +38,9 @@ const LINES := [
 		[6.335, "Mick: County, it’s Mick. Six o’clock. All clear at the east sheds."],
 		[10.211, ""],
 		[10.486, "Mick: [Coughs]"],
-		[12.194, ""],
-		[13.029, "Ruth: Oh. I thought he’d gone home."],
-		[14.8, ""],
+		[12.086, ""],
+		[12.921, "Ruth: Oh. I thought he’d gone home."],
+		[14.693, ""],
 	],
 	[
 		[0.469, "Garage operator: Sorry, County. You’re coming through now."],
@@ -48,7 +50,7 @@ const LINES := [
 		[8.636, "Mick: County, it’s Mick. Six o’clock. All clear at the east sheds."],
 		[12.513, ""],
 		[12.788, "Mick: [Coughs]"],
-		[14.495, ""],
+		[14.388, ""],
 	],
 	[
 		[0.48, "County: County desk, for anyone still on the east road."],
@@ -57,6 +59,30 @@ const LINES := [
 		[7.108, ""],
 		[7.553, "County: There’s a light on. Kettle’s on if you’re out that way."],
 		[10.587, ""],
+	],
+	[
+		[0.5, "County: County desk, evening roll call. Len?"],
+		[3.172, ""],
+		[5.172, "County: Ruth?"],
+		[5.943, ""],
+		[7.543, "County: Ruth, are you there? Please."],
+		[10.174, ""],
+		[11.374, "Ruth: Yeah, just locking up. Has Len called?"],
+		[13.483, ""],
+		[14.483, "County: Ruth. You said that two days ago."],
+		[16.346, ""],
+		[17.746, "Ruth: Yeah, just locking up. Has Len called?"],
+		[19.856, ""],
+	],
+	[
+		[0.5, "You: County, it’s me."],
+		[2.843, ""],
+		[3.443, "You: I’m at the house. Everything’s fine."],
+		[5.359, ""],
+		[5.959, "You: The kettle’s on. You should come out."],
+		[9.335, ""],
+		[10.535, "Mick: [Coughs]"],
+		[12.135, ""],
 	],
 ]
 

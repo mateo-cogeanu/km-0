@@ -1,6 +1,7 @@
 extends Node
 
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
+const StoryNotes := preload("res://scripts/story_notes.gd")
 
 const SAVE_PATH := "user://trip.save"
 const SAVE_VERSION := 1
@@ -155,6 +156,8 @@ func save_trip() -> bool:
 		"has_supplies": true,
 		"opened": _opened_containers(world),
 		"house_seen": RoadEndHouse.seen,
+		"notes_read": StoryNotes.read.keys(),
+		"story": RoadEndHouse.story.duplicate(),
 		"driving": driving,
 		"first_person": player.active_vehicle.first_person_camera_enabled if not driving.is_empty() else false,
 		"vehicle_look": Vector2(player.active_vehicle.camera_yaw, player.active_vehicle.camera_pitch) if not driving.is_empty() else Vector2.ZERO,
@@ -218,6 +221,10 @@ func restore_trip(world: Node) -> void:
 	if player.vitals and data.get("vitals") is Dictionary:
 		player.vitals.from_save(data["vitals"])
 	RoadEndHouse.seen = data.get("house_seen", false)
+	StoryNotes.read.clear()
+	for id in data.get("notes_read", []):
+		StoryNotes.read[id] = true
+	RoadEndHouse.story = data.get("story", {}).duplicate()
 	player.head.rotation.x = player.look_rotation_x
 	world.get_node("DayNightCycle").time_of_day = data["time"]
 	world.get_node("Shack").restore_door_state(data.get("garage_doors", {}))

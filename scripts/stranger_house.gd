@@ -9,6 +9,8 @@ const PlayerBody := preload("res://scripts/player_body.gd")
 const Supply := preload("res://scripts/supply_item.gd")
 const Style := preload("res://scripts/menu_style.gd")
 const DOOR_SOUND := preload("res://assets/audio/ending/door_open.wav")
+const DOOR_RATTLE := preload("res://assets/audio/ending/door_rattle.wav")
+const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 
 const LOCATION := Vector3(46.0, 0.0, 660.0)
 ## The door faces back towards the road and the workshop.
@@ -42,6 +44,15 @@ const REFUSED := [
 ]
 const AGAIN_GIVEN := [
 	["him", "Still here? Go on, then. I'm not going back there. Not ever.", "cough"],
+]
+## After you have been inside the house, he won't open the door.
+const THROUGH_THE_DOOR := [
+	["him", "Don't. Don't come in."],
+	["him", "I saw you go in there. I watched from the ridge."],
+	["him", "And you came back out."],
+	["you", "It's me. I got out."],
+	["him", "...Did you?"],
+	["him", "Go away. Please. Just go away."],
 ]
 const AGAIN_REFUSED := [
 	["him", "Changed your mind?", "offer"],
@@ -83,8 +94,10 @@ func _ready() -> void:
 	mouth = AudioStreamPlayer3D.new()
 	mouth.unit_size = 3.0
 	mouth.volume_db = 2.0
+	mouth.bus = GameSettings.voice_bus()
 	add_child(mouth)
 	ears = AudioStreamPlayer.new()
+	ears.bus = GameSettings.voice_bus()
 	ears.volume_db = -2.0
 	add_child(ears)
 
@@ -138,6 +151,11 @@ func _build_cabin() -> void:
 	Shapes.box(self, "ChairBack", Vector3(0.42, 0.5, 0.04), Vector3(-1.2, 0.72, -0.25), planks)
 	Shapes.box(self, "Cot", Vector3(0.75, 0.38, 1.9), Vector3(1.85, 0.2, -0.9), Shapes.material(Color("#55593f")), true)
 	Shapes.box(self, "Blanket", Vector3(0.74, 0.05, 1.3), Vector3(1.85, 0.42, -0.6), Shapes.material(Color("#6a3a2f")))
+	var scratched := preload("res://scripts/note_item.gd").new()
+	scratched.note_id = "stranger_wall"
+	scratched.position = Vector3(-0.95, 0.812, -1.0)
+	scratched.rotation.y = 0.5
+	add_child(scratched)
 	Shapes.box(self, "RadioCase", Vector3(0.34, 0.15, 0.2), Vector3(-1.45, 0.89, -1.35), Shapes.material(Color("#343a37"), 0.2))
 	Shapes.box(self, "RadioDial", Vector3(0.14, 0.025, 0.01), Vector3(-1.5, 0.92, -1.245), glow)
 	var bulb := Shapes.material(Color("#fff0d0"))
@@ -150,7 +168,7 @@ func _build_cabin() -> void:
 	lamp.light_color = Color("#ffcf95")
 	lamp.light_energy = 1.3
 	lamp.omni_range = 7.0
-	lamp.shadow_enabled = true
+	lamp.shadow_enabled = GameSettings.lamp_shadows()
 	add_child(lamp)
 	lamp.position = Vector3(-0.85, 1.1, -1.3)
 	var tin := Shapes.material(Color("#8f8d88"), 0.75, 0.35)
@@ -208,6 +226,27 @@ func _build_door(planks: Material, dark: Material) -> void:
 	hitbox.shape = shape
 	hitbox.position = Vector3(0.63, 1.2, 0)
 	door_target.add_child(hitbox)
+
+
+func use_door(who: Node3D) -> void:
+	## Since the house, the door stays barred and he talks to you through it.
+	if RoadEndHouse.seen and not door_open:
+		var rattle := AudioStreamPlayer3D.new()
+		rattle.stream = DOOR_RATTLE
+		rattle.unit_size = 3.0
+		add_child(rattle)
+		rattle.position = Vector3(0, 1.1, 2.1)
+		rattle.play()
+		rattle.finished.connect(rattle.queue_free)
+		if line_index < 0:
+			player = who
+			lines = THROUGH_THE_DOOR.duplicate()
+			ask_after = false
+			player.start_talking(self)
+			_build_overlay()
+			_next_line()
+		return
+	toggle_door()
 
 
 func toggle_door() -> void:
@@ -360,7 +399,7 @@ func _next_line() -> void:
 		flare.show()
 	var speaker: String = line[0]
 	var text: String = line[1]
-	caption.text = ("Stranger: " if speaker == "him" else "You: ") + text
+	caption.text = (("Stranger: " if speaker == "him" else "You: ") + text) if GameSettings.subtitles else ""
 	line_timer = maxf(1.6, text.length() * 0.075) + 0.6
 	var recording := "res://assets/audio/stranger/%s_%s.wav" % [speaker, text.md5_text().substr(0, 10)]
 	if ResourceLoader.exists(recording):

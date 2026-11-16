@@ -23,6 +23,17 @@ var shadow_quality: int = 3
 var lighting_quality: int = 2
 var headlight_shadows: bool = true
 var ui_scale: float = 1.35
+var subtitles := true
+var voice_volume := 1.0
+var fov := 75.0
+## Softer stings, no camera shake or red flash in the scariest moments.
+var reduce_scares := false
+## For older computers: no screen-space effects, no lamp shadows, less dust.
+var low_end := false
+## 0 near, 1 medium, 2 far: how much road and desert is kept around you.
+var draw_distance := 1
+const DRAW_OPTIONS: Array[String] = ["Near", "Medium", "Far"]
+const PRESETS: Array[String] = ["Potato", "Low", "Medium", "High", "Ultra"]
 
 
 func _ready() -> void:
@@ -50,6 +61,12 @@ func load_settings() -> void:
 	lighting_quality = clampi(int(config.get_value(SECTION, "lighting_quality", lighting_quality)), 0, LIGHTING_OPTIONS.size() - 1)
 	headlight_shadows = bool(config.get_value(SECTION, "headlight_shadows", headlight_shadows))
 	ui_scale = clampf(float(config.get_value(SECTION, "ui_scale", ui_scale)), 1.0, 1.8)
+	subtitles = bool(config.get_value(SECTION, "subtitles", subtitles))
+	voice_volume = clampf(float(config.get_value(SECTION, "voice_volume", voice_volume)), 0.0, 1.0)
+	fov = clampf(float(config.get_value(SECTION, "fov", fov)), 60.0, 100.0)
+	reduce_scares = bool(config.get_value(SECTION, "reduce_scares", reduce_scares))
+	low_end = bool(config.get_value(SECTION, "low_end", low_end))
+	draw_distance = clampi(int(config.get_value(SECTION, "draw_distance", draw_distance)), 0, 2)
 
 
 func save_settings() -> void:
@@ -67,6 +84,12 @@ func save_settings() -> void:
 	config.set_value(SECTION, "lighting_quality", lighting_quality)
 	config.set_value(SECTION, "headlight_shadows", headlight_shadows)
 	config.set_value(SECTION, "ui_scale", ui_scale)
+	config.set_value(SECTION, "subtitles", subtitles)
+	config.set_value(SECTION, "voice_volume", voice_volume)
+	config.set_value(SECTION, "fov", fov)
+	config.set_value(SECTION, "reduce_scares", reduce_scares)
+	config.set_value(SECTION, "low_end", low_end)
+	config.set_value(SECTION, "draw_distance", draw_distance)
 	config.save(CONFIG_PATH)
 
 
@@ -76,6 +99,9 @@ func apply_settings() -> void:
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen_enabled else DisplayServer.WINDOW_MODE_WINDOWED)
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(master_volume, 0.001)))
 	AudioServer.set_bus_mute(0, master_volume <= 0.001)
+	var voices := voice_bus()
+	AudioServer.set_bus_volume_db(AudioServer.get_bus_index(voices), linear_to_db(maxf(voice_volume, 0.001)))
+	AudioServer.set_bus_mute(AudioServer.get_bus_index(voices), voice_volume <= 0.001)
 	_apply_viewport_settings()
 	settings_changed.emit()
 
@@ -88,7 +114,7 @@ func _apply_viewport_settings() -> void:
 	# Avoid sharpening noise from low-resolution lighting and shadows.
 	viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	viewport.scaling_3d_scale = render_scale
-	viewport.set("msaa_3d", Viewport.MSAA_4X if shadow_quality >= 2 else Viewport.MSAA_2X)
+	viewport.set("msaa_3d", Viewport.MSAA_DISABLED if low_end else (Viewport.MSAA_4X if shadow_quality >= 2 else Viewport.MSAA_2X))
 	viewport.set("screen_space_aa", Viewport.SCREEN_SPACE_AA_FXAA)
 
 
@@ -184,3 +210,41 @@ func set_player_name(value: String) -> void:
 	player_name = cleaned
 	save_settings()
 	player_name_changed.emit(player_name)
+
+
+func voice_bus() -> StringName:
+	## Every spoken line goes through this bus, so it has its own volume.
+	if AudioServer.get_bus_index(&"Voice") < 0:
+		var index := AudioServer.bus_count
+		AudioServer.add_bus(index)
+		AudioServer.set_bus_name(index, &"Voice")
+		AudioServer.set_bus_send(index, AudioServer.get_bus_name(0))
+	return &"Voice"
+
+
+func lamp_shadows() -> bool:
+	## Whether small lights (lamps, bulbs, flashlights) should cast shadows.
+	return not low_end and shadow_quality >= 1
+
+
+func set_option(key: String, value: Variant) -> void:
+	set(key, value)
+	save_settings()
+	apply_settings()
+
+
+func apply_preset(index: int) -> void:
+	## One click for a whole graphics level, from the oldest laptop up.
+	match index:
+		0:
+			render_scale = 0.5; shadow_quality = 0; lighting_quality = 0; low_end = true; draw_distance = 0; headlight_shadows = false
+		1:
+			render_scale = 0.67; shadow_quality = 1; lighting_quality = 0; low_end = true; draw_distance = 0; headlight_shadows = false
+		2:
+			render_scale = 0.75; shadow_quality = 1; lighting_quality = 1; low_end = false; draw_distance = 1; headlight_shadows = true
+		3:
+			render_scale = 1.0; shadow_quality = 2; lighting_quality = 2; low_end = false; draw_distance = 1; headlight_shadows = true
+		_:
+			render_scale = 1.0; shadow_quality = 3; lighting_quality = 2; low_end = false; draw_distance = 2; headlight_shadows = true
+	save_settings()
+	apply_settings()

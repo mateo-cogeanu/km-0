@@ -23,6 +23,8 @@ var shadow_distance: float = 220.0
 var sun_shadow_enabled: bool = true
 ## 0 at night, 1 in full day. Read by the player for the night vignette.
 var daylight := 1.0
+## 0 to 1: how thick the current dust storm is. Set by the weather.
+var storm := 0.0
 
 
 func _ready() -> void:
@@ -112,12 +114,12 @@ func _apply_graphics_quality() -> void:
 		sun.light_angular_distance = 0.0
 
 	if environment:
-		environment.set("ssao_enabled", GameSettings.lighting_quality >= 2)
+		environment.set("ssao_enabled", GameSettings.lighting_quality >= 2 and not GameSettings.low_end)
 		environment.set("ssao_radius", 1.8)
 		environment.set("ssao_intensity", 0.55)
 		environment.set("ssao_power", 0.85)
 		environment.ssao_detail = 0.25
-		environment.glow_enabled = GameSettings.lighting_quality >= 1
+		environment.glow_enabled = GameSettings.lighting_quality >= 1 and not GameSettings.low_end
 		environment.fog_enabled = GameSettings.lighting_quality >= 1
 
 
@@ -289,9 +291,12 @@ func _update_world_lighting() -> void:
 		var lighting_boost: float = [0.9, 1.0, 1.14][GameSettings.lighting_quality]
 		environment.ambient_light_energy = lerpf(0.045, 0.98 * lighting_boost, daylight)
 		environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-		environment.fog_density = lerpf(0.000015, 0.00022, daylight)
+		environment.fog_density = lerpf(lerpf(0.000015, 0.00022, daylight), 0.045, storm)
 		environment.fog_light_energy = lerpf(0.01, 0.10, daylight)
 		environment.fog_light_color = Color(0.08, 0.10, 0.16, 1.0).lerp(Color(0.88, 0.90, 0.94, 1.0), daylight)
+		# Dust hangs brown and close, lit by whatever light there is.
+		environment.fog_light_color = environment.fog_light_color.lerp(Color(0.56, 0.43, 0.3, 1.0) * maxf(daylight, 0.12), storm)
+		environment.fog_sky_affect = lerpf(0.08, 1.0, storm)
 		environment.background_color = Color(0.003, 0.006, 0.018, 1.0).lerp(Color(0.12, 0.28, 0.58, 1.0), daylight)
 		environment.background_energy_multiplier = lerpf(0.18, 1.65 * lighting_boost, daylight)
 
