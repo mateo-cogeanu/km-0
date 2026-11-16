@@ -228,6 +228,14 @@ func toggle_listening(player: Node3D) -> void:
 	set_process(true)
 
 
+func answer(player: Node3D) -> void:
+	## After the house: pick up the mic. See replaced_ending.gd.
+	var ending: Node = preload("res://scripts/replaced_ending.gd").new()
+	ending.name = "ReplacedEnding"
+	get_tree().current_scene.add_child(ending)
+	ending.start(player, self)
+
+
 func stop_listening() -> void:
 	set_process(false)
 	if is_instance_valid(listener):

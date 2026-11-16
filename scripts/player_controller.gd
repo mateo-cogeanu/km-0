@@ -916,6 +916,9 @@ func _handle_interaction() -> void:
 		radio.get_parent().get_parent().use_door(self)
 		return
 	if radio and radio.is_in_group("road_radio"):
+		if radio == listening_radio and RoadEndHouseState.seen and radio.has_method("answer"):
+			radio.answer(self)
+			return
 		if is_instance_valid(listening_radio) and listening_radio != radio:
 			listening_radio.stop_listening()
 		radio.toggle_listening(self)
@@ -1434,7 +1437,9 @@ func _interaction_text() -> String:
 	if target == null:
 		return ""
 	if target.is_in_group("road_radio") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
-		return "E  Turn off radio" if target == listening_radio else "E  Tune radio"
+		if target == listening_radio:
+			return "E  Answer it" if RoadEndHouseState.seen else "E  Turn off radio"
+		return "E  Tune radio"
 	if target.is_in_group("house_front_door") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
 		return "E  Open front door"
 	var near := camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance

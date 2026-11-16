@@ -6,7 +6,7 @@ Run inside a Python 3.11 environment with chatterbox-tts installed, e.g.:
 
 Each character speaks in the voice of a short reference clip in Sources/voice_refs.
 Those clips were made with public-domain Piper voices (him, you, county, mick)
-and Apache-2.0 Kokoro voices (ruth, operator), so everything here can be shipped
+and Apache-2.0 Kokoro voices (ruth, operator, caller), so everything here can be shipped
 under the game's GPL.
 
 Writes:
@@ -159,6 +159,17 @@ def escape():
     write(folder / "escape_back.wav", say("Come back. Please. The kettle's on.", "you"))
 
 
+def replaced():
+    """Somebody new on channel 4, answering you."""
+    folder = ROOT / "assets/audio/ending"
+    first = say("Hello? ...Hello, I hear you.", "caller")
+    second = say("I've been listening for days. I thought nobody was out there.", "caller")
+    third = say("Okay. Okay. I'm coming out.", "caller")
+    gap = 0.7
+    write(folder / "replaced_reply.wav", np.concatenate([first, silence(gap), second, silence(gap), third]))
+    print("reply cues", 0.0, round((len(first)) / RATE + gap, 2), round((len(first) + len(second)) / RATE + gap * 2, 2))
+
+
 # The radio ---------------------------------------------------------------------
 
 SPEAKERS = {"County": "county", "Ruth": "ruth", "Garage operator": "operator", "Mick": "mick", "You": "you"}
@@ -214,4 +225,4 @@ if __name__ == "__main__":
     jobs = sys.argv[1:] or ["stranger", "ending", "radio"]
     for job in jobs:
         {"stranger": stranger, "stranger-coughs": lambda: stranger("coughs"), "stranger-missing": lambda: stranger("missing"),
-         "ending": ending, "escape": escape, "radio": radio}[job]()
+         "ending": ending, "escape": escape, "replaced": replaced, "radio": radio}[job]()

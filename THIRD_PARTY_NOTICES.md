@@ -9,4 +9,4 @@ The Godot Easy Vehicle Physics add-on and its attribution are included in [addon
 Every spoken line in KM0 was generated with [Chatterbox](https://github.com/resemble-ai/chatterbox) and [Chatterbox Turbo](https://huggingface.co/ResembleAI/chatterbox-turbo) by Resemble AI (MIT licence), using `Sources/make_voices.py`. Each character's voice comes from a short reference clip in `Sources/voice_refs`, made with:
 
 - [Piper](https://github.com/OHF-Voice/piper1-gpl) voices from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices): *john*, *norman* and *bryce* (trained on public-domain LibriVox recordings) and *joe* (CC0).
-- [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) by hexgrad (Apache 2.0): the *bf_emma* and *bm_lewis* voices.
+- [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) by hexgrad (Apache 2.0): the *bf_emma*, *bm_lewis* and *af_sarah* voices.
