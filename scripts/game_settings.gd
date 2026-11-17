@@ -12,7 +12,7 @@ const LIGHTING_OPTIONS: Array[String] = ["Performance", "Balanced", "Cinematic"]
 
 var camera_motion := 0.65
 var player_name := ""
-var fps_cap: int = 90
+var fps_cap: int = 60
 var vsync_enabled: bool = true
 var fullscreen_enabled: bool = false
 var master_volume: float = 1.0
@@ -38,7 +38,18 @@ const DRAW_OPTIONS: Array[String] = ["Near", "Medium", "Far"]
 const PRESETS: Array[String] = ["Potato", "Low", "Medium", "High", "Ultra"]
 
 
+## While nothing needs a fast frame rate (paused, a menu, a note, the pack, or the
+## window in the background) the game draws at most this often, so the GPU can
+## rest. It looks the same: nothing on screen is moving fast then.
+const IDLE_FPS := 30
+const MENU_FPS := 60
+var idle_check := 0.0
+var window_focused := true
+
+
 func _ready() -> void:
+	# Keep watching while the game is paused, to know when to slow down.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_settings()
 	apply_settings()
 
@@ -120,6 +131,40 @@ func _apply_viewport_settings() -> void:
 	viewport.scaling_3d_scale = render_scale
 	viewport.set("msaa_3d", Viewport.MSAA_DISABLED if low_end else (Viewport.MSAA_4X if shadow_quality >= 2 else Viewport.MSAA_2X))
 	viewport.set("screen_space_aa", Viewport.SCREEN_SPACE_AA_FXAA)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		window_focused = false
+		_apply_frame_cap()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		window_focused = true
+		_apply_frame_cap()
+
+
+func _process(delta: float) -> void:
+	idle_check -= delta
+	if idle_check <= 0.0:
+		idle_check = 0.25
+		_apply_frame_cap()
+
+
+func _apply_frame_cap() -> void:
+	if not is_inside_tree():
+		return
+	var cap := fps_cap
+	var scene := get_tree().current_scene
+	if not window_focused or get_tree().paused:
+		cap = IDLE_FPS
+	elif scene and scene.scene_file_path == "res://scenes/menu.tscn":
+		cap = mini(fps_cap, MENU_FPS)
+	else:
+		var player := get_tree().get_first_node_in_group("local_player")
+		# Reading a note or looking through the pack: the world behind is still.
+		if player and player.has_method("reading") and (player.reading() or player.inventory_open()):
+			cap = IDLE_FPS
+	if Engine.max_fps != cap:
+		Engine.max_fps = cap
 
 
 func set_fps_cap(value: int) -> void:
