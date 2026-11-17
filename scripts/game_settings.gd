@@ -52,6 +52,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_settings()
 	apply_settings()
+	get_tree().root.size_changed.connect(_apply_ao_resolution)
 
 
 func load_settings() -> void:
@@ -131,6 +132,32 @@ func _apply_viewport_settings() -> void:
 	viewport.scaling_3d_scale = render_scale
 	viewport.set("msaa_3d", Viewport.MSAA_DISABLED if low_end else (Viewport.MSAA_4X if shadow_quality >= 2 else Viewport.MSAA_2X))
 	viewport.set("screen_space_aa", Viewport.SCREEN_SPACE_AA_FXAA)
+	_apply_ao_resolution()
+
+
+## Ambient occlusion at half resolution looks the same once the 3D image is
+## tall enough (Retina, 1440p and up) and saves a lot there. Below that the
+## half-size buffer would soften contact shadows, and full size is cheap anyway.
+const AO_HALF_FROM := 1400.0
+var ao_half := true
+
+
+func _apply_ao_resolution() -> void:
+	if not is_inside_tree():
+		return
+	var viewport := get_tree().root
+	var rendered := float(viewport.size.y) * viewport.scaling_3d_scale
+	var half := rendered >= AO_HALF_FROM
+	if half != ao_half:
+		ao_half = half
+		print("ambient occlusion: ", "half" if half else "full", " size at ", int(rendered), "px tall")
+	RenderingServer.environment_set_ssao_quality(
+		ProjectSettings.get_setting("rendering/environment/ssao/quality", 2),
+		half,
+		ProjectSettings.get_setting("rendering/environment/ssao/adaptive_target", 0.5),
+		ProjectSettings.get_setting("rendering/environment/ssao/blur_passes", 2),
+		ProjectSettings.get_setting("rendering/environment/ssao/fadeout_from", 50.0),
+		ProjectSettings.get_setting("rendering/environment/ssao/fadeout_to", 300.0))
 
 
 func _notification(what: int) -> void:
