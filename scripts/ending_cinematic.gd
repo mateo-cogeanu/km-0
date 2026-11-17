@@ -27,6 +27,9 @@ const GRAVEL := preload("res://assets/audio/road/gravel.wav")
 const BROADCAST := preload("res://assets/audio/radio/you.wav")
 const FLICKER := preload("res://assets/audio/ending/flicker.wav")
 const DOOR_LATCH := preload("res://assets/audio/vehicle/door_latch.wav")
+const MICK_COUGH := preload("res://assets/audio/radio/mick_cough.wav")
+const CRACK := preload("res://assets/audio/ending/crack.wav")
+const TORCH_CLICK := preload("res://assets/audio/player/flashlight_click.wav")
 
 ## Where the new car comes from, how fast, and where it stops (replaced).
 const CRUISE := 17.0
@@ -73,6 +76,9 @@ var flicker_done := {}
 var smooth_frames := 0
 var waited := 0
 var wave_target: Variant = null
+var head_twist_now := 0.0
+var torch: SpotLight3D
+var head_lens: StandardMaterial3D
 
 
 static func create(which: String) -> Control:
@@ -95,7 +101,11 @@ func _ready() -> void:
 	viewport.own_world_3d = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	viewport.msaa_3d = Viewport.MSAA_DISABLED if GameSettings.low_end else Viewport.MSAA_4X
-	viewport.positional_shadow_atlas_size = 2048
+	viewport.positional_shadow_atlas_size = 4096
+	viewport.positional_shadow_atlas_quad_0 = Viewport.SHADOW_ATLAS_QUADRANT_SUBDIV_1
+	viewport.positional_shadow_atlas_quad_1 = Viewport.SHADOW_ATLAS_QUADRANT_SUBDIV_4
+	viewport.positional_shadow_atlas_quad_2 = Viewport.SHADOW_ATLAS_QUADRANT_SUBDIV_4
+	viewport.positional_shadow_atlas_quad_3 = Viewport.SHADOW_ATLAS_QUADRANT_SUBDIV_16
 	container.add_child(viewport)
 	stage = Node3D.new()
 	stage.name = "Stage"
@@ -560,6 +570,7 @@ func _make_car(color: Color, style: int) -> Node3D:
 	stage.add_child(root)
 	CarModel.new(color).build(root, style, false)
 	var lens := StandardMaterial3D.new()
+	head_lens = lens
 	lens.albedo_color = Color(1, 0.97, 0.9)
 	lens.emission_enabled = true
 	lens.emission = Color(1, 0.94, 0.82)
@@ -761,12 +772,15 @@ func _figure(at: Vector3, facing: float) -> Node3D:
 	body.rotation.y = facing
 	for mesh: GeometryInstance3D in body.find_children("*", "GeometryInstance3D", true, false):
 		mesh.layers = 1
+		# Its own shadow is not a person's. See _wrong_shadow.
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_wrong_shadow(body)
 	# Points of eyeshine, the way an animal's eyes catch a light.
 	var shine := StandardMaterial3D.new()
 	shine.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	shine.albedo_color = Color(0.85, 1.0, 0.8)
+	shine.albedo_color = Color(0.52, 0.004, 0.011)
 	shine.emission_enabled = true
-	shine.emission = Color(0.8, 1.0, 0.75)
+	shine.emission = Color(0.74, 0.009, 0.018)
 	shine.emission_energy_multiplier = 0.0
 	for side in [-1.0, 1.0]:
 		var dot := MeshInstance3D.new()
@@ -782,9 +796,64 @@ func _figure(at: Vector3, facing: float) -> Node3D:
 	return body
 
 
-func _pose_figure(delta: float, pitch: float, shine: float) -> void:
+func _wrong_shadow(body: Node3D) -> void:
+	## What actually stands there, seen only in the shadow it throws: too tall,
+	## too thin, head cocked, arms hanging past its knees with long fingers. It
+	## does not move when the body does.
+	var parts := Node3D.new()
+	parts.name = "WrongShadow"
+	body.add_child(parts)
+	parts.scale = Vector3.ONE * 1.12
+	parts.position.y = -PlayerBody.FEET * 0.12
+	var ink := StandardMaterial3D.new()
+	for limb: Array in [
+			# Spine and neck, bent a little forward.
+			[Vector3(0, -0.12, 0), Vector3(0, 0.62, 0.04), 0.11],
+			[Vector3(0, 0.62, 0.04), Vector3(0.04, 0.86, -0.02), 0.035],
+			# Legs, the knees bending the wrong way.
+			[Vector3(-0.1, -0.1, 0), Vector3(-0.13, -0.55, 0.12), 0.05],
+			[Vector3(-0.13, -0.55, 0.12), Vector3(-0.15, -1.02, -0.02), 0.04],
+			[Vector3(0.1, -0.1, 0), Vector3(0.13, -0.55, 0.12), 0.05],
+			[Vector3(0.13, -0.55, 0.12), Vector3(0.15, -1.02, -0.02), 0.04],
+			# Arms: shoulders, an elbow bent backward, wrists down by the knees.
+			[Vector3(-0.07, 0.6, 0), Vector3(-0.24, 0.58, 0.02), 0.04],
+			[Vector3(-0.24, 0.58, 0.02), Vector3(-0.36, 0.1, 0.12), 0.032],
+			[Vector3(-0.36, 0.1, 0.12), Vector3(-0.33, -0.48, -0.04), 0.026],
+			[Vector3(0.07, 0.6, 0), Vector3(0.24, 0.58, 0.02), 0.04],
+			[Vector3(0.24, 0.58, 0.02), Vector3(0.37, 0.12, 0.12), 0.032],
+			[Vector3(0.37, 0.12, 0.12), Vector3(0.35, -0.46, -0.04), 0.026]]:
+		var piece := Shapes.tube(parts, "Limb", limb[0], limb[1], limb[2], ink)
+		piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	# Fingers, too many and too long.
+	for side in [-1.0, 1.0]:
+		var wrist := Vector3(side * 0.34, -0.47, -0.04)
+		for finger in range(5):
+			var spread := (finger - 2) * 0.035
+			var tip := wrist + Vector3(side * 0.02 + spread, -0.22 - absf(spread) * 0.8, 0.02)
+			var piece := Shapes.tube(parts, "Finger", wrist, tip, 0.008, ink)
+			piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	# A long head, cocked over to one side.
+	var head := MeshInstance3D.new()
+	var skull := SphereMesh.new()
+	skull.radius = 0.1
+	skull.height = 0.2
+	head.mesh = skull
+	head.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	parts.add_child(head)
+	head.position = Vector3(0.12, 0.96, -0.02)
+	head.rotation.z = -0.75
+	head.scale = Vector3(0.9, 1.6, 0.95)
+
+
+func _pose_figure(delta: float, pitch: float, shine: float, twist := 0.0) -> void:
 	figure.animate(delta, {"velocity": Vector3.ZERO, "on_floor": true, "pitch": pitch, "targets": [null, wave_target],
 		"grip": [0.15, 0.1], "step": 1.0})
+	if twist != 0.0 and figure.posed.has("Head"):
+		# The head turns over on its neck further than a head can.
+		var neck_top: Transform3D = figure.posed["Head"]
+		var forward: Vector3 = (figure.to_rig.basis * Vector3.FORWARD).normalized()
+		figure._pose_bone("Head", Transform3D(Basis(forward, twist) * neck_top.basis, neck_top.origin))
+		head_twist_now = twist
 	var head: Transform3D = figure.posed.get("Head", Transform3D())
 	var rest_head: Transform3D = figure.rest.get("Head", Transform3D())
 	for dot in glints:
@@ -794,7 +863,7 @@ func _pose_figure(delta: float, pitch: float, shine: float) -> void:
 		dot.global_position = figure.global_transform * (figure.to_rig.affine_inverse() * rig_point)
 		var reach := maxf(1.0, camera.global_position.distance_to(dot.global_position) * 0.22)
 		dot.scale = Vector3.ONE * reach
-		(dot.material_override as StandardMaterial3D).emission_energy_multiplier = shine * 3.0 * minf(reach, 3.0)
+		(dot.material_override as StandardMaterial3D).emission_energy_multiplier = shine * 6.0 * minf(reach, 3.0)
 		(dot.material_override as StandardMaterial3D).emission_energy_multiplier = shine * 3.0
 		dot.visible = shine > 0.01
 
@@ -823,6 +892,17 @@ func _build_replaced() -> void:
 	spill.position = Vector3(0.1, 1.8, 2.4)
 	_build_kettle()
 	figure = _figure(Vector3(0.55, -0.006, 4.72), PI)
+	# Her flashlight, once she is out of the car.
+	torch = SpotLight3D.new()
+	torch.light_color = Color(0.92, 0.96, 1.0)
+	torch.light_energy = 0.0
+	torch.spot_range = 14.0
+	torch.spot_angle = 17.0
+	torch.spot_angle_attenuation = 1.4
+	torch.shadow_enabled = true
+	torch.light_volumetric_fog_energy = 0.6
+	stage.add_child(torch)
+	torch.look_at_from_position(Vector3(-2.7, 1.25, 9.4), Vector3(0.8, 1.35, 4.2), Vector3.UP)
 	car = _make_car(Color("#3b4b5e"), CarModel.HATCHBACK)
 	car.position = Vector3(1.75, 0, START_Z)
 	dust = _dust_trail(car, Color(0.42, 0.38, 0.34), 90)
@@ -833,14 +913,18 @@ func _build_replaced() -> void:
 	_sound("engine", _loop(ENGINE), -60.0).play()
 	_sound("kettle", KETTLE, -6.0)
 	_sound("door", DOOR_LATCH, -10.0)
+	_sound("cough", MICK_COUGH, -9.0)
+	_sound("crack", CRACK, -13.0)
+	_sound("torch", TORCH_CLICK, -6.0)
 	_sound("flicker", FLICKER, -14.0)
-	text_at = 28.0
+	text_at = 34.5
 	shots = [
 		[0.0, _shot_porch_behind],
 		[7.0, _shot_kettle],
 		[13.0, _shot_passing],
 		[20.0, _shot_windshield],
 		[27.0, _shot_arrival],
+		[31.0, _shot_reveal],
 	]
 
 
@@ -951,11 +1035,11 @@ func _animate_replaced(t: float, delta: float) -> void:
 		_roll_wheels(before - car_z)
 	dust.emitting = car_speed > 2.0
 	# The car's door opens: whoever it is, they are getting out.
-	var door_open := clampf((t - 31.0) / 1.2, 0.0, 1.0)
+	var door_open := clampf((t - 29.2) / 1.2, 0.0, 1.0)
 	if car_door:
 		car_door.rotation.y = -_ease(door_open) * 1.05
 	dome.light_energy = 0.6 * door_open
-	if t >= 31.0 and not flicker_done.has("door"):
+	if t >= 29.2 and not flicker_done.has("door"):
 		flicker_done["door"] = true
 		players["door"].play()
 	# The porch lamp stutters now and then.
@@ -966,8 +1050,17 @@ func _animate_replaced(t: float, delta: float) -> void:
 			if not flicker_done.has(at):
 				flicker_done[at] = true
 				players["flicker"].play()
+	# As her flashlight comes on, the porch lamp gives out.
+	if t > 31.0:
+		buzz = 0.0 if t > 31.45 else (0.2 if fmod(t * 25.0, 1.0) < 0.5 else 1.0)
 	porch_lamp.light_energy = 1.4 * buzz
 	porch_glass.emission_energy_multiplier = 4.0 * buzz
+	# She switches off the engine and the lights to get out.
+	var lights_on := 1.0 if t < 30.0 else 0.0
+	for beam in car_lights:
+		beam.light_energy = 5.5 * lights_on
+	head_lens.emission_energy_multiplier = 9.0 * lights_on
+	flare_strength = lights_on
 	# The figure does not move. Near the end its head tips, just slightly.
 	var shine := clampf((t - 24.5) / 2.0, 0.0, 1.0) * clampf(1.0 - (car_z - ARRIVE_Z) / 80.0, 0.0, 1.0)
 	var tip := _ease(clampf((t - 23.0) / 3.0, 0.0, 1.0))
@@ -977,7 +1070,27 @@ func _animate_replaced(t: float, delta: float) -> void:
 	wave_target = null
 	if wave > 0.0:
 		wave_target = Vector3(0.18, -0.45, -0.08).lerp(Vector3(0.33 + 0.07 * sin((t - 23.2) * 3.4), 0.74, -0.2), _ease(wave))
-	_pose_figure(maxf(delta, 0.001), -0.05 + 0.1 * tip, shine)
+	# She turns on her flashlight, and the wall shows what is really there.
+	if t > 31.4:
+		torch.light_energy = 7.0 * (0.92 + 0.08 * sin(t * 13.0) * sin(t * 4.1))
+		if not flicker_done.has("torch"):
+			flicker_done["torch"] = true
+			players["torch"].play()
+	# Early on, on the porch, it coughs: Mick's cough, exactly.
+	var hunch := 0.0
+	if t > 3.6 and t < 5.0:
+		hunch = sin(clampf((t - 3.6) / 1.4, 0.0, 1.0) * PI) * 0.35
+		if not flicker_done.has("cough"):
+			flicker_done["cough"] = true
+			players["cough"].play()
+	# And when she opens her door, its head turns over, slowly, too far.
+	var twist := 0.0
+	if t > 32.2:
+		twist = -1.4 * _ease(clampf((t - 32.2) / 2.4, 0.0, 1.0))
+		if not flicker_done.has("crack"):
+			flicker_done["crack"] = true
+			players["crack"].play()
+	_pose_figure(maxf(delta, 0.001), -0.05 + 0.1 * tip - hunch, shine, twist)
 	# Sound.
 	var inside := last_shot == 1
 	_fade_sound("dread", -15.0, delta, 0.6)
@@ -1035,8 +1148,15 @@ func _shot_face(s: float) -> void:
 
 func _shot_arrival(s: float) -> void:
 	# Wide from behind the car, the lit house and the figure in the beams.
-	var u := clampf(s / 18.0, 0.0, 1.0)
-	_aim(Vector3(5.6, 2.2, 31.0).lerp(Vector3(4.2, 3.4, 27.5), _ease(u)), Vector3(0.4, 1.7, 5.0))
+	var u := clampf(s / 4.0, 0.0, 1.0)
+	_aim(Vector3(5.6, 2.2, 31.0).lerp(Vector3(5.0, 2.7, 29.5), _ease(u)), Vector3(0.4, 1.7, 5.0))
+
+
+func _shot_reveal(s: float) -> void:
+	# Close, from where she is getting out: what it throws on the wall behind
+	# it, the red in its eyes, and its head going over.
+	var u := clampf(s / 16.0, 0.0, 1.0)
+	_aim(Vector3(1.55, 1.4, 8.9).lerp(Vector3(1.2, 1.55, 7.4), _ease(u)), Vector3(0.3, 1.5, 4.3))
 
 
 # The house ending: nobody came back --------------------------------------------
@@ -1073,10 +1193,10 @@ func _build_house_ending() -> void:
 	# Eyes, low, in the dark of the doorway.
 	var shine := StandardMaterial3D.new()
 	shine.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	shine.albedo_color = Color(0.9, 1.0, 0.75)
+	shine.albedo_color = Color(0.52, 0.004, 0.011)
 	shine.emission_enabled = true
-	shine.emission = Color(0.85, 1.0, 0.7)
-	shine.emission_energy_multiplier = 6.0
+	shine.emission = Color(0.74, 0.009, 0.018)
+	shine.emission_energy_multiplier = 18.0
 	for side in [-1.0, 1.0]:
 		var dot := MeshInstance3D.new()
 		var ball := SphereMesh.new()
