@@ -32,6 +32,8 @@ var reduce_scares := false
 var low_end := false
 ## 0 near, 1 medium, 2 far: how much road and desert is kept around you.
 var draw_distance := 1
+## The first trip's job-sheet tutorial has been finished or skipped.
+var tutorial_done := false
 const DRAW_OPTIONS: Array[String] = ["Near", "Medium", "Far"]
 const PRESETS: Array[String] = ["Potato", "Low", "Medium", "High", "Ultra"]
 
@@ -67,6 +69,7 @@ func load_settings() -> void:
 	reduce_scares = bool(config.get_value(SECTION, "reduce_scares", reduce_scares))
 	low_end = bool(config.get_value(SECTION, "low_end", low_end))
 	draw_distance = clampi(int(config.get_value(SECTION, "draw_distance", draw_distance)), 0, 2)
+	tutorial_done = bool(config.get_value(SECTION, "tutorial_done", tutorial_done))
 
 
 func save_settings() -> void:
@@ -90,6 +93,7 @@ func save_settings() -> void:
 	config.set_value(SECTION, "reduce_scares", reduce_scares)
 	config.set_value(SECTION, "low_end", low_end)
 	config.set_value(SECTION, "draw_distance", draw_distance)
+	config.set_value(SECTION, "tutorial_done", tutorial_done)
 	config.save(CONFIG_PATH)
 
 

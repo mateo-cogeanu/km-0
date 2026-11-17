@@ -10,6 +10,7 @@ var settings_button: Button
 var settings_panel: PanelContainer
 var tutorial: Control
 var tutorial_card: PanelContainer
+var tutorial_button: Button
 
 
 func _ready() -> void:
@@ -71,6 +72,9 @@ func _build_ui() -> void:
 	settings_button = Style.button("Settings", 24)
 	settings_button.pressed.connect(_open_settings)
 	items.add_child(settings_button)
+	tutorial_button = Style.button("Show tutorial again", 24)
+	tutorial_button.pressed.connect(_toggle_tutorial)
+	items.add_child(tutorial_button)
 	var main_menu := Style.button("Main menu" if NetworkManager.is_online() else "Save & main menu", 24)
 	main_menu.pressed.connect(_return_to_menu)
 	items.add_child(main_menu)
@@ -86,16 +90,11 @@ func _build_ui() -> void:
 func _fit_layout() -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
 	Style.fit_panel(card, viewport_size, false)
-	# Wrapping changes the minimum height after the container gets its width.
-	var bounds := tutorial_card.get_combined_minimum_size()
-	var available := Vector2(viewport_size.x - 32.0, viewport_size.y * 0.68).max(Vector2.ONE)
-	var fit := minf(GameSettings.ui_scale, minf(available.x / bounds.x, available.y / bounds.y))
-	tutorial_card.size = bounds
-	tutorial_card.scale = Vector2.ONE * fit
-	tutorial_card.position = (viewport_size - bounds * fit) * 0.5
+
 
 
 func _pause_game() -> void:
+	_refresh_tutorial_button()
 	get_tree().paused = not NetworkManager.is_online()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	overlay.show()
@@ -152,45 +151,46 @@ func gameplay_ui_open() -> bool:
 
 
 func _build_tutorial() -> void:
-	tutorial = ColorRect.new()
-	tutorial.color = Color(0.04, 0.04, 0.04, 0.58)
-	tutorial.theme = Style.make_theme()
+	## The old card is gone; the tutorial is now a live job sheet on screen
+	## (tutorial_guide.gd), shown on your first trip only.
+	tutorial = Control.new()
+	tutorial.hide()
 	add_child(tutorial)
-	tutorial.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	tutorial_card = PanelContainer.new()
-	tutorial_card.custom_minimum_size.x = 470
-	tutorial.add_child(tutorial_card)
-	tutorial_card.minimum_size_changed.connect(_fit_layout, CONNECT_DEFERRED)
-	var items := Style.vbox(10)
-	tutorial_card.add_child(items)
-	items.add_child(Style.heading("Get the car running", 32))
-	_add_tutorial_step(items, "1. Find what’s missing",
-		"Inspect the wheels and look under the hood for an engine, radiator, and battery. Search around the shack for the missing parts.")
-	_add_tutorial_step(items, "2. Put the car back together",
-		"Carry each part to its empty mount. Keep the hood open for engine bay parts. When the tooltip says Install, fit the part before moving on.")
-	_add_tutorial_step(items, "3. Fuel up and head out",
-		"Take the fuel can from the shack and open the car’s fuel cap. Aim at the filler to refuel. Open the shutter, get in, and follow the road. Check abandoned buildings for supplies along the way.")
-	_add_tutorial_step(items, "4. Look after yourself",
-		"Eat and drink what you find: hold it and press R. Search coolers and toolboxes for supplies. Sleep on the cot, or press Z in a parked car, when you get tired. Q puts away what you’re holding, or opens your pack when your hands are empty. F switches your flashlight on and off; batteries run down.")
-	var actions := HBoxContainer.new()
-	items.add_child(actions)
-	var start := Style.button("Start repairs", 17)
-	start.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	actions.add_child(start)
-	var skip := Style.button("Skip tutorial", 17)
-	skip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	actions.add_child(skip)
-	start.pressed.connect(_close_tutorial)
-	skip.pressed.connect(_close_tutorial)
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	start.grab_focus.call_deferred()
+	if not GameSettings.tutorial_done:
+		_start_guide.call_deferred()
 
 
-func _add_tutorial_step(items: VBoxContainer, title: String, text: String) -> void:
-	items.add_child(Style.label(title, 17, Style.AMBER))
-	items.add_child(Style.caption(text))
+func _start_guide() -> void:
+	var world := get_parent()
+	if world == null or world.get_node_or_null("TutorialGuide"):
+		return
+	var guide: CanvasLayer = preload("res://scripts/tutorial_guide.gd").new()
+	guide.name = "TutorialGuide"
+	world.add_child(guide)
+	_refresh_tutorial_button()
+
+
+func _guide() -> Node:
+	return get_parent().get_node_or_null("TutorialGuide") if get_parent() else null
+
+
+func _toggle_tutorial() -> void:
+	var guide := _guide()
+	if guide:
+		guide.finish()
+	else:
+		GameSettings.tutorial_done = false
+		GameSettings.save_settings()
+		_start_guide()
+	_refresh_tutorial_button.call_deferred()
+
+
+func _refresh_tutorial_button() -> void:
+	if tutorial_button:
+		var guide := _guide()
+		tutorial_button.text = "Skip tutorial" if guide and not guide.is_queued_for_deletion() else "Show tutorial again"
 
 
 func _close_tutorial() -> void:
+	## Kept for the check scenes; there is no card to close any more.
 	tutorial.hide()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED

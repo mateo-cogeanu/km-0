@@ -232,6 +232,26 @@ def replaced():
     print("reply cues", 0.0, round((len(first)) / RATE + gap, 2), round((len(first) + len(second)) / RATE + gap * 2, 2))
 
 
+COUNTY_LINES = {
+    "county_intro": ("county", "Workshop, this is County desk. Workshop, do you read? Len hasn't checked in since Tuesday. "
+                     "If you can get that car going, drive the east road and check in at every station radio. Find him. County out."),
+    "county_reply_1": ("county", "Copy, I hear you. That's one. Keep heading east. The next station's a kilometre or so on."),
+    "county_reply_2": ("county", "Copy. That's two. Still nothing from Len. He always called in at night. "
+                       "Stay out there, find somewhere to sleep, and keep listening."),
+    "county_reply_3": ("county", "Copy. Keep going. Check in at the next one."),
+    "county_reply_4": ("county", "Copy. Still no word. Keep listening."),
+    "you_checkin": ("you", "County, this is the workshop car. Checking in."),
+}
+
+
+def county():
+    """County's voice at the workshop and at every station you check in from."""
+    for name, (who, text) in COUNTY_LINES.items():
+        parts = [say(sentence, who) for sentence in re.split(r"(?<=[.?!])\s+", text) if sentence]
+        gaps = [np.concatenate([part, silence(0.35)]) for part in parts]
+        write(ROOT / f"assets/audio/radio/{name}.wav", np.concatenate(gaps))
+
+
 # The radio ---------------------------------------------------------------------
 
 SPEAKERS = {"County": "county", "Ruth": "ruth", "Garage operator": "operator", "Mick": "mick", "You": "you"}
@@ -290,4 +310,4 @@ if __name__ == "__main__":
     jobs = sys.argv[1:] or ["stranger", "ending", "radio"]
     for job in jobs:
         {"stranger": stranger, "stranger-coughs": lambda: stranger("coughs"), "stranger-missing": lambda: stranger("missing"),
-         "ending": ending, "escape": escape, "replaced": replaced, "radio": radio}[job]()
+         "ending": ending, "escape": escape, "replaced": replaced, "county": county, "radio": radio}[job]()

@@ -86,6 +86,17 @@ const LINES := [
 	],
 ]
 
+## County's side of things: the call at the workshop, and her answer each time
+## you check in from a station. Recorded by Sources/make_voices.py (county).
+const COUNTY := {
+	"county_intro": "Workshop, this is County desk. Workshop, do you read? Len hasn't checked in since Tuesday. If you can get that car going, drive the east road and check in at every station radio. Find him. County out.",
+	"county_reply_1": "Copy, I hear you. That's one. Keep heading east. The next station's a kilometre or so on.",
+	"county_reply_2": "Copy. That's two. Still nothing from Len. He always called in at night. Stay out there, find somewhere to sleep, and keep listening.",
+	"county_reply_3": "Copy. Keep going. Check in at the next one.",
+	"county_reply_4": "Copy. Still no word. Keep listening.",
+}
+const CHECK_IN_LINE := "County, this is the workshop car. Checking in."
+
 const RADIO_BUS := &"Radio"
 const VOICE_VOLUME := 0.0
 
@@ -99,6 +110,12 @@ var echo: AudioStreamPlayer3D
 var echo_at := -1.0
 ## After the house there is nothing on the radios but an open line, waiting.
 var open_line := false
+## Checking in: your report, then County's answer, after the broadcast.
+var replying := false
+var reply_speaker: AudioStreamPlayer3D
+var you_speaker: AudioStreamPlayer
+var reply_lines: Array = []
+var reply_from: Node
 const YOUR_VOICE := preload("res://assets/audio/ending/anybody.wav")
 
 
@@ -137,7 +154,12 @@ func _ready() -> void:
 	echo.bus = _radio_bus()
 	echo.pitch_scale = 0.94
 	carrier = _make_player(_carrier_sound(), -18.0 - broadcast * 0.9)
-	voice.finished.connect(stop_listening)
+	voice.finished.connect(_broadcast_over)
+	reply_speaker = _make_player(null, VOICE_VOLUME)
+	reply_speaker.bus = _radio_bus()
+	you_speaker = AudioStreamPlayer.new()
+	you_speaker.bus = GameSettings.voice_bus()
+	add_child(you_speaker)
 	set_process(false)
 
 
@@ -189,6 +211,9 @@ func _make_player(stream: AudioStream, volume: float) -> AudioStreamPlayer3D:
 
 
 func _process(_delta: float) -> void:
+	if replying:
+		_show_reply()
+		return
 	if not is_instance_valid(listener) or not listener.can_listen_to_radio(global_position):
 		stop_listening()
 		return
@@ -245,6 +270,89 @@ func toggle_listening(player: Node3D) -> void:
 	set_process(true)
 
 
+static func county_captions(key: String, length: float) -> Array:
+	## Sentence by sentence, timed by length across the recording.
+	var text: String = COUNTY[key]
+	var sentences := []
+	for piece in text.replace("? ", "?|").replace(". ", ".|").split("|", false):
+		sentences.append(piece)
+	var total := 0.0
+	for sentence: String in sentences:
+		total += sentence.length() + 8.0
+	var lines := []
+	var at := 0.0
+	for sentence: String in sentences:
+		lines.append([at, "County: " + sentence])
+		at += (sentence.length() + 8.0) / total * length
+	return lines
+
+
+func county_call(key: String, to: Node3D) -> void:
+	## County comes over this radio on her own, e.g. the call at the workshop.
+	var stream: AudioStream = load("res://assets/audio/radio/%s.wav" % key)
+	listener = to
+	replying = true
+	dial.emission_enabled = true
+	carrier.play()
+	reply_speaker.stream = stream
+	reply_lines = county_captions(key, stream.get_length())
+	reply_from = reply_speaker
+	reply_speaker.play()
+	_after_reply()
+	set_process(true)
+
+
+func _broadcast_over() -> void:
+	## After a broadcast you report in, and County answers, once per station.
+	var story: Dictionary = preload("res://scripts/road_end_house.gd").story
+	var checked: Dictionary = story.get("checked_in", {})
+	if not is_instance_valid(listener) or preload("res://scripts/road_end_house.gd").seen or checked.has(str(broadcast)):
+		stop_listening()
+		return
+	checked[str(broadcast)] = true
+	story["checked_in"] = checked
+	mark_heard(broadcast)
+	replying = true
+	you_speaker.stream = load("res://assets/audio/radio/you_checkin.wav")
+	reply_lines = [[0.0, "You: " + CHECK_IN_LINE]]
+	reply_from = you_speaker
+	you_speaker.play()
+	you_speaker.finished.connect(func() -> void:
+		var key := "county_reply_%d" % clampi(checked.size(), 1, 4)
+		var stream: AudioStream = load("res://assets/audio/radio/%s.wav" % key)
+		reply_lines = county_captions(key, stream.get_length())
+		reply_from = reply_speaker
+		reply_speaker.stream = stream
+		get_tree().create_timer(0.7).timeout.connect(func() -> void:
+			if replying:
+				reply_speaker.play()
+				_after_reply()), CONNECT_ONE_SHOT)
+
+
+func _after_reply() -> void:
+	if not reply_speaker.finished.is_connected(_reply_over):
+		reply_speaker.finished.connect(_reply_over, CONNECT_ONE_SHOT)
+
+
+func _show_reply() -> void:
+	if not is_instance_valid(listener):
+		return
+	var line := "[Static]"
+	if reply_from and reply_from.playing:
+		var at: float = reply_from.get_playback_position()
+		for entry: Array in reply_lines:
+			if at >= entry[0]:
+				line = entry[1]
+	if line != caption:
+		caption = line
+		listener.show_radio_caption(self, line)
+
+
+func _reply_over() -> void:
+	replying = false
+	stop_listening()
+
+
 func answer(player: Node3D) -> void:
 	## After the house: pick up the mic. See replaced_ending.gd.
 	var ending: Node = preload("res://scripts/replaced_ending.gd").new()
@@ -260,6 +368,14 @@ func stop_listening() -> void:
 	listener = null
 	caption = ""
 	open_line = false
+	replying = false
+	reply_speaker.stop()
+	you_speaker.stop()
+	# Drop anything still waiting on a reply that will not come now.
+	for connection: Dictionary in you_speaker.finished.get_connections():
+		you_speaker.finished.disconnect(connection["callable"])
+	if reply_speaker.finished.is_connected(_reply_over):
+		reply_speaker.finished.disconnect(_reply_over)
 	voice.stop()
 	carrier.stop()
 	echo.stop()

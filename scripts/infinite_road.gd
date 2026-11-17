@@ -62,6 +62,9 @@ var wire_mesh := CylinderMesh.new()
 var pole_shape := CylinderShape3D.new()
 var pole_wood := Shapes.material(Color("#4a3a2c"))
 var wire_black := Shapes.material(Color("#191817"), 0.3, 0.6)
+var marker_white := Shapes.material(Color("#e6e1d2"))
+var marker_green := Shapes.material(Color("#2f5a3c"))
+var sign_wood := Shapes.material(Color("#6b5a45"))
 
 
 func _ready() -> void:
@@ -99,6 +102,9 @@ func _ready() -> void:
 	add_child(cabin)
 	cabin.position = StrangerHouse.LOCATION
 	cabin.rotation.y = StrangerHouse.TURN
+	var desk: Node = preload("res://scripts/county_desk.gd").new()
+	desk.name = "CountyDesk"
+	add_child(desk)
 	_update_segments()
 
 
@@ -264,6 +270,7 @@ func _create_segment(index: int) -> Node3D:
 	var stop_side := _stop_side(index) if index < -1 else 0.0
 	terrain.populate(segment, segment_start, segment_length, index, absi(index) <= 1, stop_side, _road_x)
 	_add_power_line(segment, segment_start, segment_start + segment_length)
+	_add_markers(segment, index, segment_start, segment_start + segment_length)
 	if start >= end:
 		return segment
 	if start == approach:
@@ -285,6 +292,60 @@ func _create_segment(index: int) -> Node3D:
 	if end == ROAD_END:
 		_add_strip(segment, "CrumbledEnd", end - 0.10, end + 0.48, -half, half, -0.012, gravel)
 	return segment
+
+
+static func station_number(index: int) -> int:
+	## Stations counted from the workshop: the first garage is 1, then one per block.
+	return 1 if index == -5 else -floori(float(index) / STOP_BLOCK)
+
+
+func _add_markers(segment: Node3D, index: int, from_z: float, to_z: float) -> void:
+	## Kilometre posts, and a sign before each station telling you it is coming.
+	var approach := house_approach()
+	var first := ceili(-to_z / 1000.0)
+	var last := floori(-from_z / 1000.0)
+	for km in range(maxi(first, 1), last + 1):
+		var z := -km * 1000.0
+		if z < approach + 20.0:
+			continue
+		var post := _roadside(segment, z, 5.3)
+		Shapes.box(post, "Post", Vector3(0.12, 1.0, 0.08), Vector3(0, 0.5, 0), marker_white)
+		Shapes.box(post, "Plate", Vector3(0.36, 0.3, 0.03), Vector3(0, 0.88, 0.03), marker_green)
+		_label(post, "KM\n%d" % km, Vector3(0, 0.88, 0.05), 46)
+	for stop in range(index - 8, index + 2):
+		if not _has_stop(stop):
+			continue
+		var stop_z := (stop + 0.5) * segment_length
+		var sign_z := stop_z + 300.0
+		if sign_z < from_z or sign_z >= to_z or sign_z > -20.0 or stop_z < approach:
+			continue
+		var board := _roadside(segment, sign_z, 5.6)
+		for x in [-0.55, 0.55]:
+			Shapes.box(board, "SignPost", Vector3(0.09, 2.0, 0.09), Vector3(x, 1.0, 0), sign_wood)
+		Shapes.box(board, "SignBoard", Vector3(1.5, 0.75, 0.05), Vector3(0, 1.75, 0.04), marker_green)
+		_label(board, "STATION %d\nRADIO  ·  300 m" % station_number(stop), Vector3(0, 1.75, 0.075), 52)
+
+
+func _roadside(segment: Node3D, z: float, lateral: float) -> Node3D:
+	var holder := Node3D.new()
+	segment.add_child(holder)
+	var slope := _road_x(z + 0.5) - _road_x(z - 0.5)
+	holder.position = _sample(z, lateral) - segment.position
+	holder.rotation.y = atan2(slope, 1.0)
+	return holder
+
+
+func _label(parent: Node3D, text: String, at: Vector3, size: int) -> void:
+	var label := Label3D.new()
+	label.text = text
+	label.font_size = size
+	label.pixel_size = 0.004
+	label.modulate = Color(0.95, 0.95, 0.9)
+	label.outline_size = 0
+	label.double_sided = false
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	parent.add_child(label)
+	label.position = at
 
 
 func _has_pole(z: float) -> bool:

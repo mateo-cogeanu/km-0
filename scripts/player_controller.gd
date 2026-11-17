@@ -1442,7 +1442,7 @@ func _interaction_text() -> String:
 	if target.is_in_group("road_radio") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
 		if target == listening_radio:
 			return "E  Answer it" if RoadEndHouseState.seen else "E  Turn off radio"
-		return "E  Tune radio"
+		return "E  Tune radio" if RoadEndHouseState.seen else "E  Check in on the radio"
 	if target.is_in_group("house_front_door") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
 		return "E  Open front door"
 	var near := camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance
