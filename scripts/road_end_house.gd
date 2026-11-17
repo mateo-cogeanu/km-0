@@ -171,12 +171,12 @@ const CRAWL_PAUSE_AT := 0.47
 const LEAN_TIME := 2.25
 const CLOSE_HOLD := 3.1
 const INTRO_QUESTION_CUE := 1.03
-const FINAL_WORDS_CUE := 1.4
+const FINAL_WORDS_CUE := 1.16
 # Level of the final take, sampled every 50 ms, including the breath and pause.
 const FINAL_JAW := [
-	22, 214, 56, 0, 0, 0, 20, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 23, 135, 145, 67, 0, 0,
-	27, 87, 55, 67, 47, 34, 0, 63, 108, 128, 99, 80, 47, 0, 0,
+	0, 39, 214, 169, 42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 35, 198, 182, 0, 0, 33, 113, 74, 27, 0, 65, 109,
+	149, 100, 24, 0,
 ]
 
 

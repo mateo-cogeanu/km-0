@@ -59,14 +59,76 @@ def tidy(audio, level=0.09):
     return audio / max(1.0, peak / 0.89)
 
 
-def say(text, who):
+listener = None
+
+
+def words_of(text):
+    text = text.lower().replace("’", "'").replace("‘", "'").replace("okay", "ok")
+    return re.findall(r"[a-z0-9']+", text.replace("'", ""))
+
+
+def heard(audio):
+    """What a speech recognizer hears in a take, to catch Chatterbox repeating
+    or dropping words."""
+    global listener
+    if listener is None:
+        from faster_whisper import WhisperModel
+        listener = WhisperModel("base.en", compute_type="int8")
+    segments, _ = listener.transcribe(np.asarray(audio, dtype=np.float32), language="en", beam_size=5)
+    return " ".join(segment.text for segment in segments)
+
+
+def repeats(words):
+    """Runs of three or more words said twice."""
+    seen = set()
+    for i in range(len(words) - 2):
+        run = tuple(words[i:i + 3])
+        if run in seen:
+            return True
+        seen.add(run)
+    return False
+
+
+def mismatch(target, audio):
+    """0 when the take says the line; above ACCEPT for repeats, extra words or
+    big slips. A misheard word here and there does not count."""
+    import difflib
+    want, got = words_of(target), words_of(heard(audio))
+    extra = max(0, len(got) - len(want))
+    if len(want) <= 2:
+        # Short calls and breaths: only reject takes that run on into more words.
+        return 0.0 if extra <= 1 else 0.3 * extra
+    ratio = difflib.SequenceMatcher(None, want, got).ratio()
+    score = max(0.0, 0.8 - ratio) + 0.3 * max(0, extra - 1)
+    if repeats(got) and not repeats(want):
+        score += 1.0
+    return score
+
+
+ACCEPT = 0.01
+
+
+def say(text, who, tries=8):
+    """Record a line, listen back, and record it again until it says the words
+    once, in order, with nothing repeated."""
     global model
     if model is None:
         model = ChatterboxTTS.from_pretrained(device=DEVICE)
-    seed_for(text, who)
-    text = text.replace("’", "'").replace("‘", "'")
-    wav = model.generate(text, audio_prompt_path=str(REFS / f"{who}.wav"), exaggeration=EXAGGERATION, cfg_weight=CFG)
-    return tidy(wav.squeeze(0).cpu().numpy())
+    spoken = text.replace("’", "'").replace("‘", "'")
+    best, best_score = None, None
+    for attempt in range(tries):
+        seed_for(text + ("#%d" % attempt if attempt else ""), who)
+        wav = model.generate(spoken, audio_prompt_path=str(REFS / f"{who}.wav"), exaggeration=EXAGGERATION, cfg_weight=CFG)
+        take = tidy(wav.squeeze(0).cpu().numpy())
+        score = mismatch(text, take)
+        if best is None or score < best_score:
+            best, best_score = take, score
+        if score <= ACCEPT:
+            break
+        print(f"  retake {attempt + 1} for {who}: {text!r} (heard {heard(take)!r})", flush=True)
+    if best_score > ACCEPT:
+        print(f"  WARNING best take still off ({best_score:.2f}) for {who}: {text!r}", flush=True)
+    return best
 
 
 def cough(who, text="[cough] [cough] [cough] Hm."):
@@ -195,10 +257,13 @@ def radio():
             key = (speaker, words)
             if key not in takes:
                 # The same report twice is the same recording twice.
-                takes[key] = cough(SPEAKERS[speaker]) if words == "[Coughs]" else say(words, SPEAKERS[speaker])
                 if words == "[Coughs]":
-                    # Mick's one cough, kept on its own for the creature to reuse.
+                    # Mick's one cough: a Chatterbox Turbo take trimmed to its three
+                    # clean bursts, kept on its own for the creature to reuse.
+                    takes[key] = sf.read(REFS / "mick_cough_take.wav")[0]
                     write(ROOT / "assets/audio/radio/mick_cough.wav", takes[key])
+                else:
+                    takes[key] = say(words, SPEAKERS[speaker])
             audio = takes[key]
             rows.append((round(clock, 3), text))
             pieces.append(audio)
