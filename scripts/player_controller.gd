@@ -135,6 +135,18 @@ var remote_last := Vector3.ZERO
 
 
 var drawn_at := Vector3.ZERO
+## Slows walking on ground that drags at you (water in the Salvage Run).
+var terrain_speed_scale := 1.0
+## Footstep sounds for the ground you are on, when it is not the usual (water).
+var step_sounds: Array = []
+## Heavy parts (an engine) take two: one holds it, the other helps carry.
+## Alone, you can only drag it along the ground, slowly and loudly.
+const HEAVY_PARTS := ["engine"]
+var helping_object: RigidBody3D
+var helping_holder: Node
+var helper_point := Vector3.ZERO
+var helper_seen := -10.0
+var _helper_send := 0.0
 var low_fuel_warned := false
 
 func _ready() -> void:
@@ -273,6 +285,70 @@ func _process(delta: float) -> void:
 			name_tags.erase(other)
 
 
+func is_heavy(body: Node) -> bool:
+	return body != null and String(body.get_meta("vehicle_part_type", "")) in HEAVY_PARTS
+
+
+func carry_helped() -> bool:
+	## Someone is holding the other end, close enough to share the weight.
+	return Time.get_ticks_msec() / 1000.0 - helper_seen < 0.35 and is_instance_valid(held_object) \
+		and helper_point.distance_to(hold_point.global_position) < 3.5
+
+
+func dragging_heavy() -> bool:
+	return is_instance_valid(held_object) and is_heavy(held_object) and not carry_helped()
+
+
+func _ground_below(point: Vector3) -> float:
+	var query := PhysicsRayQueryParameters3D.create(point + Vector3.UP * 0.5, point + Vector3.DOWN * 4.0, 1)
+	query.exclude = _raycast_exclusions()
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	return hit["position"].y if not hit.is_empty() else point.y - 1.0
+
+
+func _start_helping(object: RigidBody3D) -> void:
+	var world := get_tree().current_scene
+	helping_holder = world.get_node_or_null(str(object.get_meta("held_by"))) if world else null
+	if helping_holder == null:
+		return
+	helping_object = object
+	_show_tip("Carrying it with %s   ·   E  Let go" % str(helping_holder.get("player_name")))
+	tip_time = 3.0
+
+
+func _stop_helping() -> void:
+	if is_instance_valid(helping_holder) and NetworkManager.is_online():
+		helping_holder.carry_left.rpc_id(helping_holder.get_multiplayer_authority())
+	helping_object = null
+	helping_holder = null
+
+
+func _update_helping(delta: float) -> void:
+	if helping_object == null:
+		return
+	if not is_instance_valid(helping_object) or not is_instance_valid(helping_holder) or not helping_object.has_meta("held_by") \
+			or int(helping_object.get_meta("held_by")) != helping_holder.get_multiplayer_authority() \
+			or helping_object.global_position.distance_to(camera.global_position) > 3.6:
+		_stop_helping()
+		return
+	_helper_send -= delta
+	if _helper_send <= 0.0:
+		_helper_send = 0.05
+		helping_holder.carry_point.rpc_id(helping_holder.get_multiplayer_authority(), hold_point.global_position)
+
+
+@rpc("any_peer", "call_remote", "unreliable_ordered", 2)
+func carry_point(point: Vector3) -> void:
+	## On the holder's machine: where the helper's hands are.
+	helper_point = point
+	helper_seen = Time.get_ticks_msec() / 1000.0
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func carry_left() -> void:
+	helper_seen = -10.0
+
+
 func _smooth_view() -> void:
 	## Teleports snap instead of sliding across the map for a frame, and the
 	## view keeps the mouse's turn from this frame rather than the last tick's.
@@ -324,7 +400,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Z:
 			_try_sleep("in the car")
 			get_viewport().set_input_as_handled()
-		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_T:
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_T and not NetworkManager.salvage():
 			car_radio.toggle()
 			get_viewport().set_input_as_handled()
 		return
@@ -403,6 +479,9 @@ func _physics_process(delta: float) -> void:
 	var target_speed := crouch_speed if is_crouching else (sprint_speed if is_sprinting else move_speed)
 	if is_instance_valid(held_object) and not is_crouching:
 		target_speed = minf(target_speed, move_speed * 0.85)
+	if dragging_heavy():
+		target_speed = minf(target_speed, move_speed * 0.45)
+	target_speed *= terrain_speed_scale
 	if is_sprinting and Vector3(velocity.x, 0, velocity.z).length() > move_speed * 0.6:
 		vitals.sprinting(delta)
 
@@ -429,6 +508,7 @@ func _physics_process(delta: float) -> void:
 	elif global_position.y < -12.0:
 		global_position = last_safe_position + Vector3.UP
 		velocity = Vector3.ZERO
+	_update_helping(delta)
 	if controls_active:
 		_update_held_object(delta)
 		_update_spray_paint(delta)
@@ -574,6 +654,9 @@ func _toggle_grab() -> void:
 		return
 
 	var target := result.collider as RigidBody3D
+	if is_heavy(target) and target.has_meta("held_by") and int(target.get_meta("held_by")) != multiplayer.get_unique_id():
+		_start_helping(target)
+		return
 	if not _can_grab_body(target):
 		return
 
@@ -591,6 +674,8 @@ func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
 	# Smoothed like the view it is held in front of, so it does not shake.
 	held_object.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_ON
 	held_object.reset_physics_interpolation()
+	held_object.set_meta("held_by", multiplayer.get_unique_id())
+	helper_seen = -10.0
 	# Held close, so it must not shove you around.
 	add_collision_exception_with(held_object)
 	# Small things come close, into your hand; big ones stay further out.
@@ -639,6 +724,7 @@ func _restore_held_object_physics() -> void:
 		return
 
 	held_object.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_INHERIT
+	held_object.remove_meta("held_by")
 	held_object.gravity_scale = held_original_gravity_scale
 	held_object.linear_damp = held_original_linear_damp
 	held_object.angular_damp = held_original_angular_damp
@@ -651,11 +737,22 @@ func _update_held_object(delta: float) -> void:
 		return
 
 	var grabbed_point := held_object.to_global(held_local_grab_point)
-	var to_target := hold_point.global_position - grabbed_point
+	var target_point := hold_point.global_position
+	var speed_limit := grab_max_speed
+	if is_heavy(held_object):
+		grabbed_point = held_object.global_position
+		if carry_helped():
+			# Carried between the two of you.
+			target_point = (target_point + helper_point) * 0.5 + Vector3.DOWN * 0.35
+		else:
+			# Too heavy alone: it stays on the ground and drags behind you.
+			target_point = Vector3(target_point.x, _ground_below(target_point) + 0.22, target_point.z)
+			speed_limit = 1.4
+	var to_target := target_point - grabbed_point
 	var wanted_velocity := to_target * grab_follow_strength
 
-	if wanted_velocity.length() > grab_max_speed:
-		wanted_velocity = wanted_velocity.normalized() * grab_max_speed
+	if wanted_velocity.length() > speed_limit:
+		wanted_velocity = wanted_velocity.normalized() * speed_limit
 
 	var blend: float = min(grab_smoothing * delta, 1.0)
 	held_object.linear_velocity = held_object.linear_velocity.lerp(wanted_velocity, blend)
@@ -683,8 +780,10 @@ func sync_held_object_state(object_path: NodePath, is_held: bool) -> void:
 		object.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 		object.linear_velocity = Vector3.ZERO
 		object.angular_velocity = Vector3.ZERO
+		object.set_meta("held_by", get_multiplayer_authority())
 	else:
 		object.freeze = false
+		object.remove_meta("held_by")
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 2)
@@ -907,6 +1006,10 @@ func _set_mesh_overlay_recursive(node: Node, material: Material) -> void:
 func _handle_interaction() -> void:
 	if active_vehicle:
 		_exit_vehicle()
+		return
+
+	if helping_object:
+		_stop_helping()
 		return
 
 	if held_object and _try_install_vehicle_part():
@@ -1444,10 +1547,19 @@ func _interaction_text() -> String:
 		if NetworkManager.is_online() and shared_seat > 0:
 			return "Mouse  Look around   ·   E  Exit"
 		var rest := "   ·   Z  Sleep" if vitals and vitals.can_sleep() else ""
+		if NetworkManager.salvage():
+			return "C  Change camera   ·   L  Headlights   ·   E  Exit"
 		return "C  Change camera   ·   L  Headlights   ·   T  Radio   ·   E  Exit" + rest
+	if helping_object:
+		return "Carrying it together   ·   E  Let go"
 	var hit := _crosshair_hit(vehicle_interact_distance)
 	var target := hit.get("collider") as Node3D
 	var car := _vehicle_from_target(target)
+	if not is_instance_valid(held_object) and is_heavy(target) and target.has_meta("held_by") \
+			and int(target.get_meta("held_by")) != multiplayer.get_unique_id():
+		return "E  Take the other end"
+	if dragging_heavy() and car == null:
+		return "Too heavy to lift alone: someone can take the other end   ·   E  Drop"
 	if is_instance_valid(held_object):
 		if car and held_object.has_meta("vehicle_part_type") and held_object.get_meta("vehicle_part_type") != "aux_battery":
 			var reason: String = car.install_blocker(held_object)
@@ -1674,9 +1786,10 @@ func _update_steps(delta: float, crouching: bool, sprinting: bool) -> void:
 		var count := floori(step_travel / stride)
 		if count != last_step:
 			last_step = count
-			footstep.stream = STEPS[randi() % STEPS.size()]
+			var sounds: Array = step_sounds if not step_sounds.is_empty() else STEPS
+			footstep.stream = sounds[randi() % sounds.size()]
 			footstep.pitch_scale = randf_range(0.9, 1.08)
-			footstep.volume_db = -19.0 if crouching else (-8.0 if sprinting else -13.0)
+			footstep.volume_db = (-19.0 if crouching else (-8.0 if sprinting else -13.0)) + (4.0 if not step_sounds.is_empty() else 0.0)
 			footstep.play()
 	if is_multiplayer_authority():
 		if on_floor and not was_on_floor:

@@ -74,6 +74,7 @@ func _build_ui() -> void:
 	items.add_child(settings_button)
 	tutorial_button = Style.button("Show tutorial again", 24)
 	tutorial_button.pressed.connect(_toggle_tutorial)
+	tutorial_button.visible = not NetworkManager.salvage()
 	items.add_child(tutorial_button)
 	var main_menu := Style.button("Main menu" if NetworkManager.is_online() else "Save & main menu", 24)
 	main_menu.pressed.connect(_return_to_menu)
@@ -156,7 +157,7 @@ func _build_tutorial() -> void:
 	tutorial = Control.new()
 	tutorial.hide()
 	add_child(tutorial)
-	if not GameSettings.tutorial_done:
+	if not GameSettings.tutorial_done and not NetworkManager.salvage():
 		_start_guide.call_deferred()
 
 

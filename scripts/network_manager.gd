@@ -19,6 +19,10 @@ var players: Dictionary = {}
 var discovered_lobbies: Dictionary = {}
 var game_in_progress := false
 var kicked_peers: Dictionary = {}
+## Which story the session plays: "road" (KM0) or "salvage" (the co-op
+## Salvage Run in the flooded town).
+var story := "road"
+const STORY_SCENES := {"road": "res://scenes/main.tscn", "salvage": "res://scenes/salvage.tscn"}
 
 var _discovery_listener := PacketPeerUDP.new()
 var _discovery_broadcaster := PacketPeerUDP.new()
@@ -88,6 +92,7 @@ func leave_lobby() -> void:
 		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	is_host = false
 	game_in_progress = false
+	story = "road"
 	kicked_peers.clear()
 	lobby_name = ""
 	players.clear()
@@ -121,19 +126,24 @@ func can_host_start() -> bool:
 	return true
 
 
-func start_game() -> void:
+func start_game(story_name := "road") -> void:
 	if not can_host_start():
 		return
 	multiplayer.multiplayer_peer.refuse_new_connections = true
-	begin_game.rpc(players.duplicate(true))
+	begin_game.rpc(players.duplicate(true), story_name)
 
 
 @rpc("authority", "call_local", "reliable")
-func begin_game(roster: Dictionary) -> void:
+func begin_game(roster: Dictionary, story_name := "road") -> void:
 	players = roster
 	game_in_progress = true
+	story = story_name if STORY_SCENES.has(story_name) else "road"
 	game_start_requested.emit()
-	get_tree().change_scene_to_file("res://scenes/main.tscn")
+	get_tree().change_scene_to_file(STORY_SCENES[story])
+
+
+func salvage() -> bool:
+	return story == "salvage"
 
 
 @rpc("any_peer", "call_remote", "reliable")

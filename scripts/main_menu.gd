@@ -9,6 +9,7 @@ var name_panel: PanelContainer
 
 func _ready() -> void:
 	get_tree().paused = false
+	NetworkManager.story = "road"
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	GameSettings.apply_settings()
 	resized.connect(_apply_menu_scale)

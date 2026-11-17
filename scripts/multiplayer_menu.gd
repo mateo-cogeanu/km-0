@@ -2,6 +2,7 @@ extends Control
 
 const Style := preload("res://scripts/menu_style.gd")
 
+var salvage_button: Button
 var lobby_list: ItemList
 var lobby_name_edit: LineEdit
 var status_label: Label
@@ -146,6 +147,10 @@ func _build_room() -> void:
 	play_button = Style.button("Start drive")
 	play_button.pressed.connect(NetworkManager.start_game)
 	room_panel.add_child(play_button)
+	salvage_button = Style.button("Start the Salvage Run")
+	salvage_button.tooltip_text = "A separate co-op story: strip cars in a flooded town for a scrap buyer. Something in the water hunts by sound."
+	salvage_button.pressed.connect(NetworkManager.start_game.bind("salvage"))
+	room_panel.add_child(salvage_button)
 
 
 func _add_field(parent: Control, field_name: String, placeholder: String) -> LineEdit:
@@ -265,6 +270,8 @@ func _refresh_room() -> void:
 	ready_button.text = "Unready" if is_ready else "Ready"
 	play_button.visible = host
 	play_button.disabled = not NetworkManager.can_host_start()
+	salvage_button.visible = host
+	salvage_button.disabled = play_button.disabled
 	if pending:
 		launch_hint.text = "You can ready up when the lobby connects."
 	elif host:
