@@ -140,3 +140,20 @@ for i in range(count):
         kettle[i] += hiss_hi[i] * 0.25 * whistle
     kettle[i] *= min(1.0, (9.0 - t) / 0.3)
 write("kettle", kettle, 0.5)
+
+# A house fire: a low roar with crackles and the odd sharp pop. Loops.
+FIRE_LOOP = 6.0
+count = int(FIRE_LOOP * RATE)
+roar = looped_noise(count, 77, 260)
+hiss = looped_noise(count, 78, 2600, passes=1)
+fire = [roar[i] * 7.0 + hiss[i] * 1.2 for i in range(count)]
+rng = Random(79)
+for _ in range(int(FIRE_LOOP * 26)):
+    at = rng.randrange(count)
+    size = rng.random() ** 3
+    length = int((0.004 + 0.02 * size) * RATE)
+    pop = noise(length, rng.randrange(1 << 30))
+    for j in range(length):
+        k = (at + j) % count
+        fire[k] += pop[j] * (0.4 + 2.6 * size) * exp(-j / (0.003 * RATE + size * 0.01 * RATE))
+write("fire_crackle", fire, 0.55)

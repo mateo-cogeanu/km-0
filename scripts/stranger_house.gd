@@ -149,6 +149,12 @@ func _build_cabin() -> void:
 	scratched.position = Vector3(-0.95, 0.812, -1.0)
 	scratched.rotation.y = 0.5
 	add_child(scratched)
+	# Len came through here too, and left the last piece of the way out.
+	var folded := preload("res://scripts/note_item.gd").new()
+	folded.note_id = "len_page_cabin"
+	folded.position = Vector3(1.75, 0.395, -1.4)
+	folded.rotation.y = -0.3
+	add_child(folded)
 	Shapes.box(self, "RadioCase", Vector3(0.34, 0.15, 0.2), Vector3(-1.45, 0.89, -1.35), Shapes.material(Color("#343a37"), 0.2))
 	Shapes.box(self, "RadioDial", Vector3(0.14, 0.025, 0.01), Vector3(-1.5, 0.92, -1.245), glow)
 	var bulb := Shapes.material(Color("#fff0d0"))

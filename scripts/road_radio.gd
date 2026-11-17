@@ -208,6 +208,8 @@ func _process(_delta: float) -> void:
 	var drift := pow(maxf(0.0, sin(elapsed * 0.83 + broadcast) * sin(elapsed * 0.31 + broadcast * 2.0)), 3.0)
 	voice.volume_db = VOICE_VOLUME - drift * 9.0 + sin(elapsed * 23.0) * drift * 1.5
 	var playback := voice.get_playback_position()
+	if playback > RECORDINGS[broadcast].get_length() * 0.6:
+		mark_heard(broadcast)
 	var captions: Array = LINES[broadcast]
 	var line := "Carrier signal…"
 	for entry: Array in captions:
@@ -267,6 +269,14 @@ func stop_listening() -> void:
 func _exit_tree() -> void:
 	if is_instance_valid(listener):
 		listener.clear_radio_caption(self)
+
+
+static func mark_heard(which: int) -> void:
+	## Remembered with the trip: the road ends only after it has been listened to.
+	var story: Dictionary = preload("res://scripts/road_end_house.gd").story
+	var heard: Dictionary = story.get("heard", {})
+	heard[str(which)] = true
+	story["heard"] = heard
 
 
 func _carrier_sound() -> AudioStreamWAV:

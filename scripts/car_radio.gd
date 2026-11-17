@@ -96,6 +96,8 @@ func _process(delta: float) -> void:
 			voice.play()
 		return
 	var at := voice.get_playback_position()
+	if at > RoadRadio.RECORDINGS[playing].get_length() * 0.6:
+		RoadRadio.mark_heard(playing)
 	var line := "Carrier signal…"
 	for entry: Array in RoadRadio.LINES[playing]:
 		if at >= entry[0]:

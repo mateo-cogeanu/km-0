@@ -7,8 +7,19 @@ const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const Dread := preload("res://scripts/road_dread.gd")
 const Weather := preload("res://scripts/weather.gd")
 const StrangerHouse := preload("res://scripts/stranger_house.gd")
+const CarModel := preload("res://scripts/compact_car_model.gd")
+const FUEL := preload("res://scenes/fuel_canister.tscn")
+const NoteItem := preload("res://scripts/note_item.gd")
 const ROAD_END := 9.0
-const HOUSE_APPROACH := -5200.0
+## The road only ends once it has had a good listen to you, and you to it: the
+## broadcasts at HEARD_NEEDED different places, and NIGHTS_NEEDED nights out
+## here. Then the house is HOUSE_AHEAD metres on, but never nearer than
+## HOUSE_NEAREST. Until then the road goes on.
+const HOUSE_NEAREST := -5200.0
+const HOUSE_AHEAD := 1600.0
+const HEARD_NEEDED := 4
+const NIGHTS_NEEDED := 2
+const NO_HOUSE := -1.0e9
 const STOP_BLOCK := 12
 const GROUND_TILE_SIZE := 160.0
 const GROUND_DEPTH := 8.0
@@ -43,6 +54,8 @@ var yellow := Shapes.material(Color("#cfa247"))
 var desert_ground: MeshInstance3D
 var terrain := Terrain.new()
 var stream_stops := false
+var furthest := 0.0
+var was_night := false
 var pole_mesh := CylinderMesh.new()
 var arm_mesh := BoxMesh.new()
 var wire_mesh := CylinderMesh.new()
@@ -94,11 +107,52 @@ func begin_streaming() -> void:
 	_update_segments()
 
 
+static func house_approach() -> float:
+	## Where the pavement runs out before the house, or NO_HOUSE while the road
+	## still goes on.
+	return RoadEndHouse.story.get("house_z", NO_HOUSE)
+
+
+func _watch_for_the_house() -> void:
+	var story := RoadEndHouse.story
+	if story.has("house_z"):
+		return
+	# Trips from before this came in, and anyone who has been there already.
+	if RoadEndHouse.seen:
+		story["house_z"] = HOUSE_NEAREST
+		return
+	var cycle := get_tree().current_scene.get_node_or_null("DayNightCycle") if get_tree().current_scene else null
+	if cycle and "daylight" in cycle:
+		var night: bool = cycle.daylight < 0.12
+		if night and not was_night:
+			story["nights"] = int(story.get("nights", 0)) + 1
+		was_night = night
+	var heard: Dictionary = story.get("heard", {})
+	if heard.size() < HEARD_NEEDED or int(story.get("nights", 0)) < NIGHTS_NEEDED:
+		return
+	story["house_z"] = minf(HOUSE_NEAREST, furthest - HOUSE_AHEAD)
+	# Any stretch of road already built where the house now goes is rebuilt.
+	var at := floori(float(story["house_z"]) / segment_length)
+	for index in range(at - 2, at + 2):
+		if segments.has(index):
+			(segments[index] as Node3D).queue_free()
+			segments.erase(index)
+	_update_segments()
+	var player := get_tree().get_first_node_in_group("local_player")
+	if player:
+		player.tip_override = "[Every radio, at once, very faint] ...the kettle's on. Not far now."
+		player.tip_time = 7.0
+
+
 func _process(delta: float) -> void:
 	update_timer -= delta
 	if update_timer > 0.0:
 		return
 	update_timer = 0.18
+	var player := get_tree().get_first_node_in_group("local_player") as Node3D
+	if player:
+		furthest = minf(furthest, player.global_position.z)
+	_watch_for_the_house()
 	_update_segments()
 
 
@@ -205,20 +259,21 @@ func _create_segment(index: int) -> Node3D:
 	var segment_start := index * segment_length
 	segment.position.z = segment_start
 	var end := minf(segment_start + segment_length, ROAD_END)
-	var start := maxf(segment_start, HOUSE_APPROACH)
+	var approach := house_approach()
+	var start := maxf(segment_start, approach)
 	var stop_side := _stop_side(index) if index < -1 else 0.0
 	terrain.populate(segment, segment_start, segment_length, index, absi(index) <= 1, stop_side, _road_x)
 	_add_power_line(segment, segment_start, segment_start + segment_length)
 	if start >= end:
 		return segment
-	if start == HOUSE_APPROACH:
+	if start == approach:
 		_build_house_turnoff(segment)
 	var half := road_width * 0.5
 	_add_strip(segment, "Asphalt", start, end, -half, half, 0.0, road_material, "Road")
 	_add_strip(segment, "GravelLeft", start, end, -half - shoulder_width, -half, -0.009, gravel, "Dirt")
 	_add_strip(segment, "GravelRight", start, end, half, half + shoulder_width, -0.009, gravel, "Dirt")
 	var marking_end := end - 3.0 if end == ROAD_END else end
-	if start == HOUSE_APPROACH:
+	if start == approach:
 		_add_strip(segment, "CrumbledFarEnd", start - 0.46, start + 0.10, -half, half, -0.012, gravel)
 	for side in [-1.0, 1.0]:
 		var edge: float = side * (half - 0.16)
@@ -233,7 +288,7 @@ func _create_segment(index: int) -> Node3D:
 
 
 func _has_pole(z: float) -> bool:
-	if z > POLE_FIRST_Z or z < HOUSE_APPROACH + 30.0:
+	if z > POLE_FIRST_Z or z < house_approach() + 30.0:
 		return false
 	# Leave room for any stop on the poles' side of the road.
 	var near := floori(z / segment_length)
@@ -307,15 +362,65 @@ func _build_house_turnoff(segment: Node3D) -> void:
 	var house := RoadEndHouse.new()
 	house.name = "RoadEndHouse"
 	segment.add_child(house)
-	var at := _sample(HOUSE_APPROACH + 5.0, 13.0) - segment.position
+	var at := _sample(house_approach() + 5.0, 13.0) - segment.position
 	house.position = Vector3(at.x, 0.0, at.z)
 	house.rotation.y = -PI * 0.5
 	var entry := house.position + Vector3.LEFT * 6.1
-	var drive_start := _sample(HOUSE_APPROACH + 8.0, road_width * 0.5 + 0.6) - segment.position
+	var drive_start := _sample(house_approach() + 8.0, road_width * 0.5 + 0.6) - segment.position
 	var drive := Shapes.box(segment, "HouseTurnoff", Vector3(3.1, 0.04, drive_start.distance_to(entry) + 2.0),
 		(drive_start + entry) * 0.5, gravel, true)
 	drive.position.y = -0.04
 	drive.rotation.y = atan2(entry.x - drive_start.x, entry.z - drive_start.z)
+	_add_county_car(segment, drive_start, entry)
+
+
+func _add_county_car(segment: Node3D, drive_start: Vector3, entry: Vector3) -> void:
+	## The County dispatcher drove out here, parked at the turnoff and went in.
+	## Her note is on the seat and there is petrol by the boot.
+	var county := Node3D.new()
+	county.name = "CountyCar"
+	segment.add_child(county)
+	CarModel.new(Color("#d8d5cb")).build(county, CarModel.SEDAN, false)
+	var heading := entry - drive_start
+	county.position = drive_start.lerp(entry, 0.35) + heading.normalized().cross(Vector3.UP) * 3.2
+	county.position.y = -0.02
+	county.rotation.y = atan2(-heading.x, -heading.z) + 0.25
+	var door := county.get_node_or_null("FL_Door") as Node3D
+	if door:
+		door.rotation.y = -1.0
+	for side in [-1.0, 1.0]:
+		var tag := Label3D.new()
+		tag.text = "COUNTY ROADS"
+		tag.font_size = 40
+		tag.pixel_size = 0.004
+		tag.modulate = Color(0.12, 0.2, 0.42)
+		tag.outline_size = 0
+		county.add_child(tag)
+		tag.position = Vector3(side * 0.835, 0.72, 0.5)
+		tag.rotation.y = side * PI * 0.5
+	var body := StaticBody3D.new()
+	county.add_child(body)
+	var hitbox := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(1.7, 1.35, 4.3)
+	hitbox.shape = box
+	body.add_child(hitbox)
+	body.position = Vector3(0, 0.7, 0)
+	var note := NoteItem.new()
+	note.note_id = "county_car"
+	county.add_child(note)
+	note.position = Vector3(0.4, 0.62, 0.15)
+	note.rotation.y = 0.4
+	# Only the first time she is found: the can stays wherever you take it.
+	if not RoadEndHouse.story.get("county_can", false):
+		RoadEndHouse.story["county_can"] = true
+		var can := FUEL.instantiate() as RigidBody3D
+		can.name = "CountyCan"
+		can.fuel_amount = 16.0
+		# Kept on the road itself, not this stretch of it, so it is still there
+		# after you drive off and come back.
+		add_child(can)
+		can.global_transform = county.global_transform * Transform3D(Basis(), Vector3(0.9, 0.3, 2.6))
 
 
 func _add_strip(segment: Node3D, title: String, from_z: float, to_z: float, left: float, right: float, lift: float, material: Material, surface_group: String = "") -> void:
@@ -366,7 +471,7 @@ func _stop_side(index: int) -> float:
 
 
 func _update_stop(index: int, tracking: Vector3, segment: Node3D, players: Array[Node]) -> void:
-	if (index + 0.5) * segment_length <= HOUSE_APPROACH or not _has_stop(index):
+	if (index + 0.5) * segment_length <= house_approach() or not _has_stop(index):
 		return
 	var z := (index + 0.5) * segment_length
 	var side := _stop_side(index)

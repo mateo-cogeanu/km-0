@@ -10,9 +10,37 @@ const Notes := preload("res://scripts/story_notes.gd")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const Style := preload("res://scripts/menu_style.gd")
 const Cinematic := preload("res://scripts/ending_cinematic.gd")
-## How far back past the start of the road the calls come, and where you are free.
-const CALL_AT := [1400.0, 1700.0]
-const FREE_AT := 1950.0
+## The way out, for someone with all of Len's pages who never went into the
+## house: back past the start and on into the desert for twelve kilometres.
+## Your own voice calls after you the whole way, a storm comes in, and halfway
+## out a wheel comes off. Then it comes for you, and you have until it arrives
+## to put the wheel back on.
+const PAGES := ["len_last", "len_page_tower", "len_page_cabin"]
+const CALLS := [
+	[1400.0, "res://assets/audio/ending/escape_wait.wav", 1.0],
+	[1700.0, "res://assets/audio/ending/escape_back.wav", 1.0],
+	[2700.0, "res://assets/audio/ending/anybody.wav", 1.0],
+	[4200.0, "res://assets/audio/ending/hello.wav", 0.94],
+	[5600.0, "res://assets/audio/ending/escape_wait.wav", 0.9],
+	[8200.0, "res://assets/audio/radio/you.wav", 1.0],
+	[9800.0, "res://assets/audio/ending/escape_back.wav", 0.86],
+	[11000.0, "res://assets/audio/radio/mick_cough.wav", 1.0],
+]
+const STORM_AT := 3200.0
+const BREAKDOWN_AT := 6300.0
+const FREE_AT := 12000.0
+## How far behind it starts when the wheel comes off, and how fast it comes.
+const CHASE_START := 140.0
+const CHASE_SPEED := 3.2
+const CHASE_SPEED_DRIVING := 13.0
+const CAUGHT_AT := 2.2
+const STEP_SOUND := preload("res://assets/audio/ending/step.wav")
+const Creature := preload("res://scripts/road_creature.gd")
+const CLICKS := preload("res://assets/audio/ending/rapid_clicks.wav")
+const RATTLE := preload("res://assets/audio/ending/throat_rattle.wav")
+const BREATH := preload("res://assets/audio/ending/breath_close.wav")
+const HIT := preload("res://assets/audio/ending/hit.wav")
+const MICK_COUGH := preload("res://assets/audio/radio/mick_cough.wav")
 const STEPS := [
 	preload("res://assets/audio/player/step_1.wav"), preload("res://assets/audio/player/step_2.wav"),
 	preload("res://assets/audio/player/step_3.wav"), preload("res://assets/audio/player/step_4.wav"),
@@ -31,6 +59,17 @@ var stalker_from := Vector3.ZERO
 var calls_made := 0
 var escaping := false
 var caller: AudioStreamPlayer3D
+var stormed := false
+var broke_down := false
+var chasing := false
+var chaser: Node3D
+var chaser_step := 0.0
+var chaser_breath: AudioStreamPlayer3D
+var chaser_feet: AudioStreamPlayer3D
+var chaser_clicks: AudioStreamPlayer3D
+var gait := 0.0
+var chase_clock := 0.0
+var caught := false
 
 
 func _ready() -> void:
@@ -154,29 +193,221 @@ func _inside_building(player: Node3D) -> bool:
 
 
 
+func way_out_open() -> bool:
+	if RoadEndHouse.seen or RoadEndHouse.story.get("caught", false):
+		return false
+	for page: String in PAGES:
+		if not Notes.read.has(page):
+			return false
+	return true
+
+
 func _way_out(player: Node3D) -> void:
-	## Len's last page: go back past where the road starts and keep going,
-	## whatever you hear behind you. Only for someone who read it, and who never
-	## went into the house.
-	if escaping or RoadEndHouse.seen or not Notes.read.has("len_last"):
+	## Len's pages, put together: go back past where the road starts and keep
+	## going, whatever you hear behind you.
+	if escaping or caught or not way_out_open():
 		return
 	var out := player.global_position.z
-	if calls_made < CALL_AT.size() and out > CALL_AT[calls_made]:
+	if calls_made < CALLS.size() and out > CALLS[calls_made][0]:
 		if caller == null:
 			caller = AudioStreamPlayer3D.new()
 			caller.unit_size = 6.0
-			caller.max_distance = 80.0
+			caller.max_distance = 90.0
 			caller.volume_db = 3.0
 			caller.bus = GameSettings.voice_bus()
 			add_child(caller)
-		var stream_path: String = ["res://assets/audio/ending/escape_wait.wav", "res://assets/audio/ending/escape_back.wav"][calls_made]
-		caller.stream = load(stream_path)
+		var call: Array = CALLS[calls_made]
+		caller.stream = load(call[1])
+		caller.pitch_scale = call[2]
 		# Behind you, back the way you came.
-		caller.global_position = player.global_position + Vector3(0, 1.0, -22.0)
+		caller.global_position = player.global_position + Vector3(randf_range(-8.0, 8.0), 1.0, -24.0)
 		caller.play()
 		calls_made += 1
+	if out > STORM_AT and not stormed:
+		stormed = true
+		var weather := get_parent().get_node_or_null("Weather") if get_parent() else null
+		if weather and weather.has_method("start_storm"):
+			weather.start_storm(220.0)
+	if out > BREAKDOWN_AT and not broke_down:
+		_break_down(player)
+	if chasing:
+		_chase(player, get_process_delta_time())
 	if out > FREE_AT:
+		_stop_chase()
 		_escape(player)
+
+
+func _break_down(player: Node3D) -> void:
+	## Halfway out, a front wheel comes off. On foot, it simply starts coming.
+	broke_down = true
+	var car: Node3D = player.active_vehicle if is_instance_valid(player.active_vehicle) else null
+	if car and "removable_parts" in car and car.removable_parts.has("wheel_fl"):
+		var area: Area3D = car.removable_parts["wheel_fl"].get("area")
+		var wheel: RigidBody3D = car.remove_installed_part(area, true) if area else null
+		if wheel:
+			wheel.apply_central_impulse(car.global_basis.x * -6.0 + Vector3.UP * 2.0)
+		player.tip_override = "A wheel has come off. Get out and put it back on. Quickly."
+		player.tip_time = 8.0
+	_start_chase(player)
+
+
+func _start_chase(player: Node3D) -> void:
+	## The thing from the house, out in the open, coming on all fours.
+	chasing = true
+	chaser = Creature.new()
+	chaser.name = "Chaser"
+	add_child(chaser)
+	chaser.jitter = 0.7
+	chaser.tilt = 0.35
+	chaser.elbow_flip[0] = 0.65
+	chaser.elbow_flip[1] = 0.25
+	var behind: Vector3 = player.global_position + Vector3(0, 0, -CHASE_START)
+	chaser.global_position = Vector3(behind.x, _ground(behind.z), behind.z)
+	chaser_feet = AudioStreamPlayer3D.new()
+	chaser_feet.stream = STEP_SOUND
+	chaser_feet.unit_size = 5.0
+	chaser_feet.volume_db = -1.0
+	chaser.add_child(chaser_feet)
+	chaser_clicks = AudioStreamPlayer3D.new()
+	chaser_clicks.stream = CLICKS
+	chaser_clicks.unit_size = 6.0
+	chaser_clicks.volume_db = -4.0
+	chaser.add_child(chaser_clicks)
+	chaser_breath = AudioStreamPlayer3D.new()
+	chaser_breath.stream = RATTLE
+	chaser_breath.unit_size = 5.0
+	chaser.add_child(chaser_breath)
+	chaser_breath.position.y = 0.6
+
+
+func _ground(z: float) -> float:
+	## The desert floor past the start of the road, or the road itself.
+	return road._sample(z, 0.0).y if road and z < 9.0 else -0.041
+
+
+func _chase(player: Node3D, delta: float) -> void:
+	if chaser == null:
+		return
+	chase_clock += delta
+	var target := player.global_position
+	var flat := Vector3(target.x - chaser.global_position.x, 0, target.z - chaser.global_position.z)
+	var distance := flat.length()
+	var driving: bool = is_instance_valid(player.active_vehicle) and player.active_vehicle.linear_velocity.length() > 6.0
+	var speed := CHASE_SPEED_DRIVING if driving else CHASE_SPEED
+	# It speeds up the closer it gets.
+	speed *= 1.0 + clampf((40.0 - distance) / 40.0, 0.0, 1.0) * 0.8
+	var step := flat.normalized() * minf(speed * delta, distance)
+	chaser.global_position += step
+	chaser.global_position.y = _ground(chaser.global_position.z)
+	chaser.rotation.y = lerp_angle(chaser.rotation.y, atan2(flat.x, flat.z), 1.0 - exp(-8.0 * delta))
+	_gallop(player, speed, delta)
+	if distance < 70.0 and not chaser_clicks.playing:
+		chaser_clicks.pitch_scale = randf_range(0.85, 1.15)
+		chaser_clicks.play()
+	if distance < 18.0 and not chaser_breath.playing:
+		chaser_breath.play()
+	if distance < CAUGHT_AT:
+		_caught(player)
+	elif distance > CHASE_START * 3.0:
+		# Left behind. It will not catch a car that keeps going.
+		_stop_chase()
+
+
+func _gallop(player: Node3D, speed: float, delta: float) -> void:
+	## A broken, bounding run on all fours: hands and feet land in an uneven
+	## rhythm, the back pitches with each bound, and the head stays fixed on you.
+	var stride := 1.5 + speed * 0.06
+	var before := gait
+	gait = fposmod(gait + speed * delta / stride, 1.0)
+	var reach := clampf(speed / 6.0, 0.25, 0.75) * 0.5
+	# Front pair a little apart, the back pair half a stride behind them.
+	var limbs := [[0.0, -0.24, 0.62], [0.11, 0.24, 0.62], [0.5, -0.2, -0.36], [0.63, 0.2, -0.36]]
+	var points: Array[Vector3] = []
+	for limb: Array in limbs:
+		var phase := fposmod(gait + limb[0], 1.0)
+		var along: float
+		var lift := 0.0
+		if phase < 0.42:
+			along = lerpf(reach, -reach, phase / 0.42)
+		else:
+			var swing := (phase - 0.42) / 0.58
+			along = lerpf(-reach, reach, swing)
+			lift = sin(swing * PI) * (0.18 + reach * 0.4)
+		points.append(Vector3(limb[1], lift, limb[2] + along))
+		# A slap on the ground as each one lands.
+		if fposmod(before + limb[0], 1.0) > 0.9 and phase < 0.1 and speed > 2.0:
+			chaser_feet.pitch_scale = randf_range(0.55, 0.8)
+			chaser_feet.play()
+	var bound := sin(gait * TAU)
+	var shoulders := Vector3(0, 0.62 + bound * 0.07 * reach * 2.0, 0.38)
+	var pelvis := Vector3(0, 0.56 - bound * 0.06 * reach * 2.0, -0.36)
+	var eye: Vector3 = chaser.to_local(player.camera.global_position) if "camera" in player else Vector3(0, 1.6, 4)
+	var palms: Array[Vector3] = [points[0], points[1]]
+	var feet: Array[Vector3] = [points[2], points[3]]
+	var up: Array[Vector3] = [Vector3.UP, Vector3.UP]
+	chaser.pose_contacts(shoulders, pelvis, eye, palms, up, feet, chase_clock, 0.0, up)
+	chaser.set_eyes(5.0, 1.0)
+
+
+func PlayerBodyFeet() -> float:
+	return 1.025
+
+
+func _stop_chase() -> void:
+	chasing = false
+	if chaser:
+		chaser.queue_free()
+		chaser = null
+
+
+func _caught(player: Node3D) -> void:
+	## It caught up. You come to at the workshop, and you are not you any more:
+	## the way out is closed, and the radio will soon have a new voice on it.
+	caught = true
+	_stop_chase()
+	RoadEndHouse.story["caught"] = true
+	RoadEndHouse.seen = true
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+	var black := ColorRect.new()
+	black.color = Color.BLACK
+	black.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(black)
+	black.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var hit := AudioStreamPlayer.new()
+	hit.stream = HIT
+	hit.volume_db = -2.0 if not GameSettings.reduce_scares else -14.0
+	layer.add_child(hit)
+	hit.play()
+	var words := Style.label("It caught up.", roundi(34 * GameSettings.ui_scale))
+	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	words.add_theme_color_override("font_color", Color("#c9c2b4"))
+	words.modulate.a = 0.0
+	layer.add_child(words)
+	words.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	words.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var steps := create_tween()
+	steps.tween_interval(1.6)
+	steps.tween_property(words, "modulate:a", 1.0, 1.5)
+	steps.tween_interval(2.5)
+	steps.tween_callback(func() -> void:
+		if is_instance_valid(player.active_vehicle) and player.has_method("_exit_vehicle"):
+			player._exit_vehicle()
+		if player.held_object and player.has_method("_drop_held_object"):
+			player._drop_held_object()
+		var vitals: Node = player.vitals if "vitals" in player else null
+		var home: Vector3 = vitals.spawn_point if vitals else Vector3(0, 1.2, 0)
+		player.global_position = home
+		player.velocity = Vector3.ZERO
+		var cough := AudioStreamPlayer.new()
+		cough.stream = MICK_COUGH
+		cough.bus = GameSettings.voice_bus()
+		layer.add_child(cough)
+		cough.play())
+	steps.tween_property(words, "modulate:a", 0.0, 1.0)
+	steps.tween_property(black, "color:a", 0.0, 2.5)
+	steps.tween_callback(layer.queue_free)
 
 
 func _escape(player: Node3D) -> void:

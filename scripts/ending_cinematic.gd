@@ -27,6 +27,8 @@ const GRAVEL := preload("res://assets/audio/road/gravel.wav")
 const BROADCAST := preload("res://assets/audio/radio/you.wav")
 const FLICKER := preload("res://assets/audio/ending/flicker.wav")
 const DOOR_LATCH := preload("res://assets/audio/vehicle/door_latch.wav")
+const HouseFire := preload("res://scripts/house_fire.gd")
+const HELLO := preload("res://assets/audio/ending/hello.wav")
 const MICK_COUGH := preload("res://assets/audio/radio/mick_cough.wav")
 const CRACK := preload("res://assets/audio/ending/crack.wav")
 const TORCH_CLICK := preload("res://assets/audio/player/flashlight_click.wav")
@@ -100,6 +102,7 @@ func _ready() -> void:
 	viewport = SubViewport.new()
 	viewport.own_world_3d = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.audio_listener_enable_3d = true
 	viewport.msaa_3d = Viewport.MSAA_DISABLED if GameSettings.low_end else Viewport.MSAA_4X
 	viewport.positional_shadow_atlas_size = 4096
 	viewport.positional_shadow_atlas_quad_0 = Viewport.SHADOW_ATLAS_QUADRANT_SUBDIV_1
@@ -122,6 +125,8 @@ func _ready() -> void:
 			_build_free()
 		"house":
 			_build_house_ending()
+		"burn":
+			_build_burn()
 		_:
 			_build_replaced()
 	# The game behind stops drawing and stops making sound.
@@ -272,6 +277,8 @@ func _update(t: float, delta: float) -> void:
 			_animate_free(t, delta)
 		"house":
 			_animate_house(t, delta)
+		"burn":
+			_animate_burn(t, delta)
 		_:
 			_animate_replaced(t, delta)
 	var index := 0
@@ -1342,3 +1349,130 @@ func _shot_into_sun(s: float) -> void:
 	var follow := start + 11.0 - FREE_SPEED * s + 0.5 * 0.45 * minf(s, 26.0) * minf(s, 26.0)
 	var from := Vector3(-1.8 - 1.5 * u, 1.7 + 6.0 * _ease(u), follow)
 	_aim(from, car.global_position + Vector3(0, 0.9 - 0.4 * u, -8.0 - 20.0 * u))
+
+
+# Shared: what the thing looks like when you can see it whole ---------------------
+
+static func creature_figure() -> Node3D:
+	## A black, too-thin figure: long limbs, elbows and knees bent the wrong way,
+	## head cocked. Seen against fire or sky.
+	var figure := Node3D.new()
+	figure.name = "Thing"
+	var ink := StandardMaterial3D.new()
+	ink.albedo_color = Color(0.01, 0.008, 0.008)
+	ink.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for limb: Array in [
+			[Vector3(0, 0.95, 0), Vector3(0, 1.75, 0.04), 0.12],
+			[Vector3(0, 1.75, 0.04), Vector3(0.04, 2.0, -0.02), 0.04],
+			[Vector3(-0.11, 0.95, 0), Vector3(-0.15, 0.48, 0.14), 0.055],
+			[Vector3(-0.15, 0.48, 0.14), Vector3(-0.17, 0.0, -0.02), 0.045],
+			[Vector3(0.11, 0.95, 0), Vector3(0.15, 0.48, 0.14), 0.055],
+			[Vector3(0.15, 0.48, 0.14), Vector3(0.17, 0.0, -0.02), 0.045],
+			[Vector3(-0.08, 1.72, 0), Vector3(-0.27, 1.7, 0.02), 0.045],
+			[Vector3(-0.27, 1.7, 0.02), Vector3(-0.4, 1.18, 0.14), 0.035],
+			[Vector3(-0.4, 1.18, 0.14), Vector3(-0.37, 0.55, -0.04), 0.03],
+			[Vector3(0.08, 1.72, 0), Vector3(0.27, 1.7, 0.02), 0.045],
+			[Vector3(0.27, 1.7, 0.02), Vector3(0.41, 1.2, 0.14), 0.035],
+			[Vector3(0.41, 1.2, 0.14), Vector3(0.39, 0.57, -0.04), 0.03]]:
+		var piece := Shapes.tube(figure, "Limb", limb[0], limb[1], limb[2], ink)
+		piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var head := MeshInstance3D.new()
+	var skull := SphereMesh.new()
+	skull.radius = 0.11
+	skull.height = 0.22
+	head.mesh = skull
+	head.material_override = ink
+	figure.add_child(head)
+	head.position = Vector3(0.13, 2.12, -0.02)
+	head.rotation.z = -0.75
+	head.scale = Vector3(0.9, 1.6, 0.95)
+	return figure
+
+
+# Burn it: the house goes up, and the sun comes up -----------------------------------
+
+var fire: Node3D
+var burn_sun: DirectionalLight3D
+var radio_crackled := false
+
+
+func _build_burn() -> void:
+	_environment(true)
+	sky_material.set_shader_parameter("moon_dir", Vector3(0.55, 0.32, 0.77))
+	sky_material.set_shader_parameter("sun_dir", Vector3(0.07, 0.035, -1.0))
+	_celestial(Vector3(0.55, 0.32, 0.77), Color(0.5, 0.6, 0.9), 0.2)
+	burn_sun = _celestial(Vector3(0.07, 0.06, -1.0), Color(1.0, 0.7, 0.45), 0.0)
+	env.volumetric_fog_density = 0.012
+	_desert(-160.0, 420.0)
+	_road(9.0, 400.0)
+	_scrub_near([Vector3(5.6, 0, 27), Vector3(-5.6, 0, 24), Vector3(6.2, 0, 46), Vector3(-6.0, 0, 64)], 44)
+	house = _house(false)
+	for lamp in house.lamps:
+		lamp.visible = false
+	porch_lamp.visible = false
+	porch_glass.emission_energy_multiplier = 0.0
+	# Scorched: every board darker.
+	for mesh: MeshInstance3D in house.find_children("*", "MeshInstance3D", true, false):
+		var finish := mesh.material_override as StandardMaterial3D
+		if finish:
+			var charred := finish.duplicate() as StandardMaterial3D
+			charred.albedo_color = finish.albedo_color.darkened(0.6)
+			mesh.material_override = charred
+	fire = HouseFire.new()
+	house.add_child(fire)
+	fire.position = Vector3.ZERO
+	fire.set_heat(1.0)
+	car = _make_car(Color("#7e3830"), CarModel.SEDAN)
+	car.position = Vector3(0.9, 0, 20.0)
+	car.rotation.y = -0.1
+	for beam in car_lights:
+		beam.light_energy = 0.0
+	flare_strength = 0.0
+	head_lens = null
+	_sound("dread", _loop(DREAD), -40.0).play()
+	_sound("kettle", KETTLE, -12.0)
+	_sound("radio", HELLO, -9.0, RoadRadio._radio_bus())
+	_sound("dawn", _loop(DAWN), -60.0).play()
+	text_at = 14.0
+	shots = [
+		[0.0, _shot_burn_behind_car],
+		[7.0, _shot_burn_porch],
+		[13.0, _shot_burn_far],
+	]
+
+
+func _animate_burn(t: float, delta: float) -> void:
+	# Morning comes up behind the house as it burns down.
+	var dawn := _ease(clampf((t - 13.0) / 22.0, 0.0, 1.0))
+	sky_material.set_shader_parameter("dawn", dawn * 0.42)
+	burn_sun.light_energy = 0.9 * dawn
+	env.ambient_light_energy = lerpf(0.16, 0.32, dawn)
+	env.tonemap_exposure = lerpf(1.0, 0.8, dawn)
+	fire.set_heat(lerpf(1.0, 0.7, clampf((t - 13.0) / 24.0, 0.0, 1.0)))
+	var kettle: AudioStreamPlayer = players["kettle"]
+	if t > 7.4 and not flicker_done.has("kettle"):
+		flicker_done["kettle"] = true
+		kettle.play()
+	_fade_sound("dread", lerpf(-14.0, -30.0, dawn), delta, 0.6)
+	_fade_sound("dawn", lerpf(-40.0, -14.0, dawn), delta, 0.6)
+	if kettle.playing:
+		kettle.volume_db = lerpf(kettle.volume_db, -3.0 if last_shot == 1 else -18.0, 1.0 - exp(-4.0 * delta))
+	# And then, once, faintly, the car radio.
+	if t > 27.0 and not radio_crackled:
+		radio_crackled = true
+		players["radio"].play()
+
+
+func _shot_burn_behind_car(s: float) -> void:
+	var u := s / 7.0
+	_aim(Vector3(3.0, 1.0, 34.0).lerp(Vector3(2.4, 1.1, 30.0), _ease(u)), Vector3(0.0, 3.0, 1.0))
+
+
+func _shot_burn_porch(s: float) -> void:
+	var u := s / 6.0
+	_aim(Vector3(3.2, 1.4, 12.5).lerp(Vector3(2.4, 1.5, 11.0), _ease(u)), Vector3(0.0, 2.2, 3.8))
+
+
+func _shot_burn_far(s: float) -> void:
+	var u := clampf(s / 24.0, 0.0, 1.0)
+	_aim(Vector3(-7.0, 3.5, 74.0).lerp(Vector3(-5.5, 6.0, 66.0), _ease(u)), Vector3(0.0, 3.5, 2.0))

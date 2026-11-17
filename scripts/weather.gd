@@ -68,6 +68,17 @@ func _ready() -> void:
 	add_child(haze)
 
 
+func start_storm(seconds: float) -> void:
+	## A storm right now, for when the story wants one.
+	if left > 0.0:
+		left = maxf(left, seconds)
+		length = maxf(length, seconds)
+		return
+	length = seconds
+	left = seconds
+	wait = randf_range(900.0, 1800.0)
+
+
 func storm_level() -> float:
 	return level
 

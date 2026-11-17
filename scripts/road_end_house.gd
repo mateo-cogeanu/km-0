@@ -182,6 +182,20 @@ const FINAL_JAW := [
 
 ## Built only as scenery, e.g. for the ending cinematics: no triggers, no ending.
 var prop_only := false
+## Burning it down, from outside: petrol on all four walls, then the flare.
+const DOUSE_PER_WALL := 3.0
+const POUR_RATE := 1.4
+const POUR := preload("res://assets/audio/player/pour.wav")
+const HouseFire := preload("res://scripts/house_fire.gd")
+var doused := [0.0, 0.0, 0.0, 0.0]
+var wet_patches: Array[MeshInstance3D] = []
+var pouring := false
+var pour_sound: AudioStreamPlayer3D
+var burning := false
+var burn_clock := 0.0
+var fire: Node3D
+var entry_trigger: Area3D
+var roof_thing: Node3D
 
 
 func _ready() -> void:
@@ -208,6 +222,8 @@ func _ready() -> void:
 	shape.shape = box
 	trigger.add_child(shape)
 	trigger.body_entered.connect(_on_entry)
+	entry_trigger = trigger
+	_build_wet_patches()
 
 
 func _build_house() -> void:
@@ -1289,7 +1305,7 @@ func _return_to_menu() -> void:
 	if not TripSave.save_trip():
 		var dialog := AcceptDialog.new()
 		dialog.dialog_text = "Could not save your trip. Check available disk space and try again."
-		overlay.add_child(dialog)
+		(overlay if overlay else self).add_child(dialog)
 		dialog.confirmed.connect(dialog.queue_free)
 		dialog.canceled.connect(dialog.queue_free)
 		dialog.popup_centered()
@@ -1301,6 +1317,8 @@ func _return_to_menu() -> void:
 
 
 func _process(delta: float) -> void:
+	if not prop_only:
+		_outside(delta)
 	if not interior:
 		return
 	for i in lamps.size():
@@ -1858,3 +1876,210 @@ func _burst(t: float) -> void:
 	$FaceFill.light_energy = 1.8
 	_final_pose(1.0, 2.5)
 	creature.set_jaw_offset(-0.012)
+
+
+# Burning it down ----------------------------------------------------------------
+
+func _build_wet_patches() -> void:
+	## Dark, glistening petrol stains that spread over each wall as you pour.
+	var walls := [[Vector3(0, 1.3, 3.83), Vector3(6.6, 2.4, 0.01)], [Vector3(0, 1.3, -3.86), Vector3(6.6, 2.4, 0.01)],
+		[Vector3(-3.7, 1.3, 0), Vector3(0.01, 2.4, 7.0)], [Vector3(3.7, 1.3, 0), Vector3(0.01, 2.4, 7.0)]]
+	for wall: Array in walls:
+		var stain := StandardMaterial3D.new()
+		stain.albedo_color = Color(0.05, 0.04, 0.03, 0.0)
+		stain.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		stain.roughness = 0.08
+		stain.metallic_specular = 0.9
+		var patch := Shapes.box(self, "PetrolStain", wall[1], wall[0], stain)
+		patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		patch.layers = HOUSE_LAYER
+		wet_patches.append(patch)
+
+
+func _wall_near(point: Vector3) -> int:
+	## Which outside wall (0 front, 1 back, 2 left, 3 right) a point is beside,
+	## or -1 if it is not close to one, or is inside.
+	var local := to_local(point)
+	if absf(local.x) < 3.7 and absf(local.z) < 3.9:
+		return -1
+	var gaps := [local.z - 3.85, -local.z - 3.85, -local.x - 3.7, local.x - 3.7]
+	var best := -1
+	for i in 4:
+		var along: float = absf(local.x) < 4.2 if i < 2 else absf(local.z) < 4.4
+		if gaps[i] > 0.0 and gaps[i] < 2.6 and along and (best < 0 or gaps[i] < gaps[best]):
+			best = i
+	return best
+
+
+func _all_doused() -> bool:
+	for amount: float in doused:
+		if amount < DOUSE_PER_WALL:
+			return false
+	return true
+
+
+func handle_r(by: Node3D) -> bool:
+	## The player pressed R near the house. Pour, or light it.
+	if prop_only or burning or seen or roaming or interior:
+		return false
+	var held: Node3D = by.held_object if "held_object" in by else null
+	if held == null:
+		return false
+	if held.is_in_group("fuel_canister") and _wall_near(by.global_position) >= 0:
+		pouring = true
+		return true
+	if held.is_in_group("flare") and _all_doused() and to_local(by.global_position).length() < 16.0:
+		_ignite(by, held)
+		return true
+	return false
+
+
+func _outside(delta: float) -> void:
+	if burning:
+		_burn(delta)
+		return
+	if seen or roaming or interior:
+		return
+	var player := get_tree().get_first_node_in_group("local_player") as Node3D
+	if player == null or global_position.distance_to(player.global_position) > 20.0:
+		pouring = false
+		return
+	var held: Node3D = player.held_object
+	var wall := _wall_near(player.global_position)
+	var done := doused.filter(func(a: float) -> bool: return a >= DOUSE_PER_WALL).size()
+	if held and held.is_in_group("fuel_canister") and wall >= 0:
+		if pouring and Input.is_key_pressed(KEY_R) and held.fuel_amount > 0.0 and doused[wall] < DOUSE_PER_WALL:
+			var drained: float = held.drain_fuel(POUR_RATE * delta)
+			doused[wall] = minf(DOUSE_PER_WALL, doused[wall] + drained)
+			var stain := wet_patches[wall].material_override as StandardMaterial3D
+			stain.albedo_color.a = 0.75 * doused[wall] / DOUSE_PER_WALL
+			if pour_sound == null:
+				pour_sound = AudioStreamPlayer3D.new()
+				pour_sound.stream = POUR
+				pour_sound.unit_size = 3.0
+				add_child(pour_sound)
+			pour_sound.global_position = player.global_position
+			if not pour_sound.playing:
+				pour_sound.play()
+			player.tip_override = "Pouring petrol on this wall..."
+		else:
+			pouring = false
+			if held.fuel_amount <= 0.0:
+				player.tip_override = "The can is empty."
+			elif doused[wall] >= DOUSE_PER_WALL:
+				player.tip_override = "This wall is soaked. %d of 4 walls done." % done
+			else:
+				player.tip_override = "Hold R  Pour petrol on this wall   (%d of 4 walls done)" % done
+		player.tip_time = 0.3
+	elif held and held.is_in_group("flare") and _all_doused() and to_local(player.global_position).length() < 16.0:
+		player.tip_override = "R  Light the flare and throw it"
+		player.tip_time = 0.3
+	elif _all_doused() and to_local(player.global_position).length() < 16.0 and player.has_method("has_item") and player.has_item("flare"):
+		player.tip_override = "Take the flare out of your pack (Q), then R to light it"
+		player.tip_time = 0.3
+	elif player.has_method("has_item") and player.has_item("fuel_canister") and wall >= 0 and not _all_doused():
+		player.tip_override = "Take the petrol can out of your pack (Q) to pour it"
+		player.tip_time = 0.3
+	else:
+		pouring = false
+
+
+func _ignite(by: Node3D, flare_item: RigidBody3D) -> void:
+	burning = true
+	burn_clock = 0.0
+	story["burned"] = true
+	entry_trigger.set_deferred("monitoring", false)
+	if by.has_method("use_up"):
+		by.use_up(flare_item)
+	_play_at(FLARE_STRIKE, by.global_position)
+	# The lit flare arcs through the air onto the porch.
+	var flying := Node3D.new()
+	add_child(flying)
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(1.0, 0.25, 0.15)
+	glow.light_energy = 3.0
+	glow.omni_range = 6.0
+	flying.add_child(glow)
+	var stick := MeshInstance3D.new()
+	var tube := CylinderMesh.new()
+	tube.top_radius = 0.02
+	tube.bottom_radius = 0.02
+	tube.height = 0.3
+	stick.mesh = tube
+	var red := StandardMaterial3D.new()
+	red.emission_enabled = true
+	red.emission = Color(1.0, 0.2, 0.1)
+	red.emission_energy_multiplier = 6.0
+	stick.material_override = red
+	flying.add_child(stick)
+	var from := to_local(by.global_position + Vector3.UP * 0.4)
+	var to := Vector3(0.3, 0.1, 4.4)
+	var arc := create_tween()
+	arc.tween_method(func(t: float) -> void:
+		flying.position = from.lerp(to, t) + Vector3.UP * sin(t * PI) * 2.2
+		flying.rotation.x = t * 9.0, 0.0, 1.0, 1.1)
+	arc.tween_callback(flying.queue_free)
+	fire = HouseFire.new()
+	add_child(fire)
+	fire.position = Vector3.ZERO
+
+
+func _burn(delta: float) -> void:
+	burn_clock += delta
+	if fire:
+		fire.set_heat(clampf((burn_clock - 1.0) / 7.0, 0.0, 1.0))
+	if burn_clock > 1.0 and burn_clock - delta <= 1.0:
+		_play_at(FLARE_HISS, global_position + Vector3(0, 1, 4))
+	# Something comes up out of the roof, walks the ridge, and goes into the fire.
+	if burn_clock > 9.0 and roof_thing == null and burn_clock < 9.5:
+		roof_thing = preload("res://scripts/ending_cinematic.gd").creature_figure()
+		add_child(roof_thing)
+		roof_thing.position = Vector3(-2.6, 6.05, 0.2)
+	if roof_thing:
+		var walk := clampf((burn_clock - 9.0) / 4.0, 0.0, 1.0)
+		roof_thing.position.x = lerpf(-2.6, 0.6, walk)
+		roof_thing.rotation.y = -PI * 0.5
+		roof_thing.rotation.z = sin(burn_clock * 7.0) * 0.08
+		if burn_clock > 13.0:
+			roof_thing.position.y -= delta * 4.0
+			roof_thing.rotation.x += delta * 1.5
+			if burn_clock - delta <= 13.0:
+				var cry := AudioStreamPlayer3D.new()
+				cry.stream = SHRIEK
+				cry.unit_size = 14.0
+				cry.volume_db = _scare(2.0)
+				add_child(cry)
+				cry.position = roof_thing.position
+				cry.play()
+		if burn_clock > 14.5:
+			roof_thing.queue_free()
+			roof_thing = null
+	if burn_clock > 18.0 and burn_clock - delta <= 18.0:
+		_burn_end()
+
+
+func _burn_end() -> void:
+	var player := get_tree().get_first_node_in_group("local_player") as Node3D
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(layer)
+	var black := ColorRect.new()
+	black.color = Color(0, 0, 0, 0)
+	layer.add_child(black)
+	black.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var fade := create_tween()
+	fade.tween_property(black, "color:a", 1.0, 2.5)
+	fade.tween_callback(func() -> void:
+		if player and player.has_method("lock_for_ending"):
+			player.lock_for_ending(player.global_position)
+		var cinematic: Control = preload("res://scripts/ending_cinematic.gd").create("burn")
+		layer.add_child(cinematic)
+		black.queue_free()
+		var button := Style.button("Main menu", roundi(22 * GameSettings.ui_scale))
+		button.name = "EndButton"
+		button.theme = Style.make_theme()
+		button.pressed.connect(_return_to_menu)
+		cinematic.set_card([["It burned until morning.", 40], ["Nothing came out. Nothing called after you.", 20],
+			["On the long drive home, the radio stayed quiet. Almost the whole way.", 20], ["THE END", 30]], button)
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE)

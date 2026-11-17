@@ -340,6 +340,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if _try_wire_pointed_battery():
 			return
+		var house := get_tree().get_first_node_in_group("road_end_house")
+		if house and house.has_method("handle_r") and house.handle_r(self):
+			return
 		_cycle_spray_color()
 
 	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_L or event.keycode == KEY_H):

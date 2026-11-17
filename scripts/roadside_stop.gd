@@ -223,6 +223,7 @@ func _add_broadcast_stop() -> void:
 			_add_note(self, "ruth_postcard", Vector3(-2.6, 0.992, 0.05), 0.4)
 		RoadRadio.Broadcast.TOWER:
 			_add_note(self, "mick_scrawl", Vector3(-2.15, 0.002, 0.45), 1.1)
+			_add_note(self, "len_page_tower", Vector3(-2.6, 0.992, 0.05), -0.5)
 		RoadRadio.Broadcast.QUIET:
 			_add_note(self, "house_photo", Vector3(-2.6, 0.992, 0.05), -0.3)
 		RoadRadio.Broadcast.LAST_STOP:

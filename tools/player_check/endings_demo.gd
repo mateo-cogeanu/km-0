@@ -8,6 +8,8 @@ const Notes := preload("res://scripts/story_notes.gd")
 const Supply := preload("res://scripts/supply_item.gd")
 const Cinematic := preload("res://scripts/ending_cinematic.gd")
 const Style := preload("res://scripts/menu_style.gd")
+const FUEL := preload("res://scenes/fuel_canister.tscn")
+const PAGES := ["len_last", "len_page_tower", "len_page_cabin"]
 
 var menu: CanvasLayer
 
@@ -32,7 +34,9 @@ func _ready() -> void:
 	for choice: Array in [
 			["The house: walk in", _house.bind(false)],
 			["The house: walk in, carrying the flare", _house.bind(true)],
-			["The way out: you've read Len's last page, keep walking", _way_out],
+			["Burn it: at the house with a can of petrol and the flare", _burn],
+			["The way out: the chase (a wheel just came off, run or face it)", _way_out.bind(6230.0)],
+			["The way out: the last stretch, just before you're free", _way_out.bind(11750.0)],
 			["Replaced: after the house, at the workshop radio", _replaced],
 			["Just watch the house scene", _watch.bind("house")],
 			["Just watch the way-out scene", _watch.bind("free")],
@@ -81,6 +85,7 @@ func _face(player: CharacterBody3D, at: Vector3) -> void:
 
 func _house(with_flare: bool) -> void:
 	RoadEndHouse.seen = false
+	RoadEndHouse.story["house_z"] = -5200.0
 	var world: Node = await _world()
 	var player := _player()
 	# Go to the end of the road and let it stream in, then stand at the turnoff.
@@ -100,15 +105,31 @@ func _house(with_flare: bool) -> void:
 		player.give_item(flare)
 
 
-func _way_out() -> void:
+func _way_out(from_z: float) -> void:
 	RoadEndHouse.seen = false
-	Notes.read["len_last"] = true
+	RoadEndHouse.story.erase("caught")
+	for page: String in PAGES:
+		Notes.read[page] = true
 	await _world()
 	var player := _player()
-	# Back past the start of the road, just before the second call.
-	player.global_position = Vector3(0, 1.2, 1660)
+	player.global_position = Vector3(0, 1.2, from_z - 40.0)
+	await _frames(10)
+	player.global_position = Vector3(0, 1.2, from_z)
 	await _frames(10)
 	_face(player, player.global_position + Vector3(0, 0, 50))
+
+
+func _burn() -> void:
+	await _house(true)
+	var world := get_tree().current_scene
+	var player := _player()
+	var can := FUEL.instantiate() as RigidBody3D
+	can.fuel_amount = 16.0
+	world.add_child(can)
+	can.global_position = player.camera.global_transform * Vector3(0.15, -0.21, -0.42)
+	if player.held_object:
+		player._drop_held_object()
+	player._begin_grab_object(can, can.global_position)
 
 
 func _replaced() -> void:

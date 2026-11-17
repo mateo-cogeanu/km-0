@@ -12,12 +12,27 @@ const NOTES := {
 	"len_log": {
 		"title": "Len's notebook",
 		"style": "notebook",
-		"text": "MON  Wayside — 2 batteries, fan belt. Ruth says hi.\nTUE  Tower — Mick's gate key again. Left it under the drum.\nWED  Quiet. Radio playing up at night.\n\nTHU  Heard my own voice on channel 4. Asking if anybody was there. I hadn't said a thing.\n\nTHU  It said the kettle's on. At the house at the end of the road. In MY voice.\n\nI'm not going.",
+		"text": "MON  Wayside — 2 batteries, fan belt. Ruth says hi.\nTUE  Tower — Mick's gate key again. Left it under the drum.\nWED  Quiet. Radio playing up at night.\n\nTHU  Heard my own voice on channel 4. Asking if anybody was there. I hadn't said a thing.\n\nTHU  It said the kettle's on. At the house at the end of the road. In MY voice.\n\nMick reckons the road doesn't end until it's had a good listen to you, and you to it. A few stations, a couple of nights out here. Then one morning the house is just there.\n\nI'm not going.",
 	},
 	"len_last": {
 		"title": "Len's notebook, last page",
 		"style": "notebook",
-		"text": "If anyone finds this.\n\nDon't follow the radio. Don't go to the house.\n\nGo back. Past the workshop, past where the road starts. Keep going into the desert and don't stop, whatever you hear behind you.\n\nThat's the only way it can't follow. I'm sure of it.\n\nI'm going now. If you hear me on the radio after tonight, it isn't me.",
+		"text": "If anyone finds this.\n\nDon't follow the radio. Don't go to the house. There is a way out.\n\nI've written it down in pieces and left them in different places, so it can't hear all of it at once.\n\nFirst piece: go back. Past the workshop, past where the road starts.\n\nThe next piece is with Mick, at the tower.\n\nIf you hear me on the radio after tonight, it isn't me.",
+	},
+	"len_page_tower": {
+		"title": "Torn page, Len's handwriting",
+		"style": "paper",
+		"text": "Second piece.\n\nKeep going into the desert. Further than you'd think. Twelve kilometres. More.\n\nFill the tank. Bring water. Bring tools.\n\nThe last piece is with the man in the cabin, back past the workshop. He won't remember me.\n\n— L",
+	},
+	"len_page_cabin": {
+		"title": "Folded page, Len's handwriting",
+		"style": "paper",
+		"text": "Last piece.\n\nWhatever you hear behind you, don't stop and don't answer.\n\nIf the car gives out, fix it fast. It's slow, but it doesn't get tired, and it will be right behind you.\n\nIf it catches you, you're the next voice on the radio.\n\n— Len",
+	},
+	"county_car": {
+		"title": "Note on the passenger seat",
+		"style": "paper",
+		"text": "COUNTY ROADS — DISPATCH\n\nIt's in the walls. I can hear it moving in them.\n\nIf I don't come back out: don't go in after me.\n\nPetrol on every wall. All four sides. Then light it.\n\nThere's a can in the boot.",
 	},
 	"ruth_postcard": {
 		"title": "Postcard",
