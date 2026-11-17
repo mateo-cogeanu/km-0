@@ -48,8 +48,8 @@ const COOLANT_RESERVOIR_MODEL := preload("res://assets/vehicles/parts/coolantres
 @export_enum("Petrol", "Diesel") var fuel_type: String = "Petrol"
 @export var max_fuel: float = 60.0
 @export var fuel_amount: float = 0.0
-@export var idle_fuel_burn_rate: float = 0.015
-@export var throttle_fuel_burn_rate: float = 0.08
+@export var idle_fuel_burn_rate: float = 0.02
+@export var throttle_fuel_burn_rate: float = 0.11
 @export var part_snap_distance: float = 1.35
 @export var start_with_random_body_color: bool = true
 @export var start_with_removed_panels: bool = true
@@ -135,8 +135,12 @@ var tire_effects: Node3D
 @onready var access_sound: AudioStreamPlayer3D = $AccessSound
 
 
+var drawn_at := Vector3.ZERO
+var litres_per_km := 3.0
+
 func _ready() -> void:
 	add_to_group("drivable")
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_ON
 	contact_monitor = true
 	max_contacts_reported = 16
 	continuous_cd = true
@@ -164,6 +168,8 @@ func _ready() -> void:
 	if camera_rig == null and driver_camera:
 		camera_rig = driver_camera.get_parent() as Node3D
 	if camera_rig:
+		# Turned with the mouse every frame, on top of the smoothed body.
+		camera_rig.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		camera_mount_position = camera_rig.position
 		camera_pitch = absf(camera_rig.rotation.x)
 		camera_yaw = camera_rig.rotation.y
@@ -207,7 +213,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	var local_player := get_tree().get_first_node_in_group("local_player")
 	if local_player and local_player.gameplay_ui_open():
 		return
-	if not driver_camera or not driver_camera.current or (NetworkManager.is_online() and not seat_occupants.has(multiplayer.get_unique_id())):
+	if not _viewing() or (NetworkManager.is_online() and not seat_occupants.has(multiplayer.get_unique_id())):
 		if not _has_driving_camera():
 			_handle_interactable_input(event)
 		return
@@ -615,7 +621,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 
 func _process(_delta: float) -> void:
-	if driver_camera and driver_camera.current:
+	if global_position.distance_to(drawn_at) > 6.0:
+		reset_physics_interpolation()
+	drawn_at = global_position
+	if _viewing():
 		_update_camera_suspension(_delta)
 		_update_camera_rotation()
 	else:
@@ -1099,6 +1108,11 @@ func _update_fuel(delta: float) -> void:
 		return
 
 	var burn_rate := idle_fuel_burn_rate + absf(throttle_input) * throttle_fuel_burn_rate
+	# Litres per kilometre lately, for the range on the dashboard.
+	var moving := Vector2(linear_velocity.x, linear_velocity.z).length()
+	if moving > 3.0:
+		var lately := burn_rate / moving * 1000.0
+		litres_per_km = lerpf(litres_per_km, lately, 1.0 - exp(-delta / 20.0))
 	if current_engine_variant == "Electric":
 		electric_charge = maxf(electric_charge - burn_rate * delta, 0.0)
 	elif fuel_amount > 0.0:
@@ -1119,9 +1133,20 @@ func get_fuel_fraction() -> float:
 
 func get_fuel_text() -> String:
 	if current_engine_variant == "Electric":
-		return "Battery %.0f%%" % (get_fuel_fraction() * 100.0)
+		return "Battery %.0f%%  ·  %s" % [get_fuel_fraction() * 100.0, range_text()]
 
-	return "%s %.0f%%" % [fuel_type, get_fuel_fraction() * 100.0]
+	return "%s %.0f%%  ·  %s" % [fuel_type, get_fuel_fraction() * 100.0, range_text()]
+
+
+func range_km() -> float:
+	## How far the tank goes at the way it has been driven lately.
+	var left := electric_charge if current_engine_variant == "Electric" else fuel_amount
+	return left / maxf(litres_per_km, 0.5)
+
+
+func range_text() -> String:
+	var km := range_km()
+	return "~%.1f km" % km if km < 10.0 else "~%d km" % roundi(km)
 
 
 func can_receive_fuel() -> bool:
@@ -2596,6 +2621,16 @@ func _get_local_visual_bounds(part: Node3D) -> AABB:
 	return bounds if has_bounds else AABB()
 
 
+func _viewing() -> bool:
+	## This car's camera is the view, or the view is easing into it.
+	if driver_camera == null:
+		return false
+	if driver_camera.current:
+		return true
+	var view := get_viewport().get_camera_3d()
+	return view != null and view.get("target") == driver_camera
+
+
 func _has_driving_camera() -> bool:
 	var camera := get_viewport().get_camera_3d()
 	return camera != null and camera.is_in_group("driving_camera")
@@ -2816,7 +2851,7 @@ func _update_camera_rotation() -> void:
 
 
 func _update_third_person_camera_collision() -> void:
-	if driver_camera == null or camera_rig == null or first_person_camera_enabled or not driver_camera.current:
+	if driver_camera == null or camera_rig == null or first_person_camera_enabled or not _viewing():
 		return
 
 	driver_camera.transform = third_person_camera_transform

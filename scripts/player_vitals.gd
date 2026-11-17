@@ -6,7 +6,7 @@ const Style := preload("res://scripts/menu_style.gd")
 const VIGNETTE := preload("res://assets/ui/vignette.gdshader")
 
 ## A full stomach lasts about this many seconds of play.
-const HUNGER_SECONDS := 1500.0
+const HUNGER_SECONDS := 1250.0
 const STARVING_DAMAGE := 0.5
 const HEAL_RATE := 0.25
 const SPRINT_DRAIN := 17.0
@@ -16,7 +16,7 @@ const REGEN_DELAY := 0.9
 const RECOVER_AT := 25.0
 ## A full drink of water lasts about this long; staying awake this long makes
 ## you exhausted. A flashlight battery lasts this many seconds switched on.
-const THIRST_SECONDS := 1100.0
+const THIRST_SECONDS := 950.0
 const THIRST_DAMAGE := 0.7
 const AWAKE_SECONDS := 2400.0
 const BATTERY_SECONDS := 480.0

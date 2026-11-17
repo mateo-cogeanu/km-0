@@ -47,6 +47,7 @@ const SAFE_FALL_SPEED := 9.5
 @export var spray_distance: float = 5.0
 @export var spray_strength: float = 1.8
 
+const CameraBlend := preload("res://scripts/camera_blend.gd")
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var look_rotation_x: float = 0.0
 var held_object: RigidBody3D
@@ -133,8 +134,17 @@ var remote_last := Vector3.ZERO
 @onready var refuel_label: Label = $HUD/RefuelPanel/RefuelLabel
 
 
+var drawn_at := Vector3.ZERO
+var low_fuel_warned := false
+
 func _ready() -> void:
 	add_to_group("road_stream_player")
+	# Drawn between physics ticks. The head turns with the mouse every frame,
+	# so it is not interpolated itself (see _smooth_view).
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_ON
+	head.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	reset_physics_interpolation()
+	drawn_at = global_position
 	var locally_controlled := is_multiplayer_authority()
 	if locally_controlled:
 		camera.make_current()
@@ -207,6 +217,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_smooth_view()
 	_animate_body(delta)
 	if is_multiplayer_authority() and vitals:
 		_update_drinking(delta)
@@ -260,6 +271,16 @@ func _process(delta: float) -> void:
 		if not seen.has(other):
 			name_tags[other].queue_free()
 			name_tags.erase(other)
+
+
+func _smooth_view() -> void:
+	## Teleports snap instead of sliding across the map for a frame, and the
+	## view keeps the mouse's turn from this frame rather than the last tick's.
+	if global_position.distance_to(drawn_at) > 4.0:
+		reset_physics_interpolation()
+	drawn_at = global_position
+	var drawn_yaw := get_global_transform_interpolated().basis.get_euler().y
+	head.rotation.y = angle_difference(drawn_yaw, global_rotation.y)
 
 
 func _update_player_name(value: String) -> void:
@@ -567,6 +588,9 @@ func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
 
 	held_object = object
 	held_local_grab_point = held_object.to_local(grab_position)
+	# Smoothed like the view it is held in front of, so it does not shake.
+	held_object.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_ON
+	held_object.reset_physics_interpolation()
 	# Held close, so it must not shove you around.
 	add_collision_exception_with(held_object)
 	# Small things come close, into your hand; big ones stay further out.
@@ -614,6 +638,7 @@ func _restore_held_object_physics() -> void:
 	if held_object == null:
 		return
 
+	held_object.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_INHERIT
 	held_object.gravity_scale = held_original_gravity_scale
 	held_object.linear_damp = held_original_linear_damp
 	held_object.angular_damp = held_original_angular_damp
@@ -1000,14 +1025,19 @@ func _enter_vehicle(car: Node3D, restoring: bool = false) -> void:
 	active_vehicle = car
 	_set_hovered_grab_object(null)
 	$HUD/Crosshair.hide()
+	var was_viewing := camera.current
 	camera.current = false
 	collision_shape.disabled = true
 	hide()
 	active_vehicle.call("enter", self, restoring)
+	if was_viewing and not restoring:
+		CameraBlend.between(camera, get_viewport().get_camera_3d(), 0.45)
 
 
 func _exit_vehicle() -> void:
 	var vehicle := active_vehicle
+	var leaving_view := get_viewport().get_camera_3d()
+	var leaving_at := leaving_view.get_global_transform_interpolated() if leaving_view else Transform3D()
 	var exit_position: Vector3 = active_vehicle.call("exit") as Vector3
 	active_vehicle = null
 	$HUD/Crosshair.show()
@@ -1018,8 +1048,18 @@ func _exit_vehicle() -> void:
 	collision_shape.disabled = false
 	show()
 	camera.current = true
+	reset_physics_interpolation()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_update_fuel_hud()
+	if leaving_view and leaving_view != camera:
+		# The car's camera is no longer current: start from where it was.
+		var stand_in := Camera3D.new()
+		stand_in.fov = leaving_view.fov
+		get_tree().current_scene.add_child(stand_in)
+		stand_in.top_level = true
+		stand_in.global_transform = leaving_at
+		CameraBlend.between(stand_in, camera, 0.4)
+		stand_in.queue_free()
 
 
 func _reset_standing_shape() -> void:
@@ -1570,6 +1610,13 @@ func _apply_push(body: RigidBody3D, direction: Vector3, strength: float, delta: 
 
 func _update_fuel_hud() -> void:
 	driving_hud.show_vehicle(active_vehicle)
+	if not is_instance_valid(active_vehicle) or not active_vehicle.has_method("range_km"):
+		return
+	var low: bool = active_vehicle.get_fuel_fraction() < 0.15
+	if low and not low_fuel_warned and active_vehicle.ignition_progress() >= 1.0:
+		_show_tip("Fuel low: about %s left. Stations have petrol, and so do some of the cars left by the road." % active_vehicle.range_text().trim_prefix("~"))
+		tip_time = 6.0
+	low_fuel_warned = low
 
 
 func _update_refuel_hud() -> void:

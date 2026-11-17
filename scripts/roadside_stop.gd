@@ -77,11 +77,16 @@ func _ready() -> void:
 	world.add_child(finds)
 	finds.global_transform = global_transform
 
+	# Further out, the stations have less left in them, and now and then one
+	# has been torn apart.
+	var station := 1 if stop_index == -5 else -floori(float(stop_index) / 12.0)
+	var lean := clampf((station - 3) / 8.0, 0.0, 1.0)
+	var wrecked := not legacy_layout and station >= 4 and posmod(hash("wrecked:%d" % stop_index), 4) == 0
 	var canister := FUEL.instantiate() as RigidBody3D
 	canister.position = Vector3(2.57, 0.16, -0.97)
-	canister.fuel_amount = rng.randf_range(8.0, 20.0)
+	canister.fuel_amount = rng.randf_range(8.0, 20.0) * lerpf(1.0, 0.55, lean) * (0.15 if wrecked else 1.0)
 	finds.add_child(canister)
-	if old_style == 1 or rng.randf() < 0.45:
+	if old_style == 1 or rng.randf() < lerpf(0.45, 0.22, lean):
 		var spare := FUEL.instantiate() as RigidBody3D
 		spare.position = Vector3(2.47, 0.16, -1.52)
 		finds.add_child(spare)
@@ -96,6 +101,9 @@ func _ready() -> void:
 	# Now and then, someone got here first: everything eaten, the empties
 	# thrown about.
 	var raided := absi(stop_index) > 6 and pantry.randf() < 0.2
+	raided = raided or wrecked
+	if wrecked:
+		_add_wreckage(garage, finds)
 	if raided:
 		_add_empties(finds, pantry)
 	else:
@@ -156,6 +164,25 @@ func _ready() -> void:
 		if vehicle_kind == 2:
 			var spare_engine := _spawn_part(finds, "SpareBikeEngine", BIKE_ENGINE, Vector3(1.55, 1.17, -2.32), Vector3.ONE, "engine")
 			spare_engine.set_meta("engine_variant", "Bike")
+
+
+func _add_wreckage(garage: Node3D, finds: Node3D) -> void:
+	## Something went round and round this place in the night: deep gouges in
+	## the forecourt, and the night shift's log left where it fell.
+	var gouge := Shapes.material(Color("#2c241b"), 0.0, 1.0)
+	for spot in [[Vector3(-1.6, 0, 6.0), 0.5], [Vector3(1.4, 0, 6.9), -0.9], [Vector3(0.2, 0, 5.4), 2.2]]:
+		for k in 4:
+			# Uneven, like four claws dragged at once: the outer ones shorter.
+			var length := (1.35 if k in [1, 2] else 0.95) + 0.18 * sin(k * 7.3 + spot[1] * 3.0)
+			var mark := Shapes.box(garage, "Gouge", Vector3(0.035 + 0.02 * float(k in [1, 2]), 0.012, length), Vector3.ZERO, gouge)
+			mark.rotation.y = spot[1] + (k - 1.5) * 0.05
+			mark.position = spot[0] + Basis(Vector3.UP, spot[1]) * Vector3(k * 0.11 - 0.17, -0.022, 0.12 * sin(k * 2.1))
+	var log_note := NoteItem.new()
+	log_note.note_id = "station_wrecked"
+	log_note.name = "ShiftLog"
+	finds.add_child(log_note)
+	log_note.position = Vector3(0.9, 0.0, 5.6)
+	log_note.rotation.y = 0.7
 
 
 func _add_empties(parent: Node3D, rng: RandomNumberGenerator) -> void:

@@ -50,6 +50,10 @@ var window_focused := true
 func _ready() -> void:
 	# Keep watching while the game is paused, to know when to slow down.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Physics runs at a fixed rate; the player and the vehicles are drawn
+	# between ticks so they move smoothly at any frame rate. Everything else
+	# moves in _process and is left alone.
+	get_tree().root.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	load_settings()
 	apply_settings()
 	get_tree().root.size_changed.connect(_apply_ao_resolution)

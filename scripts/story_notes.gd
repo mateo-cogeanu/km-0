@@ -64,6 +64,41 @@ const NOTES := {
 		"style": "photo",
 		"text": "A plastic ID card on a frayed lanyard.\n\nCOUNTY ROADS — DISPATCH\nNight desk\n\nThe photo has been scratched out.",
 	},
+	"wreck_county": {
+		"title": "Notice on the dashboard",
+		"style": "sheet",
+		"text": "COUNTY ROADS — NOTICE TO DRIVERS\n\nCheck in at every station.\nKeep the tank above a quarter. Stations are a kilometre apart and not all of them have petrol.\nDo not leave the road after dark.\nIf you hear your own voice on the radio, do not answer it.\nIf you see anyone sitting out in the desert, keep driving. Do not stop. Do not look for long.",
+	},
+	"wreck_rose": {
+		"title": "Postcard on the seat",
+		"style": "postcard",
+		"text": "Dad,\n\nSaw someone out in the desert today. Just sitting, way off from the road, watching the car go by. I waved.\n\nI looked back at the road for a second, and when I looked again there was nobody there. Nothing to hide behind for miles.\n\nNobody lives out here, do they?\n\n— Rose",
+	},
+	"wreck_june": {
+		"title": "Note under the wiper",
+		"style": "paper",
+		"text": "To whoever's next,\n\nNothing wrong with the car. I stopped because it was sitting in the road ahead of me, in the headlights, and it wouldn't move.\n\nI looked at it and looked at it and then it just wasn't there.\n\nI'm walking back to the last station. Don't wait for me. Don't stare at it.\n\n— June",
+	},
+	"wreck_tape": {
+		"title": "Cassette in the deck, label written out",
+		"style": "sheet",
+		"text": "RADIO LOG — EAST ROAD\n\nCOUNTY: East road, check in.\nALAN: Alan, station four. All clear.\nCOUNTY: Copy, Alan.\n[static]\nALAN: Alan, station four. All clear.\nCOUNTY: Alan, you just said that.\nALAN: I haven't said anything. I'm sat in the car. I'm looking at the radio.\n[static]\nALAN: Alan, station four. All clear.",
+	},
+	"wreck_alan": {
+		"title": "Alan's road map",
+		"style": "notebook",
+		"text": "A map of the east road, marked up in pencil. Every station circled, with a tally of nights beside it.\n\nPast where the paper runs out, someone has drawn a small house in ink, pressing so hard the pen went through.\n\nIn the margin:\n\nIt's only ever where you're not looking. You can't keep looking at it. The longer you look the worse it gets.",
+	},
+	"station_wrecked": {
+		"title": "Shift log, trodden into the dirt",
+		"style": "sheet",
+		"text": "EAST ROAD — NIGHT SHIFT\n\n01:50  All quiet. Checked in.\n02:10  Something on the roof.\n02:14  It's walking round the outside. It stops when I stop.\n02:31  It knocked. Three times. The way Len knocks.\n02:32  Len's on the radio saying he's outside and could I open up.\n\nI'm not opening the door.",
+	},
+	"wreck_dash": {
+		"title": "Scratched into the dashboard",
+		"style": "paper",
+		"text": "IT WAS SITTING IN THE BACK SEAT\n\nI LOOKED IN THE MIRROR TOO LONG",
+	},
 }
 
 ## Notes read on this trip, saved with it.

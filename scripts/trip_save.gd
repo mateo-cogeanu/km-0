@@ -163,6 +163,7 @@ func save_trip() -> bool:
 		"vehicle_look": Vector2(player.active_vehicle.camera_yaw, player.active_vehicle.camera_pitch) if not driving.is_empty() else Vector2.ZERO,
 		"time": world.get_node("DayNightCycle").time_of_day,
 		"stops": road.stops.keys(),
+		"wrecks": road.wrecks.finds.keys(),
 		"garage_doors": world.get_node("Shack").get_door_state(),
 		"stop_doors": stop_doors,
 		"car_body_styles": car_body_styles,
@@ -236,6 +237,8 @@ func restore_trip(world: Node) -> void:
 	for index in data["stops"]:
 		road.spawn_stop(index, 1, index in legacy_stops, index in sedan_loadout_stops, true, clampi(car_body_styles.get(index, 0), 0, 2), index in legacy_spare_stops)
 		road.stops[index].restore_door_state(stop_doors.get(index, {}))
+	for index in data.get("wrecks", []):
+		road.wrecks.spawn_finds(index)
 	# Recreate supplied parts from older trips only if the save still uses them.
 	var starter: Node3D = world.get_node("Car")
 	var referenced_parts: Dictionary = data["objects"].duplicate()
@@ -342,4 +345,4 @@ func restore_trip(world: Node) -> void:
 		var box := world.get_node_or_null(path)
 		if box:
 			box.open(true)
-	road._update_segments()
+	road._update_segments(1000)

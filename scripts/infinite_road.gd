@@ -41,6 +41,7 @@ const WIRE_SAG := 0.9
 @export var keep_segments_behind := 3
 
 var segments: Dictionary = {}
+var wrecks: Node
 var stops: Dictionary = {}
 var ground_tiles: Dictionary[Vector2i, StaticBody3D] = {}
 var ground_shape := BoxShape3D.new()
@@ -105,12 +106,19 @@ func _ready() -> void:
 	var desk: Node = preload("res://scripts/county_desk.gd").new()
 	desk.name = "CountyDesk"
 	add_child(desk)
-	_update_segments()
+	wrecks = preload("res://scripts/roadside_wrecks.gd").new()
+	wrecks.name = "Wrecks"
+	wrecks.road = self
+	add_child(wrecks)
+	var warmup: Node3D = preload("res://scripts/shader_warmup.gd").new()
+	warmup.name = "ShaderWarmup"
+	add_child(warmup)
+	_update_segments(1000)
 
 
 func begin_streaming() -> void:
 	stream_stops = true
-	_update_segments()
+	_update_segments(1000)
 
 
 static func house_approach() -> float:
@@ -143,7 +151,7 @@ func _watch_for_the_house() -> void:
 		if segments.has(index):
 			(segments[index] as Node3D).queue_free()
 			segments.erase(index)
-	_update_segments()
+	_update_segments(1000)
 	var player := get_tree().get_first_node_in_group("local_player")
 	if player:
 		player.tip_override = "[Every radio, at once, very faint] ...the kettle's on. Not far now."
@@ -162,7 +170,7 @@ func _process(delta: float) -> void:
 	_update_segments()
 
 
-func _update_segments() -> void:
+func _update_segments(budget := 1) -> void:
 	var camera := get_viewport().get_camera_3d()
 	var tracking := camera.global_position if camera else (target.global_position if is_instance_valid(target) else global_position)
 	desert_ground.global_position = Vector3(tracking.x, -0.105, tracking.z)
@@ -174,16 +182,34 @@ func _update_segments() -> void:
 	if NetworkManager.is_online():
 		for player in players:
 			_collect_segments(player.global_position.z, wanted)
+	# Road right under someone is built at once; the rest, nearest first, one
+	# stretch a frame, so driving fast never builds several in the same frame.
+	var urgent: Dictionary = {}
+	var center := floori(tracking.z / segment_length)
+	for index in range(center - 1, center + 2):
+		urgent[index] = true
+	for player: Node3D in players:
+		urgent[floori(player.global_position.z / segment_length)] = true
 	for vehicle in get_tree().get_nodes_in_group("drivable"):
 		# Parked vehicles still need the same road height after a player leaves the area.
 		var vehicle_index := floori(vehicle.global_position.z / segment_length)
 		for index in range(vehicle_index - 1, vehicle_index + 2):
 			wanted[index] = true
+			urgent[index] = true
 
-	for index in wanted:
-		if not segments.has(index):
+	var missing: Array = wanted.keys().filter(func(index: int) -> bool: return not segments.has(index))
+	missing.sort_custom(func(a: int, b: int) -> bool: return absi(a - center) < absi(b - center))
+	for index: int in missing:
+		if urgent.has(index) or budget > 0:
+			if not urgent.has(index):
+				budget -= 1
 			segments[index] = _create_segment(index)
-		_update_stop(index, tracking, segments[index], players)
+		else:
+			# More to build: come back next frame.
+			update_timer = 0.0
+	for index in wanted:
+		if segments.has(index):
+			_update_stop(index, tracking, segments[index], players)
 	for index in segments.keys():
 		if not wanted.has(index):
 			(segments[index] as Node3D).queue_free()
@@ -271,6 +297,7 @@ func _create_segment(index: int) -> Node3D:
 	terrain.populate(segment, segment_start, segment_length, index, absi(index) <= 1, stop_side, _road_x)
 	_add_power_line(segment, segment_start, segment_start + segment_length)
 	_add_markers(segment, index, segment_start, segment_start + segment_length)
+	wrecks.populate(segment, index)
 	if start >= end:
 		return segment
 	if start == approach:

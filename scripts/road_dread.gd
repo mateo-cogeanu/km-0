@@ -1,11 +1,10 @@
 extends Node
 ## Small wrong things along the road, long before the house.
-## - At night, a tall figure sometimes stands far out in the desert ahead. Look
-##   straight at it, or get close, and it is gone.
+## - Now and then, day or night, it sits out in the desert watching you
+##   (road_glimpse.gd). Look away, or stare too long, and it is gone.
 ## - Inside the roadside buildings, now and then, footsteps behind you that
 ##   stop the moment you turn round.
 
-const MODEL := preload("res://assets/characters/player.glb")
 const Notes := preload("res://scripts/story_notes.gd")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const Style := preload("res://scripts/menu_style.gd")
@@ -36,6 +35,7 @@ const CHASE_SPEED_DRIVING := 13.0
 const CAUGHT_AT := 2.2
 const STEP_SOUND := preload("res://assets/audio/ending/step.wav")
 const Creature := preload("res://scripts/road_creature.gd")
+const Glimpse := preload("res://scripts/road_glimpse.gd")
 const CLICKS := preload("res://assets/audio/ending/rapid_clicks.wav")
 const RATTLE := preload("res://assets/audio/ending/throat_rattle.wav")
 const BREATH := preload("res://assets/audio/ending/breath_close.wav")
@@ -47,10 +47,7 @@ const STEPS := [
 ]
 
 var road: Node3D
-var figure: Node3D
-var figure_wait := 120.0
-var figure_life := 0.0
-var figure_seen := 0.0
+var glimpse: Node3D
 var steps_wait := 25.0
 var stalker: AudioStreamPlayer3D
 var stalker_steps := 0
@@ -73,17 +70,10 @@ var caught := false
 
 
 func _ready() -> void:
-	figure = MODEL.instantiate()
-	figure.name = "DesertFigure"
-	add_child(figure)
-	figure.scale = Vector3(0.82, 1.18, 0.82)
-	var black := StandardMaterial3D.new()
-	black.albedo_color = Color(0.008, 0.008, 0.01)
-	black.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for mesh: GeometryInstance3D in figure.find_children("*", "GeometryInstance3D", true, false):
-		mesh.material_override = black
-		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	figure.hide()
+	glimpse = Glimpse.new()
+	glimpse.name = "Glimpse"
+	glimpse.road = road
+	add_child(glimpse)
 	stalker = AudioStreamPlayer3D.new()
 	stalker.unit_size = 2.0
 	stalker.volume_db = -11.0
@@ -94,9 +84,9 @@ func _process(delta: float) -> void:
 	var player := get_tree().get_first_node_in_group("local_player") as Node3D
 	var camera := get_viewport().get_camera_3d()
 	if player == null or camera == null or player.ending_locked:
-		figure.hide()
+		glimpse.hide_now()
 		return
-	_watch_figure(delta, player, camera)
+	glimpse.watch(delta, player, camera, not chasing and not caught and not _inside_building(player), _daylight(), _storm())
 	_follow_steps(delta, player, camera)
 	_way_out(player)
 
@@ -109,42 +99,6 @@ func _storm() -> float:
 func _daylight() -> float:
 	var cycle := get_tree().current_scene.get_node_or_null("DayNightCycle") if get_tree().current_scene else null
 	return cycle.daylight if cycle and "daylight" in cycle else 1.0
-
-
-func _watch_figure(delta: float, player: Node3D, camera: Camera3D) -> void:
-	if figure.visible:
-		figure_life -= delta
-		var toward := (figure.global_position + Vector3.UP * 1.6 - camera.global_position)
-		var looked := camera.is_position_in_frustum(figure.global_position) and toward.normalized().dot(-camera.global_basis.z) > 0.993
-		figure_seen = figure_seen + delta if looked else 0.0
-		var close := toward.length() < (14.0 if _storm() > 0.6 else 45.0)
-		var hidden_by_day := _daylight() > 0.3 and _storm() < 0.5
-		if figure_seen > 0.15 or close or figure_life <= 0.0 or hidden_by_day:
-			if not camera.is_position_in_frustum(figure.global_position) or figure_seen > 0.15 or close:
-				figure.hide()
-				figure_wait = randf_range(150.0, 320.0)
-		return
-	var storm := _storm()
-	if _daylight() > 0.15 and storm < 0.6:
-		return
-	# In a dust storm it comes in the day too, and much closer.
-	figure_wait -= delta * (3.0 if storm > 0.6 else 1.0)
-	if figure_wait > 0.0 or road == null:
-		return
-	# Off to one side, well ahead along the road, facing the road.
-	var ahead := player.global_position.z - (randf_range(28.0, 42.0) if storm > 0.6 else randf_range(85.0, 140.0))
-	var side := -1.0 if randf() < 0.5 else 1.0
-	var spot: Vector3 = road._sample(ahead, side * (randf_range(8.0, 14.0) if storm > 0.6 else randf_range(16.0, 34.0)))
-	spot.y = -0.04
-	if camera.is_position_in_frustum(spot) and (spot - camera.global_position).normalized().dot(-camera.global_basis.z) > 0.9:
-		figure_wait = 3.0
-		return
-	figure.global_position = spot
-	var to_road: Vector3 = road._sample(ahead, 0.0) - spot
-	figure.look_at(spot - Vector3(to_road.x, 0, to_road.z), Vector3.UP)
-	figure.show()
-	figure_life = 40.0
-	figure_seen = 0.0
 
 
 func _follow_steps(delta: float, player: Node3D, camera: Camera3D) -> void:
