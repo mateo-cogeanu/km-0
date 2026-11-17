@@ -14,6 +14,13 @@ const GROUND_TILE_SIZE := 160.0
 const GROUND_DEPTH := 8.0
 const GROUND_OVERLAP := 0.12
 const ASPHALT := preload("res://assets/buildings/asphalt.gdshader")
+## Telephone poles down the left of the road, every POLE_SPACING metres, from a
+## little past the workshop to just before the house.
+const POLE_SPACING := 42.0
+const POLE_FIRST_Z := -48.0
+const POLE_SIDE := -7.4
+const POLE_HEIGHT := 7.2
+const WIRE_SAG := 0.9
 
 @export var target: Node3D
 @export var segment_length := 80.0
@@ -36,10 +43,32 @@ var yellow := Shapes.material(Color("#cfa247"))
 var desert_ground: MeshInstance3D
 var terrain := Terrain.new()
 var stream_stops := false
+var pole_mesh := CylinderMesh.new()
+var arm_mesh := BoxMesh.new()
+var wire_mesh := CylinderMesh.new()
+var pole_shape := CylinderShape3D.new()
+var pole_wood := Shapes.material(Color("#4a3a2c"))
+var wire_black := Shapes.material(Color("#191817"), 0.3, 0.6)
 
 
 func _ready() -> void:
 	road_material.shader = ASPHALT
+	pole_mesh.top_radius = 0.1
+	pole_mesh.bottom_radius = 0.13
+	pole_mesh.height = POLE_HEIGHT
+	pole_mesh.radial_segments = 8
+	pole_mesh.rings = 0
+	pole_mesh.material = pole_wood
+	arm_mesh.size = Vector3(1.5, 0.1, 0.1)
+	arm_mesh.material = pole_wood
+	wire_mesh.top_radius = 0.012
+	wire_mesh.bottom_radius = 0.012
+	wire_mesh.height = 1.0
+	wire_mesh.radial_segments = 4
+	wire_mesh.rings = 0
+	wire_mesh.material = wire_black
+	pole_shape.radius = 0.13
+	pole_shape.height = POLE_HEIGHT
 	sand.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	# Local boxes keep collision broad-phase bounds close to the bodies using them.
 	ground_shape.size = Vector3(GROUND_TILE_SIZE + GROUND_OVERLAP, GROUND_DEPTH, GROUND_TILE_SIZE + GROUND_OVERLAP)
@@ -179,6 +208,7 @@ func _create_segment(index: int) -> Node3D:
 	var start := maxf(segment_start, HOUSE_APPROACH)
 	var stop_side := _stop_side(index) if index < -1 else 0.0
 	terrain.populate(segment, segment_start, segment_length, index, absi(index) <= 1, stop_side, _road_x)
+	_add_power_line(segment, segment_start, segment_start + segment_length)
 	if start >= end:
 		return segment
 	if start == HOUSE_APPROACH:
@@ -200,6 +230,77 @@ func _create_segment(index: int) -> Node3D:
 	if end == ROAD_END:
 		_add_strip(segment, "CrumbledEnd", end - 0.10, end + 0.48, -half, half, -0.012, gravel)
 	return segment
+
+
+func _has_pole(z: float) -> bool:
+	if z > POLE_FIRST_Z or z < HOUSE_APPROACH + 30.0:
+		return false
+	# Leave room for any stop on the poles' side of the road.
+	var near := floori(z / segment_length)
+	for index in range(near - 1, near + 2):
+		if _has_stop(index) and _stop_side(index) < 0.0 and absf(z - (index + 0.5) * segment_length) < 24.0:
+			return false
+	return true
+
+
+func _pole_top(z: float, across: float) -> Vector3:
+	## Where a wire hangs off the cross-arm of the pole at z.
+	var slope := _road_x(z + 0.5) - _road_x(z - 0.5)
+	var right := Vector3(1, 0, -slope).normalized()
+	return _sample(z, POLE_SIDE) + Vector3.UP * (POLE_HEIGHT - 0.42) + right * across
+
+
+func _add_power_line(segment: Node3D, from_z: float, to_z: float) -> void:
+	var first := ceili(from_z / POLE_SPACING)
+	var last := floori((to_z - 0.001) / POLE_SPACING)
+	for k in range(first, last + 1):
+		var z := k * POLE_SPACING
+		if not _has_pole(z):
+			continue
+		var base := _sample(z, POLE_SIDE)
+		var slope := _road_x(z + 0.5) - _road_x(z - 0.5)
+		var facing := Basis(Vector3.UP, atan2(-slope, 1.0))
+		var lean := Basis(Vector3.FORWARD, (posmod(hash("pole:%d" % k), 7) - 3) * 0.006)
+		var pole := MeshInstance3D.new()
+		pole.name = "Pole"
+		pole.mesh = pole_mesh
+		segment.add_child(pole)
+		pole.transform = Transform3D(facing * lean, base - segment.position + Vector3.UP * POLE_HEIGHT * 0.5)
+		var arm := MeshInstance3D.new()
+		arm.name = "CrossArm"
+		arm.mesh = arm_mesh
+		pole.add_child(arm)
+		arm.position.y = POLE_HEIGHT * 0.5 - 0.5
+		var body := StaticBody3D.new()
+		pole.add_child(body)
+		var hitbox := CollisionShape3D.new()
+		hitbox.shape = pole_shape
+		body.add_child(hitbox)
+		# Two wires back to the previous pole, sagging in the middle.
+		var previous := z + POLE_SPACING
+		if not _has_pole(previous):
+			continue
+		for across in [-0.6, 0.6]:
+			var a := _pole_top(z, across) - segment.position
+			var b := _pole_top(previous, across) - segment.position
+			var points: Array[Vector3] = []
+			for step in range(7):
+				var t := step / 6.0
+				points.append(a.lerp(b, t) + Vector3.DOWN * WIRE_SAG * 4.0 * t * (1.0 - t))
+			for step in range(6):
+				_wire_piece(segment, points[step], points[step + 1])
+
+
+func _wire_piece(segment: Node3D, from: Vector3, to: Vector3) -> void:
+	var span := to - from
+	var wire := MeshInstance3D.new()
+	wire.name = "Wire"
+	wire.mesh = wire_mesh
+	wire.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	segment.add_child(wire)
+	var up := span.normalized()
+	var side := up.cross(Vector3.FORWARD if absf(up.z) < 0.9 else Vector3.RIGHT).normalized()
+	wire.transform = Transform3D(Basis(side, up * span.length(), side.cross(up)), (from + to) * 0.5)
 
 
 func _build_house_turnoff(segment: Node3D) -> void:
