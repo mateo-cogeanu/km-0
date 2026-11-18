@@ -23,6 +23,15 @@ var _install_check := 0.0
 var _scrapes := {}
 
 
+func _ready() -> void:
+	add_to_group("salvage_noise")
+
+
+func heard(at: Vector3, level: float) -> void:
+	## A sound reported by something else (a door slammed).
+	add_event(at, level, _nearest_player(at))
+
+
 func _process(delta: float) -> void:
 	for event in events:
 		event["age"] += delta
@@ -60,6 +69,8 @@ func player_level(player: Node3D) -> float:
 
 
 func vehicle_level(vehicle: Node3D) -> float:
+	if vehicle.get("honking"):
+		return 1.0
 	var running := String(vehicle.get("audible_engine_variant"))
 	var level: float = ENGINES.get(running, 0.0)
 	var speed := Vector2(vehicle.linear_velocity.x, vehicle.linear_velocity.z).length()

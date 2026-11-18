@@ -317,7 +317,7 @@ func _spawn_players() -> void:
 	var me := local_player()
 	if me:
 		me.camera.make_current()
-	show_message("The buyer wants: two batteries, a radiator and an engine, on the pallet by morning.\nGo quietly. Sound carries over water.", 9.0)
+	show_message("The buyer wants: two batteries, a radiator and an engine, on the pallet by morning.\nGo quietly. Sound carries over water. Load parts onto the truck to drive them up (E against it).", 10.0)
 
 
 func local_player() -> CharacterBody3D:
@@ -360,7 +360,7 @@ func _count_pallet() -> void:
 	delivered = {}
 	for body in pallet_area.get_overlapping_bodies():
 		var kind := String(body.get_meta("vehicle_part_type", ""))
-		if body.has_meta("held_by"):
+		if body.has_meta("held_by") or body.has_meta("welded_vehicle"):
 			continue
 		if kind == "aux_battery":
 			kind = "battery"

@@ -136,6 +136,10 @@ var tire_effects: Node3D
 
 
 var drawn_at := Vector3.ZERO
+## The horn: held down with H, heard by everyone (and, in the Salvage Run, by
+## whatever is listening).
+var honking := false
+var horn_player: AudioStreamPlayer3D
 var litres_per_km := 3.0
 
 func _ready() -> void:
@@ -2621,6 +2625,51 @@ func _get_local_visual_bounds(part: Node3D) -> AABB:
 	return bounds if has_bounds else AABB()
 
 
+func press_horn(on: bool) -> void:
+	if on == honking:
+		return
+	if NetworkManager.is_online():
+		_horn.rpc(on)
+	else:
+		_horn(on)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _horn(on: bool) -> void:
+	honking = on
+	if horn_player == null:
+		horn_player = AudioStreamPlayer3D.new()
+		var tone := (load("res://assets/audio/salvage/horn.wav") as AudioStreamWAV).duplicate() as AudioStreamWAV
+		tone.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		tone.loop_begin = int(0.05 * tone.mix_rate)
+		tone.loop_end = int(tone.get_length() * tone.mix_rate)
+		horn_player.stream = tone
+		horn_player.unit_size = 14.0
+		horn_player.max_distance = 220.0
+		horn_player.volume_db = -2.0
+		add_child(horn_player)
+		horn_player.position = Vector3(0, 0.6, -1.9)
+	if on:
+		horn_player.play()
+	else:
+		horn_player.stop()
+
+
+func _slam(at: Vector3, level: float) -> void:
+	## A door, hood or boot shut: eased closed it is a click, slammed it is
+	## heard down the street.
+	if NetworkManager.is_online():
+		_slam_sound.rpc(at, level)
+	else:
+		_slam_sound(at, level)
+
+
+@rpc("authority", "call_local", "reliable")
+func _slam_sound(at: Vector3, level: float) -> void:
+	_play_sfx_3d(DOOR_LATCH, at, lerpf(-22.0, 0.0, level))
+	get_tree().call_group("salvage_noise", "heard", at, level)
+
+
 func _viewing() -> bool:
 	## This car's camera is the view, or the view is easing into it.
 	if driver_camera == null:
@@ -2731,7 +2780,8 @@ func _drag_interactable(area: Area3D, drag_amount: float) -> void:
 	_apply_panel_rotation(part, open_axis, open_direction * open_angle * target_open)
 	_update_panel_target(area)
 	if current_open > 0.08 and target_open < 0.01:
-		_play_sfx_3d(DOOR_LATCH, part.global_position, -13.0)
+		# How fast it was swung shut: a gentle push, or a slam.
+		_slam(part.global_position, clampf((current_open - target_open) * 1.6, 0.1, 0.9))
 	if NetworkManager.is_online():
 		_sync_panels.rpc({str(area.name): part.rotation})
 
@@ -2754,7 +2804,10 @@ func _latch_entry_door(from: Vector3) -> void:
 		return
 	var part := _get_interactable_part(area)
 	if part:
-		part.rotation = part_closed_rotation.get(part.get_path(), part.rotation)
+		var closed: Vector3 = part_closed_rotation.get(part.get_path(), part.rotation)
+		if part.rotation.distance_to(closed) > 0.1 and (not NetworkManager.is_online() or is_multiplayer_authority()):
+			_slam(part.global_position, 0.35)
+		part.rotation = closed
 		_update_panel_target(area)
 		if NetworkManager.is_online() and is_multiplayer_authority():
 			_sync_panels.rpc({area_name: part.rotation})

@@ -466,7 +466,7 @@ func _grabbed(who: String) -> void:
 		me.ending_locked = true
 		game.show_message("It has you.\nSomeone make a noise, anywhere else. Now.", HOLD_SECONDS)
 	else:
-		game.show_message("It's got %s!\nMake a noise somewhere else: the horn, a car door, throw something." % str(victim.get("player_name")), HOLD_SECONDS)
+		game.show_message("It's got %s!\nMake a noise somewhere else: lean on the truck's horn (H), slam a car door, throw a part." % str(victim.get("player_name")), HOLD_SECONDS)
 
 
 @rpc("authority", "call_local", "reliable")

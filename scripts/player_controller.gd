@@ -147,6 +147,7 @@ var helping_holder: Node
 var helper_point := Vector3.ZERO
 var helper_seen := -10.0
 var _helper_send := 0.0
+var _helper_far := 0.0
 var low_fuel_warned := false
 
 func _ready() -> void:
@@ -312,11 +313,16 @@ func _start_helping(object: RigidBody3D) -> void:
 	if helping_holder == null:
 		return
 	helping_object = object
+	_helper_far = 0.0
+	# Your end of it: you don't shove it about by walking into it.
+	add_collision_exception_with(object)
 	_show_tip("Carrying it with %s   ·   E  Let go" % str(helping_holder.get("player_name")))
 	tip_time = 3.0
 
 
 func _stop_helping() -> void:
+	if is_instance_valid(helping_object):
+		remove_collision_exception_with(helping_object)
 	if is_instance_valid(helping_holder) and NetworkManager.is_online():
 		helping_holder.carry_left.rpc_id(helping_holder.get_multiplayer_authority())
 	helping_object = null
@@ -327,8 +333,12 @@ func _update_helping(delta: float) -> void:
 	if helping_object == null:
 		return
 	if not is_instance_valid(helping_object) or not is_instance_valid(helping_holder) or not helping_object.has_meta("held_by") \
-			or int(helping_object.get_meta("held_by")) != helping_holder.get_multiplayer_authority() \
-			or helping_object.global_position.distance_to(camera.global_position) > 3.6:
+			or int(helping_object.get_meta("held_by")) != helping_holder.get_multiplayer_authority():
+		_stop_helping()
+		return
+	# Walked away from it (not just a jolt for a moment): you let go.
+	_helper_far = _helper_far + delta if helping_object.global_position.distance_to(camera.global_position) > 3.6 else 0.0
+	if _helper_far > 0.5:
 		_stop_helping()
 		return
 	_helper_send -= delta
@@ -399,6 +409,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Z:
 			_try_sleep("in the car")
+			get_viewport().set_input_as_handled()
+		if event is InputEventKey and not event.echo and event.keycode == KEY_H and active_vehicle.has_method("press_horn"):
+			active_vehicle.press_horn(event.pressed)
 			get_viewport().set_input_as_handled()
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_T and not NetworkManager.salvage():
 			car_radio.toggle()
@@ -1139,6 +1152,8 @@ func _enter_vehicle(car: Node3D, restoring: bool = false) -> void:
 
 func _exit_vehicle() -> void:
 	var vehicle := active_vehicle
+	if vehicle.has_method("press_horn"):
+		vehicle.press_horn(false)
 	var leaving_view := get_viewport().get_camera_3d()
 	var leaving_at := leaving_view.get_global_transform_interpolated() if leaving_view else Transform3D()
 	var exit_position: Vector3 = active_vehicle.call("exit") as Vector3
@@ -1548,7 +1563,7 @@ func _interaction_text() -> String:
 			return "Mouse  Look around   ·   E  Exit"
 		var rest := "   ·   Z  Sleep" if vitals and vitals.can_sleep() else ""
 		if NetworkManager.salvage():
-			return "C  Change camera   ·   L  Headlights   ·   E  Exit"
+			return "C  Change camera   ·   L  Headlights   ·   H  Horn   ·   E  Exit"
 		return "C  Change camera   ·   L  Headlights   ·   T  Radio   ·   E  Exit" + rest
 	if helping_object:
 		return "Carrying it together   ·   E  Let go"
@@ -1567,7 +1582,7 @@ func _interaction_text() -> String:
 				return "E  Install %s" % _object_title(held_object)
 			if not _find_touching_vehicle(held_object):
 				return "%s   ·   E  Drop" % reason
-			return "%s   ·   E  Weld" % reason
+			return "%s   ·   E  %s" % [reason, "Load onto the truck" if NetworkManager.salvage() else "Weld"]
 		if held_object.is_in_group("fuel_canister") and car:
 			if _find_refuel_car():
 				return "E  Refuel"
@@ -1580,6 +1595,8 @@ func _interaction_text() -> String:
 		if _is_spray_can(held_object) and car:
 			return "Hold left mouse  Paint   ·   R  Change color   ·   E  Drop"
 		if _find_touching_vehicle(held_object):
+			if NetworkManager.salvage():
+				return "E  Load %s onto the truck" % _object_title(held_object)
 			return "E  Weld %s to vehicle" % _object_title(held_object)
 		var extra := ""
 		if held_object.is_in_group("food"):
@@ -1633,7 +1650,7 @@ func _interaction_text() -> String:
 			var vehicle: Node3D = target.get_meta("welded_vehicle")
 			if vehicle.can_wire_battery(target):
 				return "R  Wire battery   ·   E  Unweld"
-			return "E  Unweld %s" % _object_title(target)
+			return ("E  Unload %s" if NetworkManager.salvage() else "E  Unweld %s") % _object_title(target)
 		if _can_grab_body(target):
 			return "E  Pick up %s" % _object_title(target)
 	return ""
@@ -1669,7 +1686,7 @@ func _push_colliding_bodies(walking_velocity: Vector3, delta: float) -> void:
 	for index in get_slide_collision_count():
 		var contact := get_slide_collision(index)
 		var body := contact.get_collider() as RigidBody3D
-		if body == null or body == held_object or body.has_meta("welded_vehicle"):
+		if body == null or body == held_object or body == helping_object or body.has_meta("welded_vehicle"):
 			continue
 		var direction := -contact.get_normal().slide(Vector3.UP).normalized()
 		var approach := walking_velocity.dot(direction)

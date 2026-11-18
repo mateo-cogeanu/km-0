@@ -31,6 +31,26 @@ func _ready() -> void:
 		if p != me:
 			other = p
 	_say("story %s, players here %d, me %s other %s" % [NetworkManager.story, world.players().size(), me.name, other.name if other else "none"])
+	# The guest leans on the horn, then slams a car door; the host hears both.
+	var truck: Node3D = world.get_node("Truck")
+	var door_car: Node3D = world.get_node("Flooded_2")
+	if role == "host":
+		await _seconds(0.8)
+		_say("host hears guest's horn: honking %s, noise %.2f" % [truck.honking, world.noise.vehicle_level(truck)])
+		world.noise.events.clear()
+		await _seconds(1.6)
+		_say("host hears guest's slam: %s" % [world.noise.events.map(func(e: Dictionary) -> float: return snappedf(e["level"], 0.01))])
+	else:
+		truck.press_horn(true)
+		await _seconds(1.2)
+		truck.press_horn(false)
+		me.global_position = door_car.global_position + Vector3(-2.2, 1.2, 0)
+		me.reset_physics_interpolation()
+		await _seconds(0.3)
+		door_car._drag_interactable(door_car.get_node("DoorFL"), 200.0)
+		await _seconds(0.3)
+		door_car._drag_interactable(door_car.get_node("DoorFL"), -200.0)
+		await _seconds(0.6)
 	# Both go to the V8 at the end of the street.
 	var v8: Node3D = world.get_node("Flooded_6")
 	var engine: RigidBody3D
@@ -80,7 +100,10 @@ func _ready() -> void:
 			await _seconds(0.3)
 			me._start_helping(engine)
 			_say("guest started helping: %s, gap %.2f" % [me.helping_object != null, engine.global_position.distance_to(me.camera.global_position)])
-		await _seconds(2.7)
+		for k in 9:
+			await _seconds(0.3)
+			_say("  t%d helping %s held_by %s gap %.2f holder %s" % [k, me.helping_object != null, engine.get_meta("held_by") if engine.has_meta("held_by") else "-",
+				engine.global_position.distance_to(me.camera.global_position), me.helping_holder.name if me.helping_holder else "-"])
 		_say("guest helping: %s" % (me.helping_object != null))
 		me._stop_helping()
 		await _seconds(4.5)

@@ -7,6 +7,7 @@ Writes to assets/audio/salvage:
   listen.wav       the thing in the water, close: a wet, rattling click train
   surface.wav      something big breaking the surface
   grab.wav         a violent splash and churn
+  horn.wav         a car horn, held (loops)
 """
 
 from array import array
@@ -153,3 +154,18 @@ for i in range(length):
     grab[i] = blast[i] * 4.0 * exp(-t / 0.18) + spray[i] * 1.2 * exp(-t / 0.3) \
         + churn[i] * 7.0 * (0.5 + 0.5 * sin(2 * pi * 3.1 * t)) * min(1.0, t / 0.2) * exp(-t / 1.4)
 write("grab", grab, 0.85)
+
+# Horn: an old car's two-note horn, a little hoarse. One second of whole
+# cycles of both notes, so it loops cleanly for as long as it is held.
+from math import tanh
+length = RATE
+buzz = lowpass(noise(length, 80), 3000)
+horn = [0.0] * length
+for i in range(length):
+    t = i / RATE
+    tone = tanh(3.2 * sin(2 * pi * 415 * t)) + 0.8 * tanh(3.2 * sin(2 * pi * 520 * t))
+    horn[i] = tone * (1.0 + 0.04 * sin(2 * pi * 7 * t)) + buzz[i] * 0.6
+horn = lowpass(horn, 3200)
+for i in range(int(0.03 * RATE)):
+    horn[i] *= i / (0.03 * RATE)
+write("horn", horn, 0.7)
