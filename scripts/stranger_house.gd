@@ -281,18 +281,10 @@ func _build_stranger() -> void:
 	add_child(stranger)
 	stranger.build(false)
 	stranger.position = Vector3(0.55, PlayerBody.FEET - 0.03, -0.7)
-	# Older, in a worn flannel coat and work trousers.
-	var recolor := {"Jacket": Color("#5a2a22"), "Jeans": Color("#5b5240"), "Hair": Color("#7a7670")}
+	# Older, in a heavy coat and work trousers (player_body.gd dresses him).
+	stranger.dress_as_stranger()
 	for mesh: MeshInstance3D in stranger.find_children("*", "MeshInstance3D", true, false):
 		mesh.layers = 1
-		if String(mesh.name).begins_with("Beard"):
-			mesh.visible = true
-		for surface in mesh.mesh.get_surface_count():
-			var material := mesh.mesh.surface_get_material(surface)
-			if material and recolor.has(material.resource_name):
-				var worn := (material as BaseMaterial3D).duplicate() as BaseMaterial3D
-				worn.albedo_color = recolor[material.resource_name]
-				mesh.set_surface_override_material(surface, worn)
 	talk_spot = Area3D.new()
 	talk_spot.name = "TalkTarget"
 	talk_spot.collision_layer = 8

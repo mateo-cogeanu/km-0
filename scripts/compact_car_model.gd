@@ -1,6 +1,18 @@
 extends RefCounted
 
 const Shapes := preload("res://scripts/prop_shapes.gd")
+const Looks := preload("res://scripts/vehicle_looks.gd")
+## Box pieces swapped for Blender parts of the same size (Sources/make_road_vehicles.py):
+## name -> [part, faces the back of the car].
+const PARTS := {
+	"HeadlightLens": ["lens", false], "HeadlightBezel": ["lamp_bezel", false], "FrontIndicator": ["lens", false],
+	"TailHousing": ["lamp_bezel", true], "BrakeLensLeft": ["lens", true], "BrakeLensRight": ["lens", true],
+	"RearIndicator": ["lens", true], "ReverseHousing": ["lamp_bezel", true], "ReverseLensLeft": ["lens", true],
+	"ReverseLensRight": ["lens", true], "GrilleSlat": ["grille_slat", false], "FrontPlate": ["number_plate", true],
+	"RearPlate": ["number_plate", false], "MirrorHousing": ["mirror_housing", false], "ExteriorHandle": ["door_handle", false],
+	"SeatBack": ["seat_back", false], "Headrest": ["headrest", false], "RearBench": ["bench", false],
+	"RearBackrest": ["seat_back", false], "AirVent": ["air_vent", false], "Radio": ["radio", false], "Pedal": ["pedal", true],
+}
 const SEDAN := 0
 const HATCHBACK := 1
 const WAGON := 2
@@ -19,10 +31,21 @@ var vinyl := Shapes.material(Color("#343637"), 0.0, 0.81)
 var dial_ink := Shapes.material(Color("#d7d6c5"), 0.0, 0.78)
 
 
-func _init(color := Color("#728b85")) -> void:
+## How long it has stood in the sun: a little dust on cars still running, rust
+## and bare primer on the wrecks.
+var wear := 0.2
+
+
+func _init(color := Color("#728b85"), age := 0.2) -> void:
+	wear = age
 	paint = Shapes.material(color, 0.24, 0.47)
 	paint.clearcoat_enabled = true
 	paint.clearcoat_roughness = 0.48
+	Looks.age_paint(paint, wear)
+	if wear > 0.5:
+		paint.clearcoat_enabled = false
+		paint.roughness = 0.8
+		paint.metallic = 0.1
 	glass = Shapes.material(Color(0.20, 0.28, 0.31, 0.34), 0.16, 0.23)
 	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -85,6 +108,19 @@ func build(root: Node3D, style: int, mechanical := true) -> void:
 		wheel.position = Vector3(-0.82 if i % 2 == 0 else 0.82, 0.39, WHEEL_AXLES[i / 2])
 	if mechanical:
 		_engine_mounts(root)
+	dress(root)
+
+
+func dress(root: Node) -> void:
+	## Blender parts in place of the box-shaped lamps, grille, mirrors,
+	## handles, plates, seats, vents and pedals; names and materials stay.
+	for instance: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
+		var piece: String = instance.get_meta("piece", instance.name)
+		if PARTS.has(piece):
+			Looks.reshape(instance, PARTS[piece][0], PARTS[piece][1])
+			if piece == "AirVent":
+				for slat in instance.get_children():
+					slat.visible = false
 
 
 func _station(z: float, style: int) -> Vector2:
@@ -154,7 +190,7 @@ func _lower_body(body: Node3D, style: int) -> void:
 	var header_edge := _opening_edge(nose_z, style)
 	var hood_edge := _opening_edge(HOOD_FRONT - 0.008, style)
 	_quad(shell, _side(header_edge, -1), header_edge, hood_edge, _side(hood_edge, -1))
-	_finish(shell, body, "BodyPaint", paint, true)
+	_panel(_finish(shell, body, "BodyPaint", paint, true), "body_%d_chassis" % style)
 	_finish(tubs, body, "WheelWellLiners", rubber)
 	_finish(flanges, body, "PanelReturns", rubber)
 	for side in [-1.0, 1.0]:
@@ -189,12 +225,14 @@ func _bumpers(body: Node3D, style: int) -> void:
 	var rear := Vector2(rows.back()[1], rows.back()[0])
 	var bumper_top: float = [0.475, 0.49, 0.54][style]
 	var bumper_material := trim if style != WAGON else Shapes.material(Color("#454a48"), 0.12, 0.73)
-	_skin(body, "FrontBumper", [[nose.y - 0.078, nose.x - 0.06, nose.x - 0.005, 0.285, bumper_top],
+	var front_bumper := _skin(body, "FrontBumper", [[nose.y - 0.078, nose.x - 0.06, nose.x - 0.005, 0.285, bumper_top],
 		[nose.y - 0.015, nose.x - 0.015, nose.x + 0.035, 0.25, bumper_top],
 		[nose.y + 0.12, nose.x, nose.x + 0.049, 0.25, bumper_top - 0.012]], bumper_material)
-	_skin(body, "RearBumper", [[rear.y - 0.11, rear.x - 0.01, rear.x + 0.041, 0.254, 0.47],
+	var rear_bumper_skin := _skin(body, "RearBumper", [[rear.y - 0.11, rear.x - 0.01, rear.x + 0.041, 0.254, 0.47],
 		[rear.y + 0.025, rear.x - 0.014, rear.x + 0.024, 0.26, 0.47],
 		[rear.y + 0.078, rear.x - 0.053, rear.x, 0.29, 0.46]], bumper_material)
+	_panel(front_bumper, "body_%d_bumper_front" % style)
+	_panel(rear_bumper_skin, "body_%d_bumper_rear" % style)
 	var grille_width: float = [0.62, 0.43, 0.70][style]
 	var lamp_y := 0.651 if style != WAGON else 0.689
 	Shapes.box(body, "GrilleRecess", Vector3(grille_width, 0.166, 0.034), Vector3(0, lamp_y, nose.y - 0.018), trim)
@@ -243,7 +281,7 @@ func _cabin(root: Node3D, body: Node3D, style: int) -> void:
 	var front: Vector3 = roof[0]
 	var back: Vector3 = roof[1]
 	var rear: Vector3 = BODIES[style]["rear"]
-	_skin(body, "RoofPaint", [[front.z, front.x - 0.025, front.x, front.y - 0.012, front.y + 0.023],
+	var roof_skin := _skin(body, "RoofPaint", [[front.z, front.x - 0.025, front.x, front.y - 0.012, front.y + 0.023],
 		[front.z + 0.14, front.x - 0.028, front.x + 0.004, front.y, front.y + 0.052],
 		[back.z - 0.11, back.x - 0.028, back.x + 0.004, back.y + 0.005, back.y + 0.045],
 		[back.z, back.x - 0.025, back.x, back.y - 0.013, back.y + 0.022]], paint)
@@ -270,6 +308,11 @@ func _cabin(root: Node3D, body: Node3D, style: int) -> void:
 		var trim_line := WINDSHIELD_BASE.lerp(front, 0.18)
 		var blade := Vector3(side * 0.48, trim_line.y + 0.006, trim_line.z - 0.013)
 		Shapes.tube(body, "WiperBlade", Vector3(side * 0.09, blade.y, blade.z), blade, 0.008, rubber)
+	# The roof and pillars as one Blender shell; the pillar boxes stay, hidden.
+	if _panel(roof_skin, "body_%d_cabin" % style):
+		for child in body.get_children():
+			if child is MeshInstance3D and String(child.get_meta("piece", "")) in ["FrontPillar", "CenterPillar", "RoofGutter", "RearPillar", "RearDoorJamb", "QuarterBelt"]:
+				child.visible = false
 	if style == WAGON:
 		for side in [-1.0, 1.0]:
 			for z in [-0.17, 1.57]:
@@ -325,7 +368,7 @@ func make_door(parent: Node3D, title: String, style := SEDAN) -> Node3D:
 	var belt_b := Vector3(0.836, b.y - 0.004, end)
 	_side_quad(skin, side, _side(top_a, side) - door.position, _side(top_b, side) - door.position,
 		_side(belt_b, side) - door.position, _side(belt_a, side) - door.position)
-	_finish(skin, door, "DoorSkin", paint, true)
+	_panel(_finish(skin, door, "DoorSkin", paint, true), "body_%d_door_%s" % [style, title.left(2)], door.position.y)
 	var bottom_front := belt_a + Vector3(0, 0.006, 0.020)
 	var bottom_back := belt_b + Vector3(0, 0.006, -0.021)
 	var top_front: Vector3 = BODIES[style]["roof"][0] if front else _roof_at(0.082, style)
@@ -358,14 +401,15 @@ func make_door(parent: Node3D, title: String, style := SEDAN) -> Node3D:
 		var mirror := Shapes.box(door, "MirrorHousing", Vector3(0.144, 0.080, 0.092), mount, trim)
 		mirror.rotation.y = side * 0.20
 		Shapes.box(mirror, "MirrorGlass", Vector3(0.122, 0.058, 0.004), Vector3(0, 0, 0.047), alloy)
+	dress(door)
 	return door
 
 
 func make_hood(parent: Node3D) -> Node3D:
 	var hinge := _node(parent, "HoodTargetHinge")
 	hinge.position = Vector3(0, 0.921, -0.89)
-	_skin(hinge, "Hood", [[-1.19, 0.707, 0.739, -0.124, -0.092],
-		[-0.69, 0.709, 0.739, -0.076, -0.041], [-0.026, 0.709, 0.739, -0.033, 0.007]], paint)
+	_panel(_skin(hinge, "Hood", [[-1.19, 0.707, 0.739, -0.124, -0.092],
+		[-0.69, 0.709, 0.739, -0.076, -0.041], [-0.026, 0.709, 0.739, -0.033, 0.007]], paint), "body_hood", hinge.position.y)
 	return hinge
 
 
@@ -376,8 +420,8 @@ func make_tailgate(parent: Node3D, style: int) -> Node3D:
 	if style == SEDAN:
 		hinge.position = Vector3(0, rear.y, rear.z + 0.01)
 		var length := rear_bumper(style) - hinge.position.z
-		_skin(hinge, "Trunk", [[0.0, 0.722, 0.775, -0.038, -0.005], [length - 0.21, 0.719, 0.767, -0.06, -0.022],
-			[length - 0.018, 0.702, 0.752, -0.084, -0.058]], paint)
+		_panel(_skin(hinge, "Trunk", [[0.0, 0.722, 0.775, -0.038, -0.005], [length - 0.21, 0.719, 0.767, -0.06, -0.022],
+			[length - 0.018, 0.702, 0.752, -0.084, -0.058]], paint), "body_%d_trunk" % style, hinge.position.y)
 	else:
 		var back: Vector3 = BODIES[style]["roof"][1]
 		hinge.position = Vector3(0, back.y, back.z + 0.012)
@@ -389,9 +433,24 @@ func make_tailgate(parent: Node3D, style: int) -> Node3D:
 		for side in [-1.0, 1.0]:
 			_frame(gate, "LiftgateFrame", side, top, belt, 0.036)
 		_plate(gate, "TailgatePaint", [_side(belt, -1), belt, bottom, _side(bottom, -1)], Vector3(0, -0.014, -0.028), paint, true)
+		var gate_panel := gate.get_node("TailgatePaint") as MeshInstance3D
+		if _panel(gate_panel, "body_%d_tailgate" % style, hinge.position.y):
+			# Its own frame comes with the Blender gate.
+			for child in gate.get_children():
+				if child is MeshInstance3D and String(child.get_meta("piece", "")) == "LiftgateFrame":
+					child.visible = false
 		var handle := belt.lerp(bottom, 0.67)
 		Shapes.box(gate, "TailgateHandle", Vector3(0.225, 0.032, 0.028), Vector3(0, handle.y, handle.z + 0.018), trim)
 	return hinge
+
+
+func _panel(instance: MeshInstance3D, title: String, lift := 0.0) -> bool:
+	## Give a painted panel its Blender shell (Sources/make_car_bodies.py): the
+	## node, its material, hinge and collider stay; only the mesh changes.
+	if instance == null or not Looks.has_panel(title):
+		return false
+	instance.mesh = Looks.panel(title, lift)
+	return true
 
 
 func _side(point: Vector3, side: float) -> Vector3:
@@ -477,16 +536,10 @@ func _cockpit(cabin: Node3D, style: int) -> void:
 	var wheel := _node(cabin, "Steerwheel")
 	wheel.position = Vector3(-0.416, 0.906, -0.393)
 	wheel.rotation.x = 1.12
-	var ring := TorusMesh.new()
-	ring.inner_radius = 0.151
-	ring.outer_radius = 0.176
-	ring.rings = 28
-	ring.ring_segments = 10
-	_mesh(wheel, "SteeringRim", ring, rubber)
-	Shapes.box(wheel, "SteeringHorn", Vector3(0.133, 0.045, 0.093), Vector3.ZERO, vinyl)
-	for side in [-1.0, 1.0]:
-		Shapes.box(wheel, "SteeringSpoke", Vector3(0.107, 0.024, 0.035), Vector3(side * 0.103, 0, 0), trim)
-	Shapes.box(wheel, "LowerSpoke", Vector3(0.037, 0.024, 0.096), Vector3(0, 0, 0.103), trim)
+	var steering := MeshInstance3D.new()
+	steering.name = "SteeringRim"
+	steering.mesh = Looks.mesh("steering_wheel", wear)
+	wheel.add_child(steering)
 	Shapes.tube(cabin, "SteeringColumn", wheel.position - Vector3(0, 0.015, 0.018),
 		Vector3(-0.416, 0.809, -0.585), 0.047, vinyl)
 	for x in [-0.68, -0.11, 0.051, 0.655]:
@@ -553,47 +606,15 @@ func _engine_mounts(root: Node3D) -> void:
 
 
 func make_wheel(parent: Node3D, title: String) -> Node3D:
+	## Tyre, tread, pressed-steel rim, hubcap and nuts from Blender; the outer
+	## face looks out from the car on either side.
 	var wheel := _node(parent, title)
-	var surface := SurfaceTool.new()
-	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var profile := [Vector2(-0.096, 0.270), Vector2(-0.109, 0.321), Vector2(-0.103, 0.372),
-		Vector2(-0.075, 0.384), Vector2(0, 0.390), Vector2(0.075, 0.384), Vector2(0.103, 0.372),
-		Vector2(0.109, 0.321), Vector2(0.096, 0.270)]
-	for j in profile.size():
-		var a: Vector2 = profile[j]
-		var b: Vector2 = profile[(j + 1) % profile.size()]
-		for i in range(48):
-			var theta := TAU * i / 48.0
-			var next := TAU * (i + 1) / 48.0
-			_quad(surface, _polar(a, theta), _polar(b, theta), _polar(b, next), _polar(a, next))
-	_finish(surface, wheel, "Tire", rubber)
-	var tread := SurfaceTool.new()
-	tread.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in range(48):
-		var theta := TAU * i / 48.0
-		for side in [-1.0, 1.0]:
-			var a := _polar(Vector2(side * 0.02, 0.3897), theta)
-			var b := _polar(Vector2(side * 0.084, 0.3850), theta + side * 0.075)
-			var c := _polar(Vector2(side * 0.084, 0.3850), theta + side * 0.075 + 0.035)
-			var d := _polar(Vector2(side * 0.02, 0.3897), theta + 0.035)
-			if side > 0.0:
-				_quad(tread, a, b, c, d)
-			else:
-				_quad(tread, d, c, b, a)
-	_finish(tread, wheel, "TreadBlocks", trim)
-	Shapes.cylinder(wheel, "SteelRim", Vector3.ZERO, Vector3.RIGHT, 0.281, 0.174, alloy, 36)
-	for side in [-1.0, 1.0]:
-		Shapes.cylinder(wheel, "WheelDish", Vector3(side * 0.088, 0, 0), Vector3.RIGHT, 0.249, 0.012, trim, 32)
-		for i in range(12):
-			var angle := TAU * i / 12.0
-			var spoke := Shapes.box(wheel, "PressedSpoke", Vector3(0.018, 0.145, 0.051),
-				Vector3(side * 0.098, cos(angle) * 0.155, sin(angle) * 0.155), alloy)
-			spoke.rotation.x = angle
-		Shapes.cylinder(wheel, "CenterCap", Vector3(side * 0.11, 0, 0), Vector3.RIGHT, 0.086, 0.026, alloy, 24)
-		for i in range(4):
-			var angle := TAU * i / 4.0
-			Shapes.cylinder(wheel, "LugNut", Vector3(side * 0.129, cos(angle) * 0.053, sin(angle) * 0.053),
-				Vector3.RIGHT, 0.014, 0.015, trim, 6)
+	var tire := MeshInstance3D.new()
+	tire.name = "Tire"
+	tire.mesh = Looks.mesh("car_wheel", wear)
+	wheel.add_child(tire)
+	if title.begins_with("FL") or title.begins_with("RL"):
+		tire.rotation.y = PI
 	return wheel
 
 
@@ -680,6 +701,19 @@ static func _mesh(parent: Node3D, title: String, mesh: Mesh, finish: Material) -
 static func _finish(surface: SurfaceTool, parent: Node3D, title: String, finish: Material, body_paint := false) -> MeshInstance3D:
 	surface.generate_normals()
 	surface.index()
-	var instance := _mesh(parent, title, surface.commit(), finish)
+	var built := surface.commit()
+	# Painted panels and bumpers shade smoothly across their facets.
+	if body_paint or title.ends_with("Bumper") or title in ["Dashboard", "SeatBase", "Headliner"]:
+		# Height of this panel's origin above the car's, for where grime gathers.
+		var lift := 0.0
+		var node: Node = parent
+		for i in 2:
+			if node is Node3D and node.name != "Chassis" and node.name != "Interior":
+				lift += (node as Node3D).position.y
+			node = node.get_parent() if node else null
+			if node == null or not (node.name in DOORS or String(node.name).ends_with("Hinge")):
+				break
+		built = Looks.smooth(built, 0.55, lift)
+	var instance := _mesh(parent, title, built, finish)
 	instance.set_meta("body_paint", body_paint)
 	return instance

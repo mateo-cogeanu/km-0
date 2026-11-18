@@ -188,24 +188,28 @@ func _add_wreckage(garage: Node3D, finds: Node3D) -> void:
 
 func _add_empties(parent: Node3D, rng: RandomNumberGenerator) -> void:
 	## Opened, emptied cans and torn wrappers, scattered.
-	var tin := Shapes.material(Color("#8f8d88"), 0.75, 0.35)
-	var inside := Shapes.material(Color("#2a2522"))
 	var wrapper := Shapes.material(Color("#5a2a1e"))
+	var tins := ["food_beans", "food_soup", "food_soda"]
 	for i in rng.randi_range(5, 8):
 		var at := Vector3(rng.randf_range(-2.6, 2.4), 0.04, rng.randf_range(-2.4, 0.8))
 		if i % 3 == 2:
 			var paper := Shapes.box(parent, "TornWrapper", Vector3(0.12, 0.004, 0.05), at - Vector3(0, 0.035, 0), wrapper)
 			paper.rotation = Vector3(rng.randf_range(-0.2, 0.2), rng.randf_range(0, TAU), rng.randf_range(-0.2, 0.2))
 			continue
-		var can := Node3D.new()
+		var kind: String = tins[rng.randi_range(0, tins.size() - 1)]
+		var can := (load("res://assets/desert/props/%s.glb" % kind) as PackedScene).instantiate() as Node3D
 		can.name = "EmptyCan"
 		parent.add_child(can)
-		can.position = at
-		can.rotation = Vector3(PI * 0.5, rng.randf_range(0, TAU), 0) if rng.randf() < 0.7 else Vector3(0, rng.randf_range(0, TAU), 0)
-		Shapes.cylinder(can, "Tin", Vector3.ZERO, Vector3.UP, 0.042, 0.11, tin, 12)
-		Shapes.cylinder(can, "Open", Vector3(0, 0.054, 0), Vector3.UP, 0.036, 0.004, inside, 12)
-		if not can.rotation.x:
-			can.position.y = 0.055
+		if rng.randf() < 0.7:
+			# On its side: the models stand on their base, so lift by the radius.
+			can.rotation = Vector3(PI * 0.5, rng.randf_range(0, TAU), 0)
+			can.position = Vector3(at.x, 0.035 if kind == "food_soda" else 0.043, at.z)
+		else:
+			can.rotation = Vector3(0, rng.randf_range(0, TAU), 0)
+			can.position = Vector3(at.x, 0.0, at.z)
+		for mesh: GeometryInstance3D in can.find_children("*", "GeometryInstance3D", true, false):
+			mesh.visibility_range_end = 30.0
+			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _add_broadcast_stop() -> void:

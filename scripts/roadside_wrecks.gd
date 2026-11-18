@@ -55,18 +55,30 @@ func populate(segment: Node3D, index: int) -> void:
 	var car := Node3D.new()
 	car.name = "Wreck"
 	segment.add_child(car)
-	CarModel.new(FADED[rng.randi_range(0, FADED.size() - 1)]).build(car, rng.randi_range(0, 2), false)
+	CarModel.new(FADED[rng.randi_range(0, FADED.size() - 1)], 1.0).build(car, rng.randi_range(0, 2), false)
 	var at: Vector3 = road._sample(z, lateral) - segment.position
 	car.position = Vector3(at.x, -0.13, at.z)
 	# Pulled over at an angle, nose to the desert, sagging on one corner.
 	car.rotation = Vector3(rng.randf_range(-0.03, 0.03), (0.0 if rng.randf() < 0.7 else PI) + side * rng.randf_range(0.15, 0.6), side * 0.045)
-	var rubber := Shapes.material(Color("#1d1c1b"), 0.0, 0.95)
+	# Its own wheels, the tyres gone soft; one flat to the rim.
 	var flat := rng.randi_range(0, 3)
+	var wheel_names := ["FL_Wheel", "FR_Wheel", "RL_Wheel", "RR_Wheel"]
 	for i in 4:
-		var x := 0.78 if i % 2 == 0 else -0.78
-		var wheel_z: float = CarModel.WHEEL_AXLES[i / 2]
-		var tyre := Shapes.cylinder(car, "Tyre", Vector3(x, 0.3 if i != flat else 0.2, wheel_z), Vector3.RIGHT, 0.3 if i != flat else 0.22, 0.2, rubber, 14)
-		tyre.scale.y = 1.0 if i != flat else 0.75
+		var wheel := car.get_node_or_null(wheel_names[i]) as Node3D
+		if wheel:
+			wheel.position.y = 0.27 if i == flat else 0.33
+			wheel.scale = Vector3(1.0, 0.72 if i == flat else 0.9, 1.0 if i == flat else 0.97)
+	# Sun-crazed glass, some of it gone.
+	var dirty := StandardMaterial3D.new()
+	dirty.albedo_color = Color(0.42, 0.38, 0.3, 0.55)
+	dirty.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dirty.roughness = 0.7
+	dirty.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for pane: MeshInstance3D in car.find_children("*Glass", "MeshInstance3D", true, false) + car.find_children("*Screen", "MeshInstance3D", true, false):
+		if rng.randf() < 0.35:
+			pane.visible = false
+		else:
+			pane.material_override = dirty
 	var door := car.get_node_or_null("FL_Door" if side > 0.0 else "FR_Door") as Node3D
 	if door:
 		door.rotation.y = -1.05 * (1.0 if side > 0.0 else -1.0)

@@ -6,6 +6,36 @@ extends Node3D
 
 const MODEL := preload("res://assets/characters/player.glb")
 const Shapes := preload("res://scripts/prop_shapes.gd")
+const FABRIC := preload("res://assets/characters/fabric.gdshader")
+const SKIN := preload("res://assets/characters/skin.gdshader")
+const HAIR := preload("res://assets/characters/hair.gdshader")
+const Desert := preload("res://scripts/desert_models.gd")
+## Each garment's look, by the material name Sources/make_player.py gives it:
+## [shader, settings]. Fabric kinds: 0 canvas, 1 denim, 2 knit, 3 wool,
+## 4 leather, 5 cotton, 6 flannel, 7 rubber.
+const LOOKS := {
+	"Jacket": ["fabric", {"kind": 0, "base_color": Color(0.33, 0.31, 0.22), "wear_color": Color(0.46, 0.43, 0.34), "sheen": 0.25}],
+	"Jeans": ["fabric", {"kind": 1, "base_color": Color(0.1, 0.13, 0.21), "wear_color": Color(0.33, 0.39, 0.5), "sheen": 0.2}],
+	"Belt": ["fabric", {"kind": 4, "base_color": Color(0.13, 0.075, 0.045), "wear_color": Color(0.23, 0.15, 0.1), "roughness_base": 0.55}],
+	"Boots": ["fabric", {"kind": 4, "base_color": Color(0.27, 0.15, 0.08), "wear_color": Color(0.43, 0.31, 0.21), "roughness_base": 0.6}],
+	"Sole": ["fabric", {"kind": 7, "base_color": Color(0.035, 0.032, 0.03), "roughness_base": 0.85}],
+	"Laces": ["fabric", {"kind": 5, "base_color": Color(0.4, 0.33, 0.24)}],
+	"Shirt": ["fabric", {"kind": 5, "base_color": Color(0.6, 0.58, 0.54), "sheen": 0.2}],
+	"Flannel": ["fabric", {"kind": 6, "base_color": Color(0.42, 0.11, 0.07), "check_color": Color(0.12, 0.05, 0.04), "sheen": 0.25}],
+	"Coat": ["fabric", {"kind": 3, "base_color": Color(0.24, 0.18, 0.13), "wear_color": Color(0.31, 0.26, 0.21), "sheen": 0.35, "roughness_base": 0.97}],
+	"Cap": ["fabric", {"kind": 2, "base_color": Color(0.27, 0.3, 0.25), "sheen": 0.3, "roughness_base": 1.0}],
+	"Trousers": ["fabric", {"kind": 0, "base_color": Color(0.27, 0.23, 0.16), "wear_color": Color(0.38, 0.33, 0.25), "sheen": 0.2}],
+	"Skin": ["skin", {"base_color": Color(0.66, 0.53, 0.45), "flush_color": Color(0.66, 0.45, 0.4)}],
+	"Lips": ["skin", {"base_color": Color(0.6, 0.43, 0.39), "flush_color": Color(0.6, 0.42, 0.38)}],
+	"Skin old": ["skin", {"base_color": Color(0.6, 0.48, 0.4), "flush_color": Color(0.62, 0.45, 0.39), "weathered": 1.0}],
+	"Lips old": ["skin", {"base_color": Color(0.56, 0.42, 0.37), "flush_color": Color(0.58, 0.41, 0.36), "weathered": 1.0}],
+	"Hair": ["hair", {"base_color": Color(0.12, 0.085, 0.06), "tip_color": Color(0.24, 0.18, 0.12)}],
+	"Hair grey": ["hair", {"base_color": Color(0.3, 0.29, 0.27), "tip_color": Color(0.55, 0.53, 0.5), "roughness_base": 0.55}],
+	"Hair base": ["skin", {"base_color": Color(0.1, 0.075, 0.055), "flush_color": Color(0.1, 0.075, 0.055)}],
+	"Hair base grey": ["skin", {"base_color": Color(0.24, 0.22, 0.2), "flush_color": Color(0.24, 0.22, 0.2)}],
+	"Beard": ["hair", {"base_color": Color(0.28, 0.27, 0.25), "tip_color": Color(0.56, 0.54, 0.5), "roughness_base": 0.6}],
+}
+static var looks := {}
 ## The body sits on this render layer so your own flashlight skips it.
 const BODY_LAYER := 1 << 17
 ## From the player's centre down to the soles.
@@ -51,19 +81,54 @@ func build(own_view: bool) -> void:
 		# Skin and hair are matte: no sky mirrored in them.
 		if mesh is MeshInstance3D:
 			for surface in (mesh as MeshInstance3D).mesh.get_surface_count():
-				var finish := (mesh as MeshInstance3D).mesh.surface_get_material(surface) as BaseMaterial3D
-				if finish and finish.resource_name in ["Skin", "Lips", "Hair", "Beard"]:
-					finish.metallic_specular = 0.18
-		# Only the stranger wears the beard.
-		if String(mesh.name).begins_with("Beard"):
+				var finish := (mesh as MeshInstance3D).mesh.surface_get_material(surface)
+				if finish and LOOKS.has(finish.resource_name):
+					(mesh as MeshInstance3D).set_surface_override_material(surface, look(finish.resource_name))
+		# The stranger's own face, hair, beard, cap and coat ride on the same
+		# rig; everyone else leaves them off.
+		if String(mesh.name).begins_with("Beard") or String(mesh.name).begins_with("Stranger"):
 			mesh.visible = false
 		var title := String(mesh.name)
-		if own_view and (title.begins_with("Head") or title.begins_with("Hair") or title.begins_with("Eye") or title.begins_with("Iris")):
+		if own_view and (title.begins_with("Head") or title.begins_with("Hair") or title.begins_with("Brows") or title.begins_with("Eye") or title.begins_with("Iris")):
 			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
 	to_rig = (Transform3D(Basis(), model.position) * _skeleton_offset()).affine_inverse()
 	for i in 2:
 		hand_at.append(rest["Hand" + SIDES[i]].origin)
 	_build_torch()
+
+
+static func look(title: String) -> Material:
+	## The shared material for a garment, skin or hair, made once.
+	if not looks.has(title):
+		var entry: Array = LOOKS[title]
+		var made := ShaderMaterial.new()
+		made.shader = {"fabric": FABRIC, "skin": SKIN, "hair": HAIR}[entry[0]]
+		made.set_shader_parameter("noise_tex", Desert.noise_texture())
+		var settings: Dictionary = entry[1]
+		for key: String in settings:
+			made.set_shader_parameter(key, settings[key])
+		looks[title] = made
+	return looks[title]
+
+
+func dress_as_stranger() -> void:
+	## The man in the cabin: an older, weathered face, thin grey hair under a
+	## knitted cap, a beard, a flannel shirt under a heavy wool coat, and
+	## brown work trousers.
+	for mesh: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
+		var title := String(mesh.name)
+		if title.begins_with("Stranger") or title.begins_with("Beard"):
+			mesh.visible = true
+		elif title.begins_with("Head skin") or title.begins_with("Hair") or title.begins_with("Brows") or title.begins_with("Jacket") \
+				or title.begins_with("Belt") or title.begins_with("Hardware") or title.begins_with("Shirt"):
+			mesh.visible = false
+		elif title.begins_with("Jeans"):
+			mesh.material_override = look("Trousers")
+		if title.begins_with("Stranger head") or title.begins_with("Skin hand"):
+			for surface in mesh.mesh.get_surface_count():
+				var finish := mesh.mesh.surface_get_material(surface)
+				if finish and finish.resource_name in ["Skin", "Lips"]:
+					mesh.set_surface_override_material(surface, look(finish.resource_name + " old"))
 
 
 func _skeleton_offset() -> Transform3D:

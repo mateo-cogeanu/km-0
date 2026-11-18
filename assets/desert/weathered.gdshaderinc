@@ -50,6 +50,10 @@ float nz(vec3 an, vec3 p) {
 
 void vertex() {
 	world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+#ifdef DETAIL_SCALE
+	// Small things (the props) want their wear at a finer scale.
+	world *= DETAIL_SCALE;
+#endif
 	local = VERTEX;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	local_normal = NORMAL;

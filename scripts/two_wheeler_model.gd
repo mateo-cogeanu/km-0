@@ -12,6 +12,8 @@ static func build(body: Node3D, front_wheel: Node3D, rear_wheel: Node3D, motoriz
 	var paint := S.material(Color("#a94e36") if motorized else Color("#366d63"), 0.32, 0.39)
 	paint.clearcoat_enabled = true
 	paint.clearcoat_roughness = 0.42
+	# A season in the sun: faded, dusty, the gloss gone patchy.
+	preload("res://scripts/vehicle_looks.gd").age_paint(paint, 0.3)
 	var alloy := S.material(Color("#a0a6a2"), 0.75, 0.34)
 	var steel := S.material(Color("#4a504e"), 0.58, 0.47)
 	var rubber := S.material(Color("#242524"), 0.0, 0.93)

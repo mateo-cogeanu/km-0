@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://3w0m5n65gjyd"]
 
 [ext_resource type="Script" uid="uid://ccharjbjf0lmg" path="res://scripts/spray_can.gd" id="1_spray_can"]
-[ext_resource type="PackedScene" uid="uid://cbpf1lpm11oi3" path="res://assets/vehicles/spraycan.glb" id="2_spraycan_model"]
+[ext_resource type="PackedScene" path="res://assets/desert/props/spraycan.glb" id="2_spraycan_model"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_spray_can"]
 size = Vector3(0.35, 0.7357422, 0.35)
@@ -19,4 +19,3 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06387034, 0)
 shape = SubResource("BoxShape3D_spray_can")
 
 [node name="SprayCanModel" parent="." unique_id=815067969 instance=ExtResource("2_spraycan_model")]
-transform = Transform3D(0.2, 0, 0, 0, 0.2, 0, 0, 0, 0.2, 0, 0, 0)

@@ -473,7 +473,12 @@ func _add_county_car(segment: Node3D, drive_start: Vector3, entry: Vector3) -> v
 	var county := Node3D.new()
 	county.name = "CountyCar"
 	segment.add_child(county)
-	CarModel.new(Color("#d8d5cb")).build(county, CarModel.SEDAN, false)
+	CarModel.new(Color("#d8d5cb"), 0.35).build(county, CarModel.SEDAN, false)
+	# A light bar on the roof, amber, long since switched off.
+	var bar := Shapes.box(county, "LightBar", Vector3(1.1, 0.07, 0.24), Vector3(0, 1.545, 0.2), Shapes.material(Color("#2a2c2c"), 0.3, 0.5))
+	for side in [-1.0, 1.0]:
+		var lens := Shapes.box(bar, "BarLens", Vector3(0.42, 0.09, 0.2), Vector3(side * 0.26, 0.06, 0), Shapes.material(Color("#c98a2e"), 0.1, 0.25))
+		CarModel.Looks.reshape(lens, "lens")
 	var heading := entry - drive_start
 	county.position = drive_start.lerp(entry, 0.35) + heading.normalized().cross(Vector3.UP) * 3.2
 	county.position.y = -0.02

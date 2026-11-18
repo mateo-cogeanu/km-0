@@ -1,59 +1,6 @@
 [gd_scene format=3]
 
-[sub_resource type="StandardMaterial3D" id="Metal"]
-albedo_color = Color(0.58, 0.62, 0.61, 1)
-metallic = 0.66
-roughness = 0.43
-
-[sub_resource type="StandardMaterial3D" id="Dark"]
-albedo_color = Color(0.12, 0.15, 0.15, 1)
-metallic = 0.44
-roughness = 0.56
-
-[sub_resource type="BoxMesh" id="Block"]
-size = Vector3(0.37, 0.28, 0.4)
-material = SubResource("Metal")
-
-[sub_resource type="BoxMesh" id="Fin"]
-size = Vector3(0.44, 0.018, 0.33)
-material = SubResource("Dark")
-
-[sub_resource type="CylinderMesh" id="Case"]
-top_radius = 0.12
-bottom_radius = 0.12
-height = 0.45
-radial_segments = 14
-rings = 0
-material = SubResource("Metal")
+[ext_resource type="ArrayMesh" path="res://assets/desert/props/bike_engine_mesh.res" id="1_mesh"]
 
 [node name="Engine" type="MeshInstance3D"]
-mesh = SubResource("Block")
-
-[node name="CrankCase" type="MeshInstance3D" parent="."]
-position = Vector3(0, -0.073, 0.12)
-rotation_degrees = Vector3(0, 0, 90)
-mesh = SubResource("Case")
-
-[node name="Fin1" type="MeshInstance3D" parent="."]
-position = Vector3(0, 0.025, -0.05)
-mesh = SubResource("Fin")
-
-[node name="Fin2" type="MeshInstance3D" parent="."]
-position = Vector3(0, 0.054, -0.05)
-mesh = SubResource("Fin")
-
-[node name="Fin3" type="MeshInstance3D" parent="."]
-position = Vector3(0, 0.083, -0.05)
-mesh = SubResource("Fin")
-
-[node name="Fin4" type="MeshInstance3D" parent="."]
-position = Vector3(0, 0.112, -0.05)
-mesh = SubResource("Fin")
-
-[node name="Fin5" type="MeshInstance3D" parent="."]
-position = Vector3(0, 0.141, -0.05)
-mesh = SubResource("Fin")
-
-[node name="Fin6" type="MeshInstance3D" parent="."]
-position = Vector3(0, 0.170, -0.05)
-mesh = SubResource("Fin")
+mesh = ExtResource("1_mesh")

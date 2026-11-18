@@ -1,0 +1,27 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://assets/desert/props/prop_surface.gdshader" id="1_t5lsj"]
+[ext_resource type="Texture2D" path="res://assets/desert/props/materials/noise.tres" id="2_6uw1p"]
+
+[resource]
+resource_name = "Heat stained steel"
+render_priority = 0
+shader = ExtResource("1_t5lsj")
+shader_parameter/base_color = Color(0.36, 0.3, 0.27, 1)
+shader_parameter/metallic_base = 0.6
+shader_parameter/roughness_base = 0.45
+shader_parameter/bleach = 0.0
+shader_parameter/peel = null
+shader_parameter/under_color = null
+shader_parameter/rust = 0.22
+shader_parameter/dust = 0.0
+shader_parameter/streaks = 0.0
+shader_parameter/bricks = null
+shader_parameter/blocks = null
+shader_parameter/ribs = null
+shader_parameter/boards = null
+shader_parameter/wood_grain = null
+shader_parameter/char_amount = null
+shader_parameter/wet_amount = null
+shader_parameter/use_tint = null
+shader_parameter/noise_tex = ExtResource("2_6uw1p")

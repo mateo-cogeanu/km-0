@@ -62,6 +62,18 @@ func _ready() -> void:
 			Shapes.box(lid, "Pull", Vector3(0.14, 0.025, 0.03), Vector3(0, 0.02, 0.235), Shapes.material(Color("#8a7a5a"), 0.5, 0.4))
 			Shapes.box(self, "LowerDoor", Vector3(0.54, 0.38, 0.03), Vector3(0, 0.25, 0.21), shell, true)
 			inside = Vector3(0, -0.085, 0.01)
+	# The look comes from the models (Sources/make_road_props.py); the boxes
+	# above stay for their colliders.
+	for holder: Node3D in [self, lid]:
+		for child in holder.get_children():
+			if child is MeshInstance3D:
+				child.visible = false
+				child.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var parts: Array = {"cooler": ["cooler_body", "cooler_lid"], "toolbox": ["toolbox_body", "toolbox_lid"], "cabinet": ["cabinet_body", "cabinet_drawer"]}[style]
+	for i in 2:
+		var model := (load("res://assets/desert/props/%s.glb" % parts[i]) as PackedScene).instantiate() as Node3D
+		model.name = "Model"
+		(self if i == 0 else lid).add_child(model)
 	var target := Area3D.new()
 	target.name = "SearchTarget"
 	target.collision_layer = 8

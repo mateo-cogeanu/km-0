@@ -1,0 +1,8 @@
+[gd_resource type="StandardMaterial3D" format=3]
+
+[resource]
+resource_name = "Bottle plastic"
+transparency = 1
+cull_mode = 2
+albedo_color = Color(0.78, 0.86, 0.92, 0.32)
+roughness = 0.12

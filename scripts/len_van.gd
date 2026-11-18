@@ -1,6 +1,8 @@
 extends Node3D
 
 const Shapes := preload("res://scripts/prop_shapes.gd")
+const Looks := preload("res://scripts/vehicle_looks.gd")
+const Desert := preload("res://scripts/desert_models.gd")
 
 var paint := Shapes.material(Color("#777e69"), 0.16)
 var trim := Shapes.material(Color("#343534"))
@@ -37,6 +39,31 @@ func _ready() -> void:
 	Shapes.box(self, "RearDoorSeam", Vector3(0.014, 1.05, 0.012), Vector3(0, 1.34, 2.128), trim)
 	_build_driver_door()
 	_build_ignition()
+	_dress()
+
+
+func _dress() -> void:
+	## The Blender van (Sources/make_road_vehicles.py) over the boxes, which
+	## stay for their colliders; the keys and the notes keep their places.
+	for child in get_children():
+		if child is MeshInstance3D and child.name != "SteeringWheel":
+			child.visible = false
+	var door := get_node("OpenDriverDoor") as Node3D
+	for child in door.get_children():
+		child.visible = false
+	add_child(Looks.model("len_van"))
+	door.add_child(Looks.model("len_van_door"))
+	for side in [-1.0, 1.0]:
+		for axle in [-1.46, 1.34]:
+			var wheel := MeshInstance3D.new()
+			wheel.name = "VanWheel"
+			wheel.mesh = Looks.mesh("car_wheel")
+			add_child(wheel)
+			wheel.position = Vector3(side * 0.9, 0.35, axle)
+			wheel.scale = Vector3.ONE * (0.35 / 0.39)
+			wheel.rotation.y = 0.0 if side > 0.0 else PI
+	(get_node("SteeringWheel") as MeshInstance3D).mesh = Looks.mesh("steering_wheel")
+	(get_node("SteeringWheel") as MeshInstance3D).material_override = null
 
 
 func _build_driver_door() -> void:
