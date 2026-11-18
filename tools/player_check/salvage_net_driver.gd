@@ -35,11 +35,20 @@ func _ready() -> void:
 	var truck: Node3D = world.get_node("Truck")
 	var door_car: Node3D = world.get_node("Flooded_2")
 	if role == "host":
-		await _seconds(0.8)
+		# Wait for the guest (they may still be loading).
+		var waited := 0.0
+		while not truck.honking and waited < 15.0:
+			await get_tree().process_frame
+			waited += get_process_delta_time()
 		_say("host hears guest's horn: honking %s, noise %.2f" % [truck.honking, world.noise.vehicle_level(truck)])
 		world.noise.events.clear()
-		await _seconds(1.6)
-		_say("host hears guest's slam: %s" % [world.noise.events.map(func(e: Dictionary) -> float: return snappedf(e["level"], 0.01))])
+		waited = 0.0
+		var heard := []
+		while heard.is_empty() and waited < 6.0:
+			await get_tree().process_frame
+			waited += get_process_delta_time()
+			heard = world.noise.events.filter(func(e: Dictionary) -> bool: return e["level"] > 0.8)
+		_say("host hears guest's slam: %s" % [heard.map(func(e: Dictionary) -> float: return snappedf(e["level"], 0.01))])
 	else:
 		truck.press_horn(true)
 		await _seconds(1.2)
@@ -85,6 +94,8 @@ func _ready() -> void:
 		world._end_everywhere("filled")
 		await _seconds(2.0)
 		_say("host ended: %s" % world.ended)
+		# Give the guest time to see it before the host goes away.
+		await _seconds(6.0)
 	else:
 		await _seconds(1.0)
 		me.global_position = v8.global_position + Vector3(-2.0, 1.2, -0.8)
@@ -106,11 +117,17 @@ func _ready() -> void:
 				engine.global_position.distance_to(me.camera.global_position), me.helping_holder.name if me.helping_holder else "-"])
 		_say("guest helping: %s" % (me.helping_object != null))
 		me._stop_helping()
-		await _seconds(4.5)
 		var listener: Node3D = world.listener
-		_say("guest grabbed: locked %s, creature seen %.1f m away (host puts it 2 m)" % [me.ending_locked, listener.global_position.distance_to(me.global_position)])
-		await _seconds(1.2)
-		_say("guest after decoy: locked %s" % me.ending_locked)
+		var waited := 0.0
+		while not me.ending_locked and waited < 20.0:
+			await get_tree().process_frame
+			waited += get_process_delta_time()
+		_say("guest grabbed: locked %s, creature %.1f m away" % [me.ending_locked, listener.global_position.distance_to(me.global_position)])
+		waited = 0.0
+		while me.ending_locked and waited < 6.0:
+			await get_tree().process_frame
+			waited += get_process_delta_time()
+		_say("guest after decoy: locked %s (freed after %.1f s)" % [me.ending_locked, waited])
 		await _seconds(3.5)
 		_say("guest ended: %s" % world.ended)
 	await _seconds(1.0)

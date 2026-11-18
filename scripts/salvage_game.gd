@@ -12,6 +12,8 @@ const Shapes := preload("res://scripts/prop_shapes.gd")
 const Style := preload("res://scripts/menu_style.gd")
 const NoiseField := preload("res://scripts/salvage_noise.gd")
 const Listener := preload("res://scripts/salvage_listener.gd")
+const Town := preload("res://scripts/salvage_town.gd")
+const WATER_SHADER := preload("res://assets/salvage/floodwater.gdshader")
 const WATER_BED := preload("res://assets/audio/salvage/water_bed.wav")
 const SPLASHES := [
 	preload("res://assets/audio/salvage/splash_1.wav"), preload("res://assets/audio/salvage/splash_2.wav"),
@@ -38,7 +40,8 @@ const TITLES := {"battery": "Batteries", "radiator": "Radiator", "engine": "Engi
 var clock := 0.0
 var water_level := WATER_START
 var water: MeshInstance3D
-var water_material: StandardMaterial3D
+var water_material: ShaderMaterial
+var town: Node3D
 var noise: Node
 var listener: Node3D
 var hud: CanvasLayer
@@ -54,8 +57,13 @@ var lap: AudioStreamPlayer3D
 
 
 func _ready() -> void:
+	town = Town.new()
+	town.name = "Town"
+	town.game = self
+	add_child(town)
 	_build_ground()
-	_build_town()
+	town.build_terrain()
+	town.build_street()
 	_build_camp()
 	noise = NoiseField.new()
 	noise.name = "Noise"
@@ -66,6 +74,12 @@ func _ready() -> void:
 	listener.game = self
 	add_child(listener)
 	_build_hud()
+	var moon := get_node_or_null("Sun") as DirectionalLight3D
+	if moon:
+		# Night only, and the moon is faint: the shadows you notice are the
+		# flashlight's and the headlights'. Skipping the moon's saves drawing
+		# the whole town again.
+		moon.shadow_enabled = false
 	await get_tree().process_frame
 	_spawn_cars()
 	_spawn_players()
@@ -78,10 +92,10 @@ static func is_host() -> bool:
 # --- The ground ------------------------------------------------------------------
 
 func ground_height(x: float, z: float) -> float:
-	if z >= RAMP_TOP:
-		return 0.0
 	if z > RAMP_BOTTOM and absf(x) < 6.0:
-		return lerpf(FLOOR_Y, 0.0, (z - RAMP_BOTTOM) / (RAMP_TOP - RAMP_BOTTOM))
+		return lerpf(FLOOR_Y, 0.0, clampf((z - RAMP_BOTTOM) / (RAMP_TOP - RAMP_BOTTOM), 0.0, 1.0))
+	if z > -44.0:
+		return maxf(town.terrain_height(x, z), FLOOR_Y)
 	if absf(x) > STREET_HALF and absf(x) < 14.0 and z < -44.0 and z > STREET_END:
 		return KERB_TOP
 	return FLOOR_Y
@@ -97,53 +111,31 @@ func water_depth(point: Vector3) -> float:
 
 
 func _build_ground() -> void:
-	var mud := Shapes.material(Color("#3d3428"), 0.0, 0.95)
-	var asphalt := Shapes.material(Color("#2b2a28"), 0.0, 0.9)
-	var concrete := Shapes.material(Color("#5b574f"), 0.0, 0.92)
-	var grass := Shapes.material(Color("#4d5034"), 0.0, 1.0)
-	# The ridge, and the hillside below it.
-	var ridge := Shapes.box(self, "Ridge", Vector3(70, 2, 40), Vector3(0, -1, 28), grass, true)
-	ridge.get_child(0).add_to_group("Dirt")
-	for side in [-1.0, 1.0]:
-		var bank := Shapes.box(self, "Bank", Vector3(28, 2, 52), Vector3(side * 20.0, -3.2, -16), mud, true)
-		bank.rotation.x = deg_to_rad(-7.1)
-		bank.get_child(0).add_to_group("Dirt")
-	# The road down: one long slope from the ridge to the street.
+	## The road down and the street are solid boxes (the hillside is
+	## salvage_town.gd's), with the ground shaders on them.
+	var asphalt: Material = town.ground_material(0)
+	var pavement: Material = town.ground_material(1)
 	var length := RAMP_TOP - RAMP_BOTTOM
 	var ramp := Shapes.box(self, "RoadDown", Vector3(12, 0.6, sqrt(length * length + 36.0)),
 		Vector3(0, FLOOR_Y * 0.5 - 0.3, (RAMP_TOP + RAMP_BOTTOM) * 0.5), asphalt, true)
 	ramp.rotation.x = -atan2(-FLOOR_Y, length)
 	ramp.get_child(0).add_to_group("Road")
-	# The drowned street and everything around it.
 	var street := Shapes.box(self, "Street", Vector3(90, 2, 140), Vector3(0, FLOOR_Y - 1.0, -100), asphalt, true)
 	street.get_child(0).add_to_group("Road")
-	Shapes.box(self, "Below", Vector3(90, 2, 50), Vector3(0, FLOOR_Y - 1.02, -15), mud, true)
 	for side in [-1.0, 1.0]:
 		var kerb := Shapes.box(self, "Pavement", Vector3(5, KERB_TOP - FLOOR_Y, -STREET_END - 44.0),
-			Vector3(side * (STREET_HALF + 2.5), (KERB_TOP + FLOOR_Y) * 0.5, (STREET_END - 44.0) * 0.5), concrete, true)
+			Vector3(side * (STREET_HALF + 2.5), (KERB_TOP + FLOOR_Y) * 0.5, (STREET_END - 44.0) * 0.5), pavement, true)
 		kerb.get_child(0).add_to_group("Road")
-	water_material = StandardMaterial3D.new()
-	water_material.albedo_color = Color(0.07, 0.075, 0.05, 0.95)
-	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water_material.roughness = 0.06
-	water_material.metallic_specular = 0.55
-	water_material.normal_enabled = true
-	var ripples := NoiseTexture2D.new()
-	ripples.seamless = true
-	ripples.as_normal_map = true
-	ripples.bump_strength = 2.5
-	ripples.width = 256
-	ripples.height = 256
-	var pattern := FastNoiseLite.new()
-	pattern.frequency = 0.03
-	ripples.noise = pattern
-	water_material.normal_texture = ripples
-	water_material.normal_scale = 0.35
-	water_material.uv1_scale = Vector3(18, 18, 1)
+		# Kerb stones along the edge.
+		Shapes.box(self, "Kerb", Vector3(0.3, KERB_TOP - FLOOR_Y + 0.04, -STREET_END - 44.0),
+			Vector3(side * (STREET_HALF + 0.15), (KERB_TOP + FLOOR_Y) * 0.5 + 0.02, (STREET_END - 44.0) * 0.5), town._material("Concrete"))
+	water_material = ShaderMaterial.new()
+	water_material.shader = WATER_SHADER
 	water = MeshInstance3D.new()
 	water.name = "Floodwater"
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(120, 190)
+	plane.subdivide_width = 0
 	water.mesh = plane
 	water.material_override = water_material
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -159,66 +151,10 @@ func _build_ground() -> void:
 	lap.play()
 
 
-func _build_town() -> void:
-	## Houses along both sides, flooded to the window sills, porches and
-	## pavement just above the water; a dead street light here and there.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 404
-	var walls := [Color("#6d6658"), Color("#5c6560"), Color("#76695a"), Color("#4f5458"), Color("#6a5f55")]
-	var dark := Shapes.material(Color("#0b0b0c"))
-	var trim := Shapes.material(Color("#8d877a"))
-	var roof := Shapes.material(Color("#2a2522"), 0.0, 0.85)
-	for side in [-1.0, 1.0]:
-		var z := -48.0
-		while z > STREET_END + 8.0:
-			var width := rng.randf_range(9.0, 13.0)
-			var depth := rng.randf_range(9.0, 12.0)
-			var height := rng.randf_range(4.5, 7.0)
-			var house := Node3D.new()
-			house.name = "House"
-			add_child(house)
-			house.position = Vector3(side * (14.0 + depth * 0.5), FLOOR_Y, z - width * 0.5)
-			house.rotation.y = -side * PI * 0.5
-			var paint := Shapes.material(walls[rng.randi_range(0, walls.size() - 1)], 0.0, 0.9)
-			Shapes.box(house, "Walls", Vector3(width, height, depth), Vector3(0, height * 0.5, 0), paint, true)
-			var top := Shapes.box(house, "Roof", Vector3(width + 0.6, 0.4, depth * 0.62), Vector3(0, height + 0.9, -depth * 0.2), roof)
-			top.rotation.x = 0.5
-			var back := Shapes.box(house, "Roof", Vector3(width + 0.6, 0.4, depth * 0.62), Vector3(0, height + 0.9, depth * 0.2), roof)
-			back.rotation.x = -0.5
-			# The front faces the street (+Z here): a door, black windows.
-			var front := depth * 0.5 + 0.02
-			Shapes.box(house, "Door", Vector3(1.1, 2.1, 0.06), Vector3(rng.randf_range(-1.5, 1.5), 1.25 + 1.0, front), dark)
-			for w in [-width * 0.3, width * 0.3]:
-				Shapes.box(house, "Window", Vector3(1.4, 1.2, 0.05), Vector3(w, 2.6, front), dark)
-				Shapes.box(house, "Sill", Vector3(1.6, 0.08, 0.14), Vector3(w, 1.98, front + 0.05), trim)
-				if height > 5.5:
-					Shapes.box(house, "Window", Vector3(1.2, 1.0, 0.05), Vector3(w, height - 1.6, front), dark)
-			# A tide line where the water stood for years.
-			Shapes.box(house, "TideLine", Vector3(width + 0.02, 0.5, depth + 0.02), Vector3(0, 1.55, 0), Shapes.material(Color(0.2, 0.18, 0.13)))
-			z -= width + rng.randf_range(1.5, 4.0)
-		for k in 4:
-			var post := Shapes.cylinder(self, "StreetLight", Vector3(side * (STREET_HALF + 0.6), KERB_TOP + 2.6, -60.0 - k * 26.0), Vector3.UP, 0.08, 5.2, trim, 8)
-			post.rotation.z = side * rng.randf_range(0.0, 0.12)
-	# Rubbish caught in the flood: drums, planks and a fallen fence.
-	var rust := Shapes.material(Color("#5a3a26"), 0.3, 0.7)
-	var wood := Shapes.material(Color("#4a3c2e"))
-	for i in 14:
-		var at := Vector3(rng.randf_range(-8.0, 8.0), FLOOR_Y, rng.randf_range(-48.0, STREET_END + 6.0))
-		if rng.randf() < 0.5:
-			var drum := Shapes.cylinder(self, "Drum", at + Vector3(0, 0.3, 0), Vector3(rng.randf_range(-1, 1), 0.3, rng.randf_range(-1, 1)).normalized(), 0.3, 0.85, rust, 12)
-			drum.rotation.y = rng.randf_range(0, TAU)
-		else:
-			var plank := Shapes.box(self, "Plank", Vector3(0.25, 0.05, rng.randf_range(1.5, 3.0)), at + Vector3(0, water_level - FLOOR_Y + 0.01, 0), wood)
-			plank.rotation.y = rng.randf_range(0, TAU)
-	# The way the water came: a storm drain at the far end, black and open.
-	Shapes.box(self, "DrainMouth", Vector3(6.0, 2.4, 0.4), Vector3(0, FLOOR_Y + 1.0, STREET_END + 0.5), dark)
-	Shapes.box(self, "EndWall", Vector3(30, 9, 1.0), Vector3(0, FLOOR_Y + 4.5, STREET_END - 0.2), Shapes.material(Color("#3a3833")), true)
-
-
 func _build_camp() -> void:
 	## The ridge camp: the buyer's pallet under a work lamp, a tent and the
 	## contract nailed to a post.
-	var wood := Shapes.material(Color("#7a6447"))
+	var wood: Material = town._material("Wood")
 	for i in 5:
 		Shapes.box(self, "PalletSlat", Vector3(2.4, 0.04, 0.32), PALLET + Vector3(0, 0.14, -1.0 + i * 0.5), wood)
 	for x in [-1.0, 0.0, 1.0]:
@@ -256,7 +192,7 @@ func _build_camp() -> void:
 	add_child(board)
 	board.position = PALLET + Vector3(0, 2.3, -1.9)
 	# A tent and a crate to sit on.
-	var canvas := Shapes.material(Color("#4f5a3c"))
+	var canvas: Material = town._material("Canvas")
 	for side in [-1.0, 1.0]:
 		var sheet := Shapes.box(self, "Tent", Vector3(0.04, 2.0, 3.2), Vector3(-8.0 + side * 0.7, 0.9, 20.0), canvas)
 		sheet.rotation.z = side * 0.62
@@ -296,6 +232,20 @@ func _spawn_cars() -> void:
 		car.fuel_amount = 0.0
 		car.electric_charge = 0.0
 		car.reset_physics_interpolation()
+		_far_detail(car, 50.0)
+
+
+func _far_detail(node: Node, distance: float) -> void:
+	## In the dark, nobody sees a car's door handles from the end of the
+	## street: past distance only its shape is drawn, and small parts cast no
+	## shadow.
+	for mesh: GeometryInstance3D in node.find_children("*", "GeometryInstance3D", true, false):
+		var size := mesh.get_aabb().size.length()
+		if size < 1.2:
+			mesh.visibility_range_end = distance
+			mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		elif size < 3.0:
+			mesh.visibility_range_end = distance * 2.0
 
 
 func _spawn_players() -> void:
@@ -343,7 +293,7 @@ func _process(delta: float) -> void:
 		clock += delta
 	water_level = lerpf(WATER_START, WATER_END, clampf(clock / NIGHT_SECONDS, 0.0, 1.0))
 	water.position.y = water_level
-	water_material.uv1_offset += Vector3(0.004, 0.0025, 0) * delta
+	town.set_water(water_level)
 	var me := local_player()
 	if me:
 		var wet := in_water(me.global_position + Vector3.DOWN * 0.9) and not is_instance_valid(me.active_vehicle)

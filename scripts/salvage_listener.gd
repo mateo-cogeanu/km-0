@@ -49,12 +49,17 @@ var remote_yaw := 0.0
 var remote_state := State.ROAM
 var clock := 0.0
 
-var body: Node3D
-var head: Node3D
-var ear_flaps: Array[Node3D] = []
-var neck: MeshInstance3D
-var jaw: Node3D
-var arms: Array[Node3D] = []
+## The model (salvage_listener.glb, built by Sources/make_salvage_creature.py)
+## and its skeleton, posed every frame from the state.
+var model: Node3D
+var rig: Skeleton3D
+var bones := {}
+var rests := {}
+var neck_raise := 0.0
+var jaw_open := 0.0
+var reach := 0.0
+var swim := 0.0
+var swim_phase := 0.0
 var wake: GPUParticles3D
 var voice: AudioStreamPlayer3D
 var splash: AudioStreamPlayer3D
@@ -79,109 +84,32 @@ func is_taken(player: Node) -> bool:
 
 # --- What it looks like ----------------------------------------------------------
 
-func _fan_mesh(side: float) -> ArrayMesh:
-	## A half-open fan of skin, ragged at the rim.
-	var tool := SurfaceTool.new()
-	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var steps := 14
-	var rim: Array[Vector3] = []
-	for i in steps + 1:
-		var angle := deg_to_rad(-20.0 + 140.0 * i / steps)
-		var reach := 0.8 * (0.82 + 0.18 * sin(i * 2.7))
-		rim.append(Vector3(side * cos(angle) * reach, sin(angle) * reach, -0.12 - 0.1 * sin(PI * i / steps)))
-	for i in steps:
-		for vertex in [Vector3.ZERO, rim[i], rim[i + 1]]:
-			tool.set_normal(Vector3(0, 0, 1))
-			tool.add_vertex(vertex)
-	tool.generate_normals()
-	return tool.commit()
-
-
 func _build() -> void:
-	var skin := StandardMaterial3D.new()
-	skin.albedo_color = Color("#b5b8ad")
-	skin.roughness = 0.22
-	skin.metallic_specular = 0.75
-	var dark := Shapes.material(Color("#2e2f2b"), 0.0, 0.4)
-	var membrane := StandardMaterial3D.new()
-	membrane.albedo_color = Color(0.3, 0.24, 0.23, 0.9)
-	membrane.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	membrane.cull_mode = BaseMaterial3D.CULL_DISABLED
-	membrane.roughness = 0.35
-	body = Node3D.new()
-	body.name = "Body"
-	add_child(body)
-	# Long and flat, made for lying just under the surface.
-	var trunk := MeshInstance3D.new()
-	var shape := SphereMesh.new()
-	shape.radius = 0.5
-	shape.height = 1.0
-	trunk.mesh = shape
-	trunk.material_override = skin
-	body.add_child(trunk)
-	trunk.scale = Vector3(1.6, 0.6, 4.6)
-	# A ridge of knuckled bone down the spine: all you usually see of it.
-	for i in 9:
-		var knob := MeshInstance3D.new()
-		var bump := SphereMesh.new()
-		bump.radius = 0.09 - absf(i - 4) * 0.008
-		bump.height = bump.radius * 2.6
-		knob.mesh = bump
-		knob.material_override = skin
-		body.add_child(knob)
-		knob.position = Vector3(0, 0.27 - absf(i - 4) * 0.02, 1.5 - i * 0.38)
-	# Limbs folded along its sides, long fingers trailing.
-	for side in [-1.0, 1.0]:
-		var arm := Node3D.new()
-		body.add_child(arm)
-		arm.position = Vector3(side * 0.6, 0.0, 1.2)
-		Shapes.tube(arm, "UpperArm", Vector3.ZERO, Vector3(side * 0.5, -0.1, -0.9), 0.07, skin)
-		Shapes.tube(arm, "Forearm", Vector3(side * 0.5, -0.1, -0.9), Vector3(side * 0.35, -0.15, 0.4), 0.055, skin)
-		for f in 3:
-			Shapes.tube(arm, "Finger", Vector3(side * 0.35, -0.15, 0.4), Vector3(side * (0.3 + f * 0.08), -0.2, 0.85 + f * 0.05), 0.018, skin)
-		arms.append(arm)
-	# The head: smooth, no eyes at all, a lipless slit of a mouth.
-	head = Node3D.new()
-	head.name = "Head"
-	body.add_child(head)
-	head.position = Vector3(0, 0.1, 2.15)
-	neck = Shapes.tube(body, "Neck", Vector3(0, 0.05, 1.9), Vector3(0, 0.1, 2.15), 0.13, skin)
-	var skull := MeshInstance3D.new()
-	var dome := SphereMesh.new()
-	dome.radius = 0.32
-	dome.height = 0.64
-	skull.mesh = dome
-	skull.material_override = skin
-	head.add_child(skull)
-	skull.scale = Vector3(0.8, 0.7, 1.75)
-	Shapes.box(head, "Mouth", Vector3(0.42, 0.015, 0.05), Vector3(0, -0.1, 0.5), dark)
-	# A long lower jaw, hinged far back, lined with needle teeth.
-	jaw = Node3D.new()
-	head.add_child(jaw)
-	jaw.position = Vector3(0, -0.1, -0.15)
-	Shapes.box(jaw, "Jaw", Vector3(0.36, 0.07, 0.7), Vector3(0, -0.03, 0.35), skin)
-	Shapes.box(jaw, "Gullet", Vector3(0.3, 0.02, 0.62), Vector3(0, 0.01, 0.33), dark)
-	var ivory := Shapes.material(Color("#d8d2bd"), 0.0, 0.3)
-	for t in 9:
-		for side in [-1.0, 1.0]:
-			var tooth := Shapes.cylinder(jaw, "Tooth", Vector3(side * 0.15, 0.06, 0.1 + t * 0.07), Vector3(0, 1, 0.15), 0.012, 0.11 - absf(t - 4) * 0.008, ivory, 5)
-			tooth.scale = Vector3(1, 1, 1)
-	# The ears: two great folded fans of skin that open when it listens.
-	for side in [-1.0, 1.0]:
-		var hinge := Node3D.new()
-		head.add_child(hinge)
-		hinge.position = Vector3(side * 0.24, 0.05, -0.05)
-		var fan := MeshInstance3D.new()
-		fan.mesh = _fan_mesh(side)
-		fan.material_override = membrane
-		hinge.add_child(fan)
-		# Ribs through the membrane, from the hinge to the rim.
-		for r in 5:
-			var angle := deg_to_rad(-20.0 + r * 35.0)
-			Shapes.tube(hinge, "Rib", Vector3.ZERO, Vector3(side * cos(angle) * 0.78, sin(angle) * 0.78, -0.12), 0.013, skin)
-		ear_flaps.append(hinge)
-	for mesh: GeometryInstance3D in find_children("*", "GeometryInstance3D", true, false):
+	model = (load("res://assets/characters/salvage_listener.glb") as PackedScene).instantiate()
+	model.name = "Model"
+	add_child(model)
+	rig = model.find_children("*", "Skeleton3D", true, false)[0]
+	for index in rig.get_bone_count():
+		bones[rig.get_bone_name(index)] = index
+		rests[rig.get_bone_name(index)] = rig.get_bone_rest(index).basis.get_rotation_quaternion()
+	var skin := ShaderMaterial.new()
+	skin.shader = load("res://assets/characters/listener_skin.gdshader")
+	var membrane := ShaderMaterial.new()
+	membrane.shader = load("res://assets/characters/listener_membrane.gdshader")
+	for mesh: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
 		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		for surface in mesh.mesh.get_surface_count():
+			var material := mesh.mesh.surface_get_material(surface)
+			var title := material.resource_name if material else ""
+			if title.begins_with("Wet pale skin"):
+				mesh.set_surface_override_material(surface, skin)
+			elif title.begins_with("Ear membrane"):
+				mesh.set_surface_override_material(surface, membrane)
+			elif material is BaseMaterial3D and (title.begins_with("Old ivory") or title.begins_with("Gum") or title.begins_with("Mouth")):
+				var wet := (material as BaseMaterial3D).duplicate() as BaseMaterial3D
+				wet.roughness = 0.2
+				wet.metallic_specular = 0.7
+				mesh.set_surface_override_material(surface, wet)
 	# Rings spreading on the water as it moves.
 	wake = GPUParticles3D.new()
 	wake.amount = 24
@@ -517,8 +445,9 @@ func _hold_victim() -> void:
 	## Whoever it has is held against it, wherever it goes.
 	if not is_instance_valid(victim) or (state != State.GRAB and remote_state != State.GRAB):
 		return
-	var hold := global_transform * Vector3(0, 0.3, 2.4)
-	hold.y = game.water_level + 0.15 + sin(clock * 9.0) * 0.12
+	# In its jaws, out in front of it.
+	var hold := rig.global_transform * rig.get_bone_global_pose(bones["Jaw"]).origin + global_basis.z * 0.25
+	hold.y = maxf(hold.y - 0.6, game.water_level - 0.3) + sin(clock * 9.0) * 0.1
 	victim.global_position = hold
 	if "remote_position" in victim:
 		victim.remote_position = hold
@@ -527,38 +456,45 @@ func _hold_victim() -> void:
 		victim.camera.rotation.z = sin(clock * 23.0) * 0.06
 
 
-func _stretch_neck() -> void:
-	var from := Vector3(0, 0.05, 1.85)
-	var to := head.position + Vector3(0, -0.12, -0.2)
-	var span := to - from
-	var up := span.normalized()
-	var side := up.cross(Vector3.RIGHT if absf(up.x) < 0.9 else Vector3.FORWARD).normalized()
-	var length := span.length() / maxf((neck.mesh as CylinderMesh).height, 0.01)
-	neck.transform = Transform3D(Basis(side, up * length, side.cross(up)), (from + to) * 0.5)
+func _pose(bone: String, euler: Vector3) -> void:
+	## Turn a bone from its rest pose by euler (radians, in the bone's own axes).
+	if bones.has(bone):
+		rig.set_bone_pose_rotation(bones[bone], rests[bone] * Quaternion.from_euler(euler))
 
 
 func _animate(delta: float) -> void:
 	var now: int = state
-	surfaced = lerpf(surfaced, SURFACED[now], 1.0 - exp(-3.0 * delta))
-	ears = lerpf(ears, 1.0 if now == State.LISTEN else (0.6 if now == State.GRAB else 0.0), 1.0 - exp(-4.0 * delta))
-	# Only the spine breaks the water; listening, the head rises out on its
-	# neck, dripping, and turns slowly from side to side.
-	body.position.y = lerpf(-0.52, -0.3, surfaced)
-	body.rotation.x = -0.1 * surfaced
-	head.position = Vector3(0, lerpf(0.0, 0.85, surfaced), lerpf(2.15, 2.35, surfaced))
-	head.rotation.x = -0.35 * surfaced + sin(clock * 1.3) * 0.04
-	head.rotation.y = sin(clock * 0.45) * 0.5 * ears
-	_stretch_neck()
-	head.rotation.z = sin(clock * 0.7) * 0.15 * ears
-	for i in ear_flaps.size():
-		var side := -1.0 if i == 0 else 1.0
-		ear_flaps[i].rotation.y = side * lerpf(-1.25, 0.15, ears)
-		ear_flaps[i].scale = Vector3.ONE * lerpf(0.4, 1.6, ears)
-	jaw.rotation.x = lerpf(0.0, 0.75, 1.0 if now == State.GRAB else 0.0) + (0.06 * sin(clock * 3.0) if now == State.LISTEN else 0.0)
-	for i in arms.size():
-		var side := -1.0 if i == 0 else 1.0
-		arms[i].rotation.x = -1.1 * (1.0 if now == State.GRAB else 0.0) + sin(clock * 2.0 + i) * 0.05
-		arms[i].rotation.y = side * 0.4 * (1.0 if now == State.GRAB else 0.0)
+	var ease := 1.0 - exp(-3.0 * delta)
+	surfaced = lerpf(surfaced, SURFACED[now], ease)
+	ears = lerpf(ears, 1.0 if now == State.LISTEN else (0.7 if now == State.GRAB else 0.0), 1.0 - exp(-4.0 * delta))
+	neck_raise = lerpf(neck_raise, 1.0 if now == State.LISTEN else (0.75 if now == State.GRAB else 0.0), 1.0 - exp(-2.5 * delta))
+	jaw_open = lerpf(jaw_open, 1.0 if now == State.GRAB else (0.08 + 0.05 * sin(clock * 3.0) if now == State.LISTEN else 0.0), 1.0 - exp(-8.0 * delta))
+	reach = lerpf(reach, 1.0 if now == State.GRAB else 0.0, 1.0 - exp(-6.0 * delta))
+	swim = lerpf(swim, clampf(SPEED[now] / 6.5, 0.0, 1.0), ease)
+	swim_phase += delta * (2.0 + 7.0 * swim)
+	# It lies just under the surface: only the spines break it. Hunting, it
+	# drops lower; listening or holding someone, it rises a little.
+	model.position.y = lerpf(-0.14, 0.02, surfaced)
+	# The neck lifts the head clear of the water, the head stays level and
+	# turns slowly from side to side, listening.
+	var look := sin(clock * 0.45) * 0.5 * ears
+	_pose("Neck1", Vector3(-0.62 * neck_raise, 0, 0))
+	_pose("Neck2", Vector3(-0.45 * neck_raise, 0, look * 0.6))
+	_pose("Head", Vector3(0.95 * neck_raise + 0.04 * sin(clock * 1.3), 0, look * 0.4 + sin(clock * 0.7) * 0.12 * ears))
+	_pose("Jaw", Vector3(-0.7 * jaw_open, 0, 0))
+	_pose("EarL", Vector3(0, 0, 1.3 * ears))
+	_pose("EarR", Vector3(0, 0, -1.3 * ears))
+	# Swimming: a wave down the body and tail, stronger the faster it goes.
+	var amp := 0.06 + 0.3 * swim
+	_pose("Spine", Vector3(0, 0, sin(swim_phase) * amp * 0.25))
+	_pose("Pelvis", Vector3(0, 0, sin(swim_phase - 0.8) * amp * 0.3))
+	for i in 4:
+		_pose("Tail%d" % (i + 1), Vector3(0, 0, sin(swim_phase - 1.6 - i * 0.9) * amp * (0.6 + i * 0.25)))
+	# Reaching: the arms swing forward and the hands open.
+	for side in ["L", "R"]:
+		var sign := 1.0 if side == "L" else -1.0
+		_pose("UpperArm" + side, Vector3(0.9 * reach + sin(swim_phase + (0.0 if side == "L" else PI)) * 0.15 * swim, 0, sign * 0.35 * reach))
+		_pose("Forearm" + side, Vector3(-0.9 * reach, 0, 0))
 	var speed: float = SPEED[now]
 	wake.emitting = speed > 0.5 or now == State.GRAB
 	wake.amount_ratio = clampf(speed / 6.5, 0.25, 1.0)
