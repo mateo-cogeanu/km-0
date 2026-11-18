@@ -1,5 +1,8 @@
 extends RefCounted
 
+const Desert := preload("res://scripts/desert_models.gd")
+const GROUND := preload("res://assets/desert/desert_ground.gdshader")
+
 const SAND := Color("#aa8b64")
 const MEADOW := Color("#848d4a")
 const FOREST := Color("#646f51")
@@ -10,42 +13,16 @@ const BLEND_DISTANCE := 140.0
 const WIDTH := 900.0
 const LEVEL := -0.041
 
-var terrain_material := StandardMaterial3D.new()
+var terrain_material := ShaderMaterial.new()
 var plants: Dictionary = {}
 
 
 func _init() -> void:
-	terrain_material.vertex_color_use_as_albedo = true
-	terrain_material.vertex_color_is_srgb = true
-	terrain_material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	terrain_material.roughness = 1.0
-	plants = {
-		"scrub": _mesh(SphereMesh.new(), Color("#797a46"), Vector3(0.9, 0.44, 0.8)),
-		"cactus": _mesh(CylinderMesh.new(), Color("#5f794b"), Vector3(0.18, 1.65, 0.18)),
-		"grass": _mesh(PrismMesh.new(), Color("#8f984c"), Vector3(0.13, 0.44, 0.08)),
-		"trunk": _mesh(CylinderMesh.new(), Color("#665543"), Vector3(0.25, 2.4, 0.25)),
-		"leaves": _mesh(SphereMesh.new(), Color("#586f43"), Vector3(2.55, 1.58, 2.05)),
-		"pine": _mesh(CylinderMesh.new(), Color("#3f624f"), Vector3(2.2, 2.1, 2.2), true),
-		"rock": _mesh(SphereMesh.new(), Color("#8f614f"), Vector3(3.8, 2.2, 3.1)),
-	}
-
-
-func _mesh(mesh: PrimitiveMesh, tint: Color, dimensions: Vector3, cone: bool = false) -> PrimitiveMesh:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = tint
-	material.roughness = 0.91
-	mesh.material = material
-	if mesh is SphereMesh:
-		mesh.radial_segments = 7
-		mesh.rings = 3
-	elif mesh is CylinderMesh:
-		mesh.top_radius = 0.0 if cone else 0.5
-		mesh.bottom_radius = 0.5
-		mesh.radial_segments = 7
-		mesh.rings = 0
-	# Bake proportions into the instance transform so meshes can be shared.
-	mesh.set_meta("dimensions", dimensions)
-	return mesh
+	terrain_material.shader = GROUND
+	terrain_material.set_shader_parameter("noise_tex", Desert.noise_texture())
+	# Plants and rocks from Sources/make_roadside_props.py, standing on their origins.
+	for kind in ["scrub", "scrub_b", "cactus", "cactus_b", "grass", "tree", "pine", "dead_tree", "rock", "rock_b"]:
+		plants[kind] = Desert.mesh_of(kind)
 
 
 static func _climate(z: float) -> float:
@@ -132,13 +109,13 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 		match biome:
 			0:
 				if roll < 0.09:
-					_instance(batches, "cactus", at + Vector3.UP * 0.81 * size, size, turn)
-					for side in [-1.0, 1.0]:
-						var arm := Vector3(side * 0.24, 0.76, 0).rotated(Vector3.UP, turn) * size
-						_instance(batches, "cactus", at + arm, size * 0.48, turn)
-						_instance(batches, "cactus", at + arm * Vector3(0.6, 0.68, 0.6), size * 0.30, turn, PI * 0.43)
+					_instance(batches, "cactus" if roll < 0.05 else "cactus_b", at, size * 0.85, turn)
 				elif roll < 0.58:
 					_scrub(batches, at, size, turn)
+				elif roll < 0.62:
+					_instance(batches, "dead_tree", at, size * 0.9, turn)
+				elif roll < 0.75:
+					_grass(batches, at, size * 0.8, turn)
 			1:
 				_grass(batches, at, size, turn)
 				if roll < 0.085 and absf(offset) > 16.0:
@@ -149,7 +126,7 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 					_tree(batches, at, size, turn, true)
 			3:
 				if roll < 0.25:
-					_instance(batches, "rock", at + Vector3.UP * 0.32, size, turn)
+					_instance(batches, "rock" if roll < 0.13 else "rock_b", at + Vector3.DOWN * 0.15 * size, size * 1.6, turn)
 				elif roll < 0.49:
 					_scrub(batches, at, size * 0.8, turn)
 	for kind in batches:
@@ -162,7 +139,9 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 		var visual := MultiMeshInstance3D.new()
 		visual.name = kind.capitalize()
 		visual.multimesh = instances
-		if kind in ["grass", "scrub"]:
+		if kind in ["grass", "scrub", "scrub_b", "dead_tree"]:
+			visual.visibility_range_end = 140.0 if kind != "grass" else 70.0
+		if kind in ["grass", "scrub", "scrub_b"]:
 			visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		segment.add_child(visual)
 
@@ -170,29 +149,17 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 func _instance(batches: Dictionary, kind: String, at: Vector3, scale: float, turn: float, tilt: float = 0.0) -> void:
 	if not batches.has(kind):
 		batches[kind] = []
-	var dimensions: Vector3 = plants[kind].get_meta("dimensions")
-	var basis := (Basis(Vector3.UP, turn) * Basis(Vector3.FORWARD, tilt)).scaled_local(dimensions * scale)
+	var basis := (Basis(Vector3.UP, turn) * Basis(Vector3.FORWARD, tilt)).scaled_local(Vector3.ONE * scale)
 	batches[kind].append(Transform3D(basis, at))
 
 
 func _scrub(batches: Dictionary, at: Vector3, size: float, turn: float) -> void:
-	for lobe in [-1.0, 0.0, 1.0]:
-		var offset := Vector3(lobe * 0.34, 0.15 - absf(lobe) * 0.06, 0).rotated(Vector3.UP, turn) * size
-		_instance(batches, "scrub", at + offset, size * (1.0 - absf(lobe) * 0.26), turn)
+	_instance(batches, "scrub" if fmod(turn, 1.0) < 0.5 else "scrub_b", at, size * 1.1, turn)
 
 
 func _grass(batches: Dictionary, at: Vector3, size: float, turn: float) -> void:
-	for blade in range(4):
-		var angle := turn + blade * 1.57
-		var offset := Vector3(0.11, 0.14, 0).rotated(Vector3.UP, angle) * size
-		_instance(batches, "grass", at + offset, size, angle, 0.28)
+	_instance(batches, "grass", at, size * 1.1, turn, 0.0)
 
 
 func _tree(batches: Dictionary, at: Vector3, size: float, turn: float, pine: bool) -> void:
-	_instance(batches, "trunk", at + Vector3.UP * 1.05 * size, size, turn)
-	if pine:
-		for tier in range(3):
-			_instance(batches, "pine", at + Vector3.UP * (1.65 + tier * 0.77) * size, size * (1.12 - tier * 0.22), turn)
-	else:
-		_instance(batches, "leaves", at + Vector3.UP * 2.27 * size, size, turn)
-		_instance(batches, "leaves", at + Vector3(0.54, 2.8, 0.19) * size, size * 0.75, turn)
+	_instance(batches, "pine" if pine else "tree", at, size * (1.0 if pine else 1.15), turn)

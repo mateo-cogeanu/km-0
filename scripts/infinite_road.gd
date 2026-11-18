@@ -10,6 +10,8 @@ const StrangerHouse := preload("res://scripts/stranger_house.gd")
 const CarModel := preload("res://scripts/compact_car_model.gd")
 const FUEL := preload("res://scenes/fuel_canister.tscn")
 const NoteItem := preload("res://scripts/note_item.gd")
+const Desert := preload("res://scripts/desert_models.gd")
+const GROUND := preload("res://assets/desert/desert_ground.gdshader")
 const ROAD_END := 9.0
 ## The road only ends once it has had a good listen to you, and you to it: the
 ## broadcasts at HEARD_NEEDED different places, and NIGHTS_NEEDED nights out
@@ -48,8 +50,8 @@ var ground_shape := BoxShape3D.new()
 var update_timer := 0.0
 
 var road_material := ShaderMaterial.new()
-var gravel := Shapes.material(Color("#89775b"))
-var sand := Shapes.material(Terrain.SAND, 0.0, 1.0)
+var gravel := ShaderMaterial.new()
+var sand := ShaderMaterial.new()
 var white := Shapes.material(Color("#dfdbbf"))
 var yellow := Shapes.material(Color("#cfa247"))
 var desert_ground: MeshInstance3D
@@ -57,8 +59,7 @@ var terrain := Terrain.new()
 var stream_stops := false
 var furthest := 0.0
 var was_night := false
-var pole_mesh := CylinderMesh.new()
-var arm_mesh := BoxMesh.new()
+var pole_mesh: Mesh
 var wire_mesh := CylinderMesh.new()
 var pole_shape := CylinderShape3D.new()
 var pole_wood := Shapes.material(Color("#4a3a2c"))
@@ -70,14 +71,18 @@ var sign_wood := Shapes.material(Color("#6b5a45"))
 
 func _ready() -> void:
 	road_material.shader = ASPHALT
-	pole_mesh.top_radius = 0.1
-	pole_mesh.bottom_radius = 0.13
-	pole_mesh.height = POLE_HEIGHT
-	pole_mesh.radial_segments = 8
-	pole_mesh.rings = 0
-	pole_mesh.material = pole_wood
-	arm_mesh.size = Vector3(1.5, 0.1, 0.1)
-	arm_mesh.material = pole_wood
+	for desert_material in [road_material, sand, gravel]:
+		desert_material.set_shader_parameter("noise_tex", Desert.noise_texture())
+	pole_mesh = Desert.mesh_of("pole")
+	sand.shader = GROUND
+	sand.set_shader_parameter("use_vertex_color", 0.0)
+	sand.set_shader_parameter("flat_color", Terrain.SAND)
+	gravel.shader = GROUND
+	gravel.set_shader_parameter("use_vertex_color", 0.0)
+	gravel.set_shader_parameter("flat_color", Color("#8a7a62"))
+	gravel.set_shader_parameter("pebbles", 3.0)
+	gravel.set_shader_parameter("ripples", 0.0)
+	gravel.set_shader_parameter("cracks", 0.0)
 	wire_mesh.top_radius = 0.012
 	wire_mesh.bottom_radius = 0.012
 	wire_mesh.height = 1.0
@@ -86,7 +91,6 @@ func _ready() -> void:
 	wire_mesh.material = wire_black
 	pole_shape.radius = 0.13
 	pole_shape.height = POLE_HEIGHT
-	sand.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	# Local boxes keep collision broad-phase bounds close to the bodies using them.
 	ground_shape.size = Vector3(GROUND_TILE_SIZE + GROUND_OVERLAP, GROUND_DEPTH, GROUND_TILE_SIZE + GROUND_OVERLAP)
 	desert_ground = Shapes.box(self, "DesertHorizon", Vector3(2000.0, 0.06, 2000.0), Vector3(0, -0.105, 0), sand)
@@ -336,8 +340,7 @@ func _add_markers(segment: Node3D, index: int, from_z: float, to_z: float) -> vo
 		if z < approach + 20.0:
 			continue
 		var post := _roadside(segment, z, 5.3)
-		Shapes.box(post, "Post", Vector3(0.12, 1.0, 0.08), Vector3(0, 0.5, 0), marker_white)
-		Shapes.box(post, "Plate", Vector3(0.36, 0.3, 0.03), Vector3(0, 0.88, 0.03), marker_green)
+		post.add_child(_prop("km_post"))
 		_label(post, "KM\n%d" % km, Vector3(0, 0.88, 0.05), 46)
 	for stop in range(index - 8, index + 2):
 		if not _has_stop(stop):
@@ -347,10 +350,16 @@ func _add_markers(segment: Node3D, index: int, from_z: float, to_z: float) -> vo
 		if sign_z < from_z or sign_z >= to_z or sign_z > -20.0 or stop_z < approach:
 			continue
 		var board := _roadside(segment, sign_z, 5.6)
-		for x in [-0.55, 0.55]:
-			Shapes.box(board, "SignPost", Vector3(0.09, 2.0, 0.09), Vector3(x, 1.0, 0), sign_wood)
-		Shapes.box(board, "SignBoard", Vector3(1.5, 0.75, 0.05), Vector3(0, 1.75, 0.04), marker_green)
+		board.add_child(_prop("station_sign"))
 		_label(board, "STATION %d\nRADIO  ·  300 m" % station_number(stop), Vector3(0, 1.75, 0.075), 52)
+
+
+func _prop(title: String) -> MeshInstance3D:
+	var mesh := MeshInstance3D.new()
+	mesh.name = title.to_pascal_case()
+	mesh.mesh = Desert.mesh_of(title)
+	mesh.visibility_range_end = 160.0
+	return mesh
 
 
 func _roadside(segment: Node3D, z: float, lateral: float) -> Node3D:
@@ -408,14 +417,10 @@ func _add_power_line(segment: Node3D, from_z: float, to_z: float) -> void:
 		pole.name = "Pole"
 		pole.mesh = pole_mesh
 		segment.add_child(pole)
-		pole.transform = Transform3D(facing * lean, base - segment.position + Vector3.UP * POLE_HEIGHT * 0.5)
-		var arm := MeshInstance3D.new()
-		arm.name = "CrossArm"
-		arm.mesh = arm_mesh
-		pole.add_child(arm)
-		arm.position.y = POLE_HEIGHT * 0.5 - 0.5
+		pole.transform = Transform3D(facing * lean, base - segment.position)
 		var body := StaticBody3D.new()
 		pole.add_child(body)
+		body.position.y = POLE_HEIGHT * 0.5
 		var hitbox := CollisionShape3D.new()
 		hitbox.shape = pole_shape
 		body.add_child(hitbox)

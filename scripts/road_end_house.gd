@@ -126,6 +126,9 @@ const STAIR_TIME := 7.7
 const ROAM_TIME := 10.0
 const LEAVE_Z := 3.05
 const HOUSE_LAYER := 1 << 19
+## The outside of the house: lit as the house, but the lamps inside never
+## need it in their shadow maps.
+const OUTSIDE_LAYER := 1 << 16
 const DOOR_OPEN_ANGLE := 103.0
 ## Where it stops beside the open door to shut it, and where you end up standing,
 ## clear of the door's swing.
@@ -187,6 +190,14 @@ const DOUSE_PER_WALL := 3.0
 const POUR_RATE := 1.4
 const POUR := preload("res://assets/audio/player/pour.wav")
 const HouseFire := preload("res://scripts/house_fire.gd")
+const Desert := preload("res://scripts/desert_models.gd")
+## Code-built outside pieces the Blender model draws instead. Walls, floors,
+## stairs, the window glass and the door stay: the story uses them.
+const DRESSED := ["ClapboardSeam", "CornerBoard", "Foundation", "WindowFrame", "Mullion", "Sill", "Shutter", "GableVent",
+	"GableVentSlots", "RidgeCap", "Fascia", "Chimney", "ChimneyCap", "ChimneyFlue", "PorchRail", "Baluster", "Roof",
+	"PorchRoof", "PorchPost", "Porch", "DoorJamb", "FrontSidingTrim", "Gable"]
+## This house's own copies of the weathered materials, so the fire can char them.
+var looks := {}
 var doused := [0.0, 0.0, 0.0, 0.0]
 var wet_patches: Array[MeshInstance3D] = []
 var pouring := false
@@ -210,6 +221,8 @@ func _ready() -> void:
 	# can be kept off its insides once you are in.
 	for mesh: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):
 		mesh.layers = HOUSE_LAYER
+	for mesh: MeshInstance3D in get_node("Dressing").find_children("*", "MeshInstance3D", true, false):
+		mesh.layers = HOUSE_LAYER | OUTSIDE_LAYER
 	var trigger := Area3D.new()
 	trigger.name = "EntryTrigger"
 	trigger.collision_layer = 0
@@ -270,10 +283,45 @@ func _build_house() -> void:
 		for z in [-1.61, -1.09]:
 			Shapes.box(self, "TableLeg", Vector3(0.068, 0.74, 0.066), Vector3(x, 0.371, z), floorboards)
 	_build_interior()
+	_dress()
 	_lamp(Vector3(-1.7, 2.29, 1.31), 0.72, 4.9)
 	_lamp(Vector3(2.45, 2.82, -1.94), 0.46, 4.7)
 	# Washes the tall stairwell wall so what climbs down it can be seen against it.
 	_lamp(Vector3(1.25, 2.9, -1.5), 0.42, 3.4)
+
+
+func _dress() -> void:
+	## The Blender model over the code-built shell: siding, roof, porch and
+	## trim outside, wainscot and joists inside. Every wall, floor, collider
+	## and anchor the story uses stays where it was.
+	Desert.hide_boxes(self, DRESSED)
+	for child in get_children():
+		if child is MeshInstance3D and child.visible:
+			match Desert.piece(child):
+				"Wall":
+					child.material_override = Desert.material("Plaster", looks)
+				"Floor", "UpperFloor", "Landing", "Stair":
+					child.material_override = Desert.material("Floor", looks)
+	var outside := Desert.model("road_house", false, looks)
+	outside.name = "Dressing"
+	add_child(outside)
+	# Old blue-grey paint on the siding and shutters.
+	for mesh: GeometryInstance3D in outside.find_children("*", "GeometryInstance3D", true, false):
+		mesh.set_instance_shader_parameter("tint", Color("#7f8f93"))
+	var inside := Desert.model("road_house_inside", false, looks)
+	inside.name = "DressingInside"
+	add_child(inside)
+	for mesh: GeometryInstance3D in inside.find_children("*", "GeometryInstance3D", true, false):
+		mesh.visibility_range_end = 26.0
+	# The kitchen counter.
+	Desert.solid(self, Vector3(1.5, 0.92, 0.6), Vector3(-1.75, 0.46, -3.25))
+
+
+func scorch(amount: float) -> void:
+	## Blacken the model's boards along with the code-built ones.
+	for finish: Material in looks.values():
+		if finish is ShaderMaterial:
+			(finish as ShaderMaterial).set_shader_parameter("char_amount", amount)
 
 
 func _build_exterior() -> void:
@@ -480,6 +528,7 @@ func _gable(z: float) -> void:
 		surface.add_vertex(corner)
 	var gable := MeshInstance3D.new()
 	gable.name = "Gable"
+	gable.set_meta("piece", "Gable")
 	gable.mesh = surface.commit()
 	gable.material_override = plaster
 	add_child(gable)
@@ -592,6 +641,7 @@ func _lamp(at: Vector3, energy: float, reach: float) -> void:
 	light.omni_range = reach
 	light.shadow_enabled = GameSettings.lamp_shadows()
 	light.light_cull_mask &= ~Creature.LIGHT_LAYER
+	light.shadow_caster_mask &= ~OUTSIDE_LAYER
 	add_child(light)
 	light.position = at
 	lamps.append(light)
@@ -2028,6 +2078,7 @@ func _burn(delta: float) -> void:
 	burn_clock += delta
 	if fire:
 		fire.set_heat(clampf((burn_clock - 1.0) / 7.0, 0.0, 1.0))
+		scorch(clampf((burn_clock - 3.0) / 12.0, 0.0, 0.7))
 	if burn_clock > 1.0 and burn_clock - delta <= 1.0:
 		_play_at(FLARE_HISS, global_position + Vector3(0, 1, 4))
 	# Something comes up out of the roof, walks the ridge, and goes into the fire.

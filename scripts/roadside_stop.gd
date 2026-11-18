@@ -11,6 +11,7 @@ const BIKE_ENGINE := preload("res://assets/vehicles/parts/bike_engine.tscn")
 const Salvage := preload("res://scripts/roadside_salvage.gd")
 const SupplyItem := preload("res://scripts/supply_item.gd")
 const NoteItem := preload("res://scripts/note_item.gd")
+const Desert := preload("res://scripts/desert_models.gd")
 
 # The engine also identifies the original part when Continue replays swaps.
 # Keep existing profiles and their selection stable for saved stops.
@@ -43,13 +44,13 @@ func _ready() -> void:
 	garage.name = "GarageModel"
 	add_child(garage)
 	super._ready()
-	var forecourt := Shapes.material(Color("#8d7d60"))
+	var forecourt := Desert.material("Concrete")
 	Shapes.box(garage, "Forecourt", Vector3(7.0, 0.04, 3.1), Vector3(0.0, -0.049, 6.4), forecourt)
 	if old_style == 1:
-		var steel := Shapes.material(Color("#544c41"), 0.26)
+		var steel := Desert.material("Rust")
 		Shapes.box(garage, "DiscardedDrum", Vector3(0.45, 0.64, 0.44), Vector3(2.63, 0.28, -1.8), steel, true)
 	elif old_style == 2:
-		var wood := Shapes.material(Color("#78654e"))
+		var wood := Desert.material("Wood")
 		Shapes.box(garage, "ShippingCrate", Vector3(0.62, 0.53, 0.61), Vector3(-2.48, 0.27, -1.84), wood, true)
 
 	var roll := rng.randf()
@@ -240,7 +241,7 @@ func _add_broadcast_stop() -> void:
 	radio.position = Vector3(-2.55, 1.08, -0.18)
 	radio.rotation.y = PI / 2.0
 	add_child(radio)
-	var cabinet := Shapes.material(Color("#676559"), 0.2)
+	var cabinet := Desert.weathered(Color("#5f6152"), {"peel": 0.4, "rust": 0.35, "bleach": 0.4, "streaks": 0.4, "metallic_base": 0.2, "roughness_base": 0.7})
 	Shapes.box(self, "RelayCabinet", Vector3(0.57, 0.99, 0.58), Vector3(-2.57, 0.495, -0.18), cabinet, true)
 	if broadcast == RoadRadio.Broadcast.TOWER:
 		_build_relay_tower()
@@ -293,9 +294,9 @@ func _build_relay_tower() -> void:
 	tower.name = "RelayTower"
 	tower.position = Vector3(-5.7, 0, -1.95)
 	add_child(tower)
-	var steel := Shapes.material(Color("#777770"), 0.48)
-	var faded_red := Shapes.material(Color("#804638"), 0.21)
-	var concrete := Shapes.material(Color("#8a8271"))
+	var steel := Desert.weathered(Color("#6a6a64"), {"metallic_base": 0.45, "roughness_base": 0.55, "rust": 0.35, "bleach": 0.2, "dust": 0.0})
+	var faded_red := Desert.weathered(Color("#7a3b2e"), {"peel": 0.45, "under_color": Color("#6a6a64"), "bleach": 0.55, "rust": 0.25, "dust": 0.0})
+	var concrete := Desert.material("Concrete")
 	Shapes.box(tower, "Foundation", Vector3(3.3, 0.21, 3.3), Vector3(0, 0.07, 0), concrete, true)
 	var corners := [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]
 	for level in range(9):

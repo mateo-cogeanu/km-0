@@ -14,6 +14,7 @@ static func box(parent: Node3D, node_name: String, size: Vector3, at: Vector3, f
 	mesh.size = size
 	var visual := MeshInstance3D.new()
 	visual.name = node_name
+	visual.set_meta("piece", node_name)
 	visual.mesh = mesh
 	visual.material_override = finish
 	parent.add_child(visual)
@@ -39,6 +40,7 @@ static func cylinder(parent: Node3D, node_name: String, at: Vector3, axis: Vecto
 	mesh.rings = 0
 	var visual := MeshInstance3D.new()
 	visual.name = node_name
+	visual.set_meta("piece", node_name)
 	visual.mesh = mesh
 	visual.material_override = finish
 	parent.add_child(visual)

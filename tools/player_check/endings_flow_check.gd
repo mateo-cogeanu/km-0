@@ -133,6 +133,7 @@ func _burn() -> void:
 	print("tip with flare: ", player.tip_override)
 	print("lit: ", house.handle_r(player))
 	await _frames(300)
+	print("burn clock at the fire shot: ", snappedf(house.burn_clock, 0.1), " heat: ", snappedf(house.fire.heat, 0.01) if house.fire else -1.0)
 	_shot("burn_fire")
 	await _frames(100)
 	_shot("burn_roof")

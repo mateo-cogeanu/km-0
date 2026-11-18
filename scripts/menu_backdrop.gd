@@ -39,18 +39,12 @@ func _add_landscape() -> void:
 
 	var gravel := Shapes.material(Color("#87745d"))
 	Shapes.box(self, "WorkshopPullOff", Vector3(8.5, 0.015, 5.2), Vector3(8.3, -0.024, -8.8), gravel)
-	var scrub := Shapes.material(Color("#697047"))
-	for at in [Vector3(-3.7, 0.18, 2.5), Vector3(7.1, 0.16, -1.7), Vector3(-5.3, 0.12, -13.0)]:
-		for lobe in [-1.0, 0.0, 1.0]:
-			var mesh := SphereMesh.new()
-			mesh.radial_segments = 7
-			mesh.rings = 3
-			mesh.material = scrub
-			var shrub := MeshInstance3D.new()
-			shrub.mesh = mesh
-			add_child(shrub)
-			shrub.position = at + Vector3(lobe * 0.32, -absf(lobe) * 0.06, -lobe * 0.15)
-			shrub.scale = Vector3(0.69, 0.43, 0.59) * (1.0 - absf(lobe) * 0.25)
+	for at in [Vector3(-3.7, 0.0, 2.5), Vector3(7.1, 0.0, -1.7), Vector3(-5.3, 0.0, -13.0)]:
+		var shrub := MeshInstance3D.new()
+		shrub.mesh = preload("res://scripts/desert_models.gd").mesh_of("scrub")
+		add_child(shrub)
+		shrub.position = at
+		shrub.rotation.y = at.x
 
 
 func _process(delta: float) -> void:

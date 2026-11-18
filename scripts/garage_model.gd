@@ -2,6 +2,14 @@ extends Node3D
 
 const Shapes := preload("res://scripts/prop_shapes.gd")
 const Shutter := preload("res://scripts/garage_shutter.gd")
+const Desert := preload("res://scripts/desert_models.gd")
+## The code-built pieces the Blender models draw instead (their colliders stay).
+const SHELL_PIECES := ["Slab", "Apron", "Back", "Side", "RaisedSeam", "FrontExtension", "Header", "FrontPost", "Roof",
+	"RoofSeam", "RoofFascia", "Gutter", "SignBoard", "DeadStripLamp", "BoardedWindow", "WindowBoard", "RustStreak",
+	"DryGrass", "WindowFrame", "WindowPane", "Foundation", "BackWall", "SideWall", "Lintel", "FrontWall", "FlatRoof",
+	"Parapet", "BentAwning", "GabledRoof", "GableCladding", "DepotRoof", "CanopyPost", "RoofCap", "BrickCourse"]
+const BENCH_PIECES := ["BenchTop", "BenchLeg", "ToolDrawer", "DrawerPull", "Pegboard", "Tool"]
+const SHELF_PIECES := ["Shelf", "ShelfUpright", "PartsBin"]
 const BAY_SPACING := 4.25
 const WORKSHOP_EXTRA_SIDE := 0.8
 const WORKSHOP_EXTRA_DEPTH := 0.9
@@ -56,6 +64,43 @@ func build() -> void:
 	var lamp_material := Shapes.material(Color("#91866d"))
 	Shapes.box(self, "DeadStripLamp", Vector3(2.2, 0.06, 0.13), Vector3(-0.7, 2.91, 0.85), lamp_material)
 	_add_doors()
+	var width := 6.4 + extra_width
+	_dress_model("workshop" if starting_garage else "workshop_small", width, 7.0 + extra_depth, 2.95, -2.8 - extra_depth, 4.14)
+	for child in get_children():
+		if child is MeshInstance3D and Desert.piece(child) in ["Bollard", "BollardCap"]:
+			child.material_override = Desert.material("Steel" if Desert.piece(child) == "Bollard" else "Yellow paint")
+
+
+func _dress_model(title: String, width: float, depth: float, height: float, rear: float, front: float) -> void:
+	## Swap the box shell for the Blender model, keeping every collider and anchor.
+	Desert.hide_boxes(self, SHELL_PIECES)
+	var tint := paint.albedo_color.lerp(Color(1, 1, 1), 0.25) * 1.12
+	Desert.dress(self, title, true, tint)
+	for node_name in ["Workbench", "Shelving"]:
+		var holder := get_node_or_null(node_name) as Node3D
+		if holder:
+			Desert.hide_boxes(holder, BENCH_PIECES if node_name == "Workbench" else SHELF_PIECES)
+			var model := Desert.model(node_name.to_lower())
+			holder.add_child(model)
+			for mesh: GeometryInstance3D in model.find_children("*", "GeometryInstance3D", true, false):
+				mesh.visibility_range_end = 40.0
+				mesh.set_instance_shader_parameter("tint", tint)
+	var shutter_node := get_node_or_null("GarageShutter")
+	if shutter_node:
+		for child in shutter_node.get_children():
+			if child is MeshInstance3D:
+				child.material_override = Desert.material("Shutter" if Desert.piece(child) == "Slat" else "Steel")
+				child.set_instance_shader_parameter("tint", tint)
+	var door := get_node_or_null("shack_door") as MeshInstance3D
+	if door:
+		door.material_override = Desert.material("Door")
+		door.set_instance_shader_parameter("tint", tint)
+	# The walls hide what is behind them; nothing inside, so the open shutter
+	# still shows what is in there.
+	var middle := (front + rear) * 0.5
+	Desert.occluder(self, Vector3(width - 0.3, height - 0.2, 0.1), Vector3(0, height * 0.5, rear))
+	for side in [-1.0, 1.0]:
+		Desert.occluder(self, Vector3(0.1, height - 0.2, depth - 0.4), Vector3(side * (width * 0.5 - 0.05), height * 0.5, middle))
 
 
 func _make_sign(title: String) -> void:
@@ -64,7 +109,7 @@ func _make_sign(title: String) -> void:
 	label.text = title
 	label.font_size = 53
 	label.pixel_size = 0.005
-	label.modulate = Color("#ad9d80")
+	label.modulate = Color("#4a3d30")
 	label.outline_size = 0
 	add_child(label)
 	label.position = Vector3(-0.65, 2.72, 4.332)

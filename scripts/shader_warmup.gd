@@ -22,6 +22,10 @@ func _ready() -> void:
 	flare.kind = "flare"
 	flare.freeze = true
 	add_child(flare)
+	# The weathered steel, glass and shingles of the stations and the house.
+	var desert := preload("res://scripts/desert_models.gd")
+	for title in ["station_2", "station_2_far", "road_house"]:
+		add_child(desert.model(title, title.ends_with("_far")))
 
 
 func _process(_delta: float) -> void:

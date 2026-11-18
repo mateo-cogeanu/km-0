@@ -497,41 +497,21 @@ func _scrub_near(points: Array, seed_value: int) -> void:
 	## Extra bushes and stones close to where the camera sits.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
-	var leaf := Shapes.material(Color("#5f6440"))
-	var dry := Shapes.material(Color("#7a6b4c"))
-	var stone := Shapes.material(Color("#6e5c4c"), 0.0, 0.95)
 	for at: Vector3 in points:
 		var kind_roll := rng.randf()
-		if kind_roll < 0.7:
-			for lobe in range(3):
-				var mesh := SphereMesh.new()
-				mesh.radial_segments = 7
-				mesh.rings = 4
-				var bush := MeshInstance3D.new()
-				bush.mesh = mesh
-				bush.material_override = leaf if rng.randf() < 0.6 else dry
-				stage.add_child(bush)
-				var spread := Vector3(rng.randf_range(-0.35, 0.35), 0, rng.randf_range(-0.35, 0.35))
-				var scale_by := rng.randf_range(0.5, 1.0)
-				bush.position = at + spread + Vector3.UP * 0.12 * scale_by
-				bush.scale = Vector3(0.8, 0.45, 0.7) * scale_by
-		else:
-			var rock := MeshInstance3D.new()
-			var mesh := SphereMesh.new()
-			mesh.radial_segments = 6
-			mesh.rings = 3
-			rock.mesh = mesh
-			rock.material_override = stone
-			stage.add_child(rock)
-			rock.position = at
-			rock.scale = Vector3(rng.randf_range(0.3, 0.8), rng.randf_range(0.15, 0.35), rng.randf_range(0.3, 0.7))
-			rock.rotation.y = rng.randf() * TAU
+		var plant := MeshInstance3D.new()
+		plant.mesh = preload("res://scripts/desert_models.gd").mesh_of("scrub" if kind_roll < 0.35 else "scrub_b" if kind_roll < 0.7 else "rock_b")
+		stage.add_child(plant)
+		plant.position = at
+		plant.rotation.y = rng.randf() * TAU
+		plant.scale = Vector3.ONE * (rng.randf_range(0.7, 1.2) if kind_roll < 0.7 else rng.randf_range(0.25, 0.5))
 
 
 func _road(z_from: float, z_to: float) -> void:
 	var length := z_to - z_from
 	var asphalt := ShaderMaterial.new()
 	asphalt.shader = ASPHALT
+	asphalt.set_shader_parameter("noise_tex", preload("res://scripts/desert_models.gd").noise_texture())
 	var strip := PlaneMesh.new()
 	strip.size = Vector2(6.8, length)
 	var road := MeshInstance3D.new()
@@ -552,14 +532,16 @@ func _road(z_from: float, z_to: float) -> void:
 	# Where the pavement crumbles out before the house.
 	Shapes.box(stage, "CrumbledEnd", Vector3(6.8, 0.012, 0.6), Vector3(0, -0.006, z_from - 0.2), gravel)
 	# Telephone poles down one side, the wire sagging between them.
-	var wood := Shapes.material(Color("#4a3a2c"))
 	var wire := Shapes.material(Color("#1a1a1a"))
 	var pole_z := z_from + 14.0
 	var previous := Vector3.ZERO
 	while pole_z < z_to:
 		var at := Vector3(-7.4, 0, pole_z)
-		Shapes.cylinder(stage, "Pole", at + Vector3.UP * 3.6, Vector3.UP, 0.11, 7.2, wood, 7)
-		Shapes.box(stage, "CrossArm", Vector3(1.5, 0.1, 0.1), at + Vector3.UP * 6.7, wood)
+		var pole := MeshInstance3D.new()
+		pole.name = "Pole"
+		pole.mesh = preload("res://scripts/desert_models.gd").mesh_of("pole")
+		stage.add_child(pole)
+		pole.position = at
 		if previous != Vector3.ZERO:
 			for x in [-0.6, 0.6]:
 				var a := previous + Vector3(x, 6.78, 0)
@@ -1418,6 +1400,8 @@ func _build_burn() -> void:
 			var charred := finish.duplicate() as StandardMaterial3D
 			charred.albedo_color = finish.albedo_color.darkened(0.6)
 			mesh.material_override = charred
+	if house.has_method("scorch"):
+		house.scorch(0.6)
 	fire = HouseFire.new()
 	house.add_child(fire)
 	fire.position = Vector3.ZERO

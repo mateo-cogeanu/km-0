@@ -30,14 +30,14 @@ func build() -> void:
 			Shapes.box(self, "FlatRoof", Vector3(width + 0.24, 0.16, depth + 0.35), Vector3(0, wall_top + 0.08, middle), dark, true)
 			Shapes.box(self, "Parapet", Vector3(width + 0.13, 0.38, 0.17), Vector3(0, wall_top + 0.22, front + 0.1), paint)
 			Shapes.tube(self, "BentAwning", Vector3(-3.65, 2.7, front), Vector3(-3.12, 1.25, front + 1.2), 0.04, steel)
-			_add_worn_lettering("TIRES", Vector3(-0.65, 2.83, front + 0.12))
+			_add_worn_lettering("TIRES", Vector3(-0.65, wall_top - 0.1, front + 0.2))
 		1:
 			# Long former machine shed with a peaked roof.
 			for side in [-1.0, 1.0]:
 				var panel := Shapes.box(self, "GabledRoof", Vector3(width * 0.56, 0.14, depth + 0.55), Vector3(side * width * 0.25, wall_top + 0.45, middle), dark, true)
 				panel.rotation.z = -side * 0.25
 			Shapes.box(self, "GableCladding", Vector3(width * 0.46, 0.45, 0.14), Vector3(0, wall_top + 0.14, front), paint)
-			_add_worn_lettering("MACHINE SHOP", Vector3(-0.65, 2.90, front + 0.12))
+			_add_worn_lettering("MACHINE SHOP", Vector3(-0.65, 2.89, front + 0.21))
 		2:
 			# A storage depot with a canopy and posts.
 			Shapes.box(self, "DepotRoof", Vector3(width + 0.4, 0.16, depth + 2.4), Vector3(0, wall_top + 0.08, middle + 0.89), dark, true)
@@ -49,11 +49,12 @@ func build() -> void:
 			var mortar := Shapes.material(Color("#554a40"))
 			for course in range(8):
 				Shapes.box(self, "BrickCourse", Vector3(0.012, 0.024, depth - 0.18), Vector3(width * 0.5 + 0.10, 0.4 + course * 0.33, middle), mortar)
-			_add_worn_lettering("REPAIRS", Vector3(-0.65, 2.81, front + 0.12))
+			_add_worn_lettering("REPAIRS", Vector3(-0.65, wall_top - 0.35, front + 0.2))
 	_add_decay()
 	_add_shelving()
 	_add_workbench()
 	_add_doors()
+	_dress_model("station_%d" % variant, width, depth, wall_top, rear, front)
 
 
 func _add_worn_lettering(title: String, at: Vector3) -> void:
@@ -62,7 +63,7 @@ func _add_worn_lettering(title: String, at: Vector3) -> void:
 	label.font_size = 54
 	label.pixel_size = 0.005
 	label.outline_size = 0
-	label.modulate = Color("#91856f")
+	label.modulate = Color("#5b4a3a")
 	add_child(label)
 	label.position = at
 

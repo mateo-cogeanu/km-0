@@ -11,6 +11,7 @@ const Style := preload("res://scripts/menu_style.gd")
 const DOOR_SOUND := preload("res://assets/audio/ending/door_open.wav")
 const DOOR_RATTLE := preload("res://assets/audio/ending/door_rattle.wav")
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
+const Desert := preload("res://scripts/desert_models.gd")
 
 const LOCATION := Vector3(46.0, 0.0, 660.0)
 ## The door faces back towards the road and the workshop.
@@ -120,6 +121,7 @@ func _build_cabin() -> void:
 		for corner in [Vector3(-2.6, 2.6, z), Vector3(2.6, 2.6, z), Vector3(0, 3.66, z)]:
 			gable.add_vertex(corner)
 		var mesh := MeshInstance3D.new()
+		mesh.set_meta("piece", "Gable")
 		mesh.mesh = gable.commit()
 		var both := planks.duplicate() as StandardMaterial3D
 		both.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -135,6 +137,15 @@ func _build_cabin() -> void:
 		var board := Shapes.box(self, "Board", Vector3(0.03, 0.12, 1.1), Vector3(-2.64, 1.45, -0.4), planks)
 		board.rotation.x = tilt
 	Shapes.box(self, "FrontWindow", Vector3(0.6, 0.5, 0.03), Vector3(1.6, 1.5, 2.13), glow)
+	# The Blender cabin over the code-built walls, which stay for collision.
+	Desert.hide_boxes(self, ["BackWall", "SideWall", "FrontWall", "Lintel", "Seam", "Roof", "Gable", "Board"])
+	var dressing := Desert.model("cabin")
+	dressing.name = "Dressing"
+	add_child(dressing)
+	for child in get_children():
+		if child is MeshInstance3D and Desert.piece(child) == "Floor":
+			child.material_override = Desert.material("Floor")
+	Desert.solid(self, Vector3(0.55, 0.65, 0.45), Vector3(0.75, 0.33, -1.66))
 	# Inside: table, chair, cot, lamp, a radio, empties.
 	Shapes.box(self, "Table", Vector3(1.2, 0.06, 0.75), Vector3(-1.2, 0.78, -1.2), planks, true)
 	for x in [-1.72, -0.68]:
@@ -210,7 +221,9 @@ func _build_door(planks: Material, dark: Material) -> void:
 	door_hinge.name = "DoorHinge"
 	add_child(door_hinge)
 	door_hinge.position = Vector3(-0.64, 0, 2.05)
-	Shapes.box(door_hinge, "Door", Vector3(1.26, 2.36, 0.06), Vector3(0.63, 1.2, 0), planks, true)
+	Shapes.box(door_hinge, "Door", Vector3(1.26, 2.36, 0.06), Vector3(0.63, 1.2, 0), Desert.material("Wood"), true)
+	for i in 7:
+		Shapes.box(door_hinge, "DoorPlank", Vector3(0.008, 2.34, 0.065), Vector3(0.05 + i * 0.18, 1.2, 0), dark)
 	for y in [0.45, 1.95]:
 		Shapes.box(door_hinge, "DoorBrace", Vector3(1.2, 0.1, 0.02), Vector3(0.63, y, 0.04), dark)
 	Shapes.cylinder(door_hinge, "Knob", Vector3(1.12, 1.05, 0.06), Vector3.BACK, 0.035, 0.05, Shapes.material(Color("#7a6a4a"), 0.5, 0.4))
