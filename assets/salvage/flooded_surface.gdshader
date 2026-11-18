@@ -7,6 +7,8 @@ shader_type spatial;
 uniform vec3 base_color : source_color = vec3(0.55);
 uniform float peel = 0.0;
 uniform float bricks = 0.0;
+// For the simple distant houses: clapboard drawn on instead of built.
+uniform float boards = 0.0;
 uniform float tide_y = -4.4;
 uniform float water_y = -5.2;
 uniform float roughness_base = 0.85;
@@ -42,6 +44,11 @@ void fragment() {
 		// Each brick its own shade of red-brown.
 		vec3 cell = floor(world * vec3(4.4, 13.3, 4.4));
 		color *= 0.75 + 0.45 * hash(cell);
+	}
+	if (boards > 0.5 && abs(world_normal.y) < 0.5) {
+		// The shadow line under each board's lower edge, every 20 cm.
+		float row = fract(world.y / 0.2);
+		color *= mix(0.62, 1.0, smoothstep(0.0, 0.12, row)) * mix(1.0, 1.06, smoothstep(0.5, 1.0, row));
 	}
 	// Peeling paint, showing weathered grey wood.
 	float flake = smoothstep(0.7, 0.76, noise(world * vec3(14.0, 22.0, 14.0) + vec3(2.0)) * 0.6 + noise(world * 2.5) * 0.4);

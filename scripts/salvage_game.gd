@@ -232,7 +232,7 @@ func _spawn_cars() -> void:
 		car.fuel_amount = 0.0
 		car.electric_charge = 0.0
 		car.reset_physics_interpolation()
-		_far_detail(car, 50.0)
+		_far_detail(car, 30.0)
 
 
 func _far_detail(node: Node, distance: float) -> void:
@@ -301,9 +301,37 @@ func _process(delta: float) -> void:
 	for player: Node in players():
 		player.step_sounds = SPLASHES if in_water(player.global_position + Vector3.DOWN * 0.9) else []
 	_count_pallet()
+	_rest_cars(delta)
 	_update_hud(delta)
 	if is_host() and not ended:
 		_check_end()
+
+
+var rest_check := 0.0
+func _rest_cars(delta: float) -> void:
+	## The cars in the street only wake up when someone is near them: a parked,
+	## driverless car does not need its suspension, wheels, engine sound and
+	## dashboard worked out every frame. Asleep, it is frozen where it stands.
+	rest_check -= delta
+	if rest_check > 0.0:
+		return
+	rest_check = 0.3
+	for car in get_tree().get_nodes_in_group("drivable"):
+		if not String(car.name).begins_with("Flooded"):
+			continue
+		var awake := false
+		for player: Node3D in players():
+			if player.global_position.distance_to(car.global_position) < 15.0:
+				awake = true
+		if car.is_processing() == awake:
+			continue
+		car.set_process(awake)
+		car.set_physics_process(awake)
+		car.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+		car.freeze = not awake
+		if not awake:
+			car.linear_velocity = Vector3.ZERO
+			car.angular_velocity = Vector3.ZERO
 
 
 func _count_pallet() -> void:

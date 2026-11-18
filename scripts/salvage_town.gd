@@ -14,6 +14,9 @@ const HOUSES := [
 	["house_a", 9.0, 9.0, 6.0, 2.4], ["house_b", 10.0, 8.5, 3.3, 2.2],
 	["house_c", 8.0, 10.0, 6.0, 0.0], ["shop", 11.0, 10.0, 5.6, 0.0],
 ]
+## Board by board within this distance (the flashlight reaches 22 m), the
+## simpler shell with painted-on boards beyond it.
+const NEAR_DETAIL := 28.0
 const PAINT := [Color("#6f7a76"), Color("#8c7f62"), Color("#5f6d7c"), Color("#7d6458"), Color("#76805f"), Color("#938d7f")]
 
 var game: Node3D
@@ -62,6 +65,9 @@ func _material(title: String) -> Material:
 		return materials[title]
 	var made: Material
 	match title:
+		"Siding far":
+			made = _flooded(Color(1, 1, 1), 0.55)
+			(made as ShaderMaterial).set_shader_parameter("boards", 1.0)
 		"Siding":
 			made = _flooded(Color(1, 1, 1), 0.55)
 		"Trim":
@@ -114,7 +120,7 @@ func _material(title: String) -> Material:
 	return made
 
 
-func model(title: String) -> Node3D:
+func model(title: String, far := false) -> Node3D:
 	if not scenes.has(title):
 		scenes[title] = load("res://assets/salvage/%s.glb" % title)
 	var node: Node3D = (scenes[title] as PackedScene).instantiate()
@@ -122,6 +128,8 @@ func model(title: String) -> Node3D:
 		for surface in mesh.mesh.get_surface_count():
 			var source := mesh.mesh.surface_get_material(surface)
 			var title_name := source.resource_name.get_slice(".", 0) if source else ""
+			if far and title_name == "Siding":
+				title_name = "Siding far"
 			mesh.set_surface_override_material(surface, _material(title_name))
 	return node
 
@@ -173,13 +181,13 @@ func build_street() -> void:
 				# Board by board up close; from down the street, a simpler shell
 				# of the same house.
 				for mesh: GeometryInstance3D in house.find_children("*", "GeometryInstance3D", true, false):
-					mesh.visibility_range_end = 55.0
+					mesh.visibility_range_end = NEAR_DETAIL
 					mesh.visibility_range_end_margin = 4.0
-				var far := model(pick[0] + "_far")
+				var far := model(pick[0] + "_far", true)
 				house.add_child(far)
 				for mesh: GeometryInstance3D in far.find_children("*", "GeometryInstance3D", true, false):
 					mesh.set_instance_shader_parameter("tint", paint)
-					mesh.visibility_range_begin = 55.0
+					mesh.visibility_range_begin = NEAR_DETAIL
 					mesh.visibility_range_begin_margin = 4.0
 			# Walls you cannot walk through; a porch you can stand on. The
 			# walls also hide whatever is behind them from the renderer.
