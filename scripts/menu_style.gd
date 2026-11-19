@@ -50,7 +50,8 @@ const PANEL_PADDING := 28
 ## Window height at which one design pixel is one screen pixel.
 const DESIGN_HEIGHT := 820.0
 ## The UI scale setting that means "normal size" (it was the old default).
-const UI_SCALE_NORMAL := 1.35
+## The title screen's open column is drawn larger than the boxed menus.
+const TITLE_SCALE := 1.33
 
 
 static func box(fill: Color, edge: Color, inset: int = 0, width: int = 2, radius: int = 6) -> StyleBoxFlat:
@@ -359,7 +360,7 @@ static func divider() -> HSeparator:
 static func ui_scale(viewport_size: Vector2) -> float:
 	## How big one design pixel is: by window height, times the player's UI
 	## scale, never smaller than readable.
-	return clampf(viewport_size.y / DESIGN_HEIGHT, 0.75, 3.0) * GameSettings.ui_scale / UI_SCALE_NORMAL
+	return clampf(viewport_size.y / DESIGN_HEIGHT, 0.75, 3.0) * GameSettings.ui_size
 
 
 static func screen(host: Control, width: float) -> Dictionary:
@@ -393,7 +394,7 @@ static func fit_screen(parts: Dictionary, viewport_size: Vector2, align_left: bo
 	var scroll: ScrollContainer = parts["scroll"]
 	var width: float = parts["width"]
 	# Never so small that body text drops below about 13 pixels.
-	var factor := maxf(ui_scale(viewport_size) * (1.0 if open_layout else PANEL_SCALE), MIN_FACTOR)
+	var factor := maxf(ui_scale(viewport_size) * (TITLE_SCALE if open_layout else PANEL_SCALE), MIN_FACTOR)
 	# Never wider than the window, with a margin either side.
 	factor = minf(factor, (viewport_size.x - 32.0) / (width + 2.0 * GAP_XL))
 	factor = maxf(factor, 0.5)

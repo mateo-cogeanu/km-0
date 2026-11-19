@@ -22,6 +22,11 @@ var render_scale: float = 1.0
 var shadow_quality: int = 3
 var lighting_quality: int = 2
 var headlight_shadows: bool = true
+## The player's UI scale, 100% = the designed size (0.75 to 1.5). Saved
+## under its own key: the old "ui_scale" values (1.0 to 1.8, where 1.35 was
+## normal) are not carried over, so everyone starts at the designed size.
+var ui_size: float = 1.0
+## What older code multiplies by: 1.35 at 100%.
 var ui_scale: float = 1.35
 var subtitles := true
 var voice_volume := 1.0
@@ -78,7 +83,8 @@ func load_settings() -> void:
 	shadow_quality = clampi(int(config.get_value(SECTION, "shadow_quality", shadow_quality)), 0, SHADOW_OPTIONS.size() - 1)
 	lighting_quality = clampi(int(config.get_value(SECTION, "lighting_quality", lighting_quality)), 0, LIGHTING_OPTIONS.size() - 1)
 	headlight_shadows = bool(config.get_value(SECTION, "headlight_shadows", headlight_shadows))
-	ui_scale = clampf(float(config.get_value(SECTION, "ui_scale", ui_scale)), 1.0, 1.8)
+	ui_size = clampf(float(config.get_value(SECTION, "ui_size", ui_size)), 0.75, 1.5)
+	ui_scale = 1.35 * ui_size
 	subtitles = bool(config.get_value(SECTION, "subtitles", subtitles))
 	voice_volume = clampf(float(config.get_value(SECTION, "voice_volume", voice_volume)), 0.0, 1.0)
 	fov = clampf(float(config.get_value(SECTION, "fov", fov)), 60.0, 100.0)
@@ -102,7 +108,7 @@ func save_settings() -> void:
 	config.set_value(SECTION, "shadow_quality", shadow_quality)
 	config.set_value(SECTION, "lighting_quality", lighting_quality)
 	config.set_value(SECTION, "headlight_shadows", headlight_shadows)
-	config.set_value(SECTION, "ui_scale", ui_scale)
+	config.set_value(SECTION, "ui_size", ui_size)
 	config.set_value(SECTION, "subtitles", subtitles)
 	config.set_value(SECTION, "voice_volume", voice_volume)
 	config.set_value(SECTION, "fov", fov)
@@ -290,7 +296,9 @@ func set_headlight_shadows(value: bool) -> void:
 
 
 func set_ui_scale(value: float) -> void:
-	ui_scale = clampf(value, 1.0, 1.8)
+	## value: 0.75 to 1.5, where 1.0 is the designed size.
+	ui_size = clampf(value, 0.75, 1.5)
+	ui_scale = 1.35 * ui_size
 	queue_save()
 	settings_changed.emit()
 

@@ -238,15 +238,15 @@ func _build_game(holder: VBoxContainer) -> void:
 		GameSettings.save_settings()
 		_show_camera_motion_value(value))
 	Style.slider_row(holder, "Camera motion", camera_motion_slider, camera_motion_value, "Head bob and sway while walking and driving.")
-	ui_scale_slider = Style.slider(1.0, 1.8, 0.05)
+	ui_scale_slider = Style.slider(0.75, 1.5, 0.05)
 	ui_scale_value = Style.value_label()
 	# Applied when let go, so the menu doesn't resize under the mouse.
 	ui_scale_slider.value_changed.connect(func(value: float) -> void: ui_scale_value.text = _percent_size(value))
 	ui_scale_slider.drag_ended.connect(func(_changed: bool) -> void: GameSettings.set_ui_scale(ui_scale_slider.value))
 	ui_scale_slider.focus_exited.connect(func() -> void:
-		if not is_equal_approx(GameSettings.ui_scale, ui_scale_slider.value):
+		if not is_equal_approx(GameSettings.ui_size, ui_scale_slider.value):
 			GameSettings.set_ui_scale(ui_scale_slider.value))
-	Style.slider_row(holder, "Interface size", ui_scale_slider, ui_scale_value)
+	Style.slider_row(holder, "UI scale", ui_scale_slider, ui_scale_value, "Makes every menu and the on-screen readouts bigger or smaller, keeping their proportions.")
 	scares_check = Style.toggle(false, func(on: bool) -> void: GameSettings.set_option("reduce_scares", on))
 	Style.row(holder, "Reduce scares", scares_check, "Fewer sudden loud sounds and jump scares.")
 
@@ -293,8 +293,8 @@ func _sync_from_settings() -> void:
 	fov_value.text = "%d°" % roundi(GameSettings.fov)
 	camera_motion_slider.set_value_no_signal(GameSettings.camera_motion)
 	_show_camera_motion_value(GameSettings.camera_motion)
-	ui_scale_slider.set_value_no_signal(GameSettings.ui_scale)
-	ui_scale_value.text = _percent_size(GameSettings.ui_scale)
+	ui_scale_slider.set_value_no_signal(GameSettings.ui_size)
+	ui_scale_value.text = _percent_size(GameSettings.ui_size)
 	_sync_preset()
 
 
@@ -306,7 +306,7 @@ func _save_player_name() -> void:
 
 
 func _percent_size(value: float) -> String:
-	return "%d%%" % roundi(value / Style.UI_SCALE_NORMAL * 100.0)
+	return "%d%%" % roundi(value * 100.0)
 
 
 func _show_camera_motion_value(value: float) -> void:
