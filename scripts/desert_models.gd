@@ -108,7 +108,9 @@ static func make_material(title: String) -> Material:
 		"Stone":
 			return weathered(Color(0.38, 0.35, 0.31), {"bleach": 0.2, "roughness_base": 0.95})
 		"Rock":
-			return weathered(Color(0.6, 0.48, 0.37), {"bleach": 0.35, "roughness_base": 0.95, "dust": 0.9, "streaks": 0.5})
+			# Sun-baked sandstone: warm red-brown, desert varnish running dark
+			# down the faces, the foot dusted with the ground's sand.
+			return weathered(Color(0.34, 0.2, 0.13), {"bleach": 0.05, "roughness_base": 0.95, "dust": 0.1, "streaks": 0.8})
 		"Bark":
 			return weathered(Color(0.24, 0.19, 0.15), {"bleach": 0.2, "wood_grain": 1.0, "roughness_base": 1.0, "streaks": 0.2, "dust": 0.3})
 		"Scrub":
@@ -122,7 +124,7 @@ static func make_material(title: String) -> Material:
 		"Grass":
 			return weathered(Color(0.62, 0.56, 0.36), {"bleach": 0.35, "roughness_base": 1.0, "dust": 0.0, "streaks": 0.0}, true)
 		"Dry grass":
-			return foliage(Color(0.42, 0.42, 0.22), {"kind": 2, "dry": 0.7, "dry_color": Color(0.62, 0.54, 0.33), "crown_center": Vector3(0, 0.05, 0), "crown_size": Vector3(0.45, 0.6, 0.45), "sway": 0.06})
+			return foliage(Color(0.36, 0.35, 0.2), {"kind": 2, "dry": 0.6, "dry_color": Color(0.5, 0.44, 0.29), "crown_center": Vector3(0, 0.05, 0), "crown_size": Vector3(0.45, 0.6, 0.45), "sway": 0.06})
 		"Green grass":
 			return foliage(Color(0.3, 0.36, 0.16), {"kind": 2, "dry": 0.3, "dry_color": Color(0.58, 0.52, 0.32), "crown_center": Vector3(0, 0.05, 0), "crown_size": Vector3(0.45, 0.6, 0.45), "sway": 0.06})
 		"Green paint":

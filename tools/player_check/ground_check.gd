@@ -47,10 +47,33 @@ func _ready() -> void:
 		await _view(road._sample(z + 2.0, 6.5 * side, 1.7), road._sample(z - 1.0, 9.5 * side, 0.0), biome[0] + "_near")
 		await _view(road._sample(z + 6.0, 5.0 * side, 1.7), road._sample(z - 25.0, 30.0 * side, 0.4), biome[0] + "_mid")
 		await _view(road._sample(z + 10.0, 2.0, 6.0), road._sample(z - 120.0, 90.0 * side, 0.0), biome[0] + "_far")
-		if OS.get_environment("KM0_PERF") == "1" and biome[0] in ["meadow", "forest"]:
+		if biome[0] == "badlands":
+			await _rock_close()
+		if OS.get_environment("KM0_PERF") == "1" and biome[0] in ["meadow", "forest", "badlands"]:
 			await _perf(biome[0] + "_mid", road._sample(z + 6.0, 5.0 * side, 1.7), road._sample(z - 25.0, 30.0 * side, 0.4))
 			await _perf(biome[0] + "_far", road._sample(z + 10.0, 2.0, 6.0), road._sample(z - 120.0, 90.0 * side, 0.0))
 	get_tree().quit()
+
+
+func _rock_close() -> void:
+	## Boulders up close, from eye height a few metres off.
+	var picks := []
+	for kind in ["Rock", "Rock B"]:
+		for node in road.find_children(kind, "MultiMeshInstance3D", true, false):
+			var mesh: MultiMesh = node.multimesh
+			for i in mesh.instance_count:
+				var t: Transform3D = node.global_transform * mesh.get_instance_transform(i)
+				if (t.origin - player.global_position).length() < 70.0:
+					picks.append([kind, t])
+					break
+			if picks.size() > 0 and picks[-1][0] == kind:
+				break
+	for pick in picks:
+		var t: Transform3D = pick[1]
+		var size := t.basis.get_scale().x
+		var away := (player.global_position - t.origin) * Vector3(1, 0, 1)
+		var from := t.origin + away.normalized() * (2.6 + 2.2 * size) + Vector3.UP * 1.7
+		await _view(from, t.origin + Vector3.UP * 0.4 * size, "badlands_%s_close" % String(pick[0]).to_lower().replace(" ", "_"))
 
 
 func _view(from: Vector3, at: Vector3, title: String) -> void:

@@ -139,8 +139,8 @@ var drawn_at := Vector3.ZERO
 var terrain_speed_scale := 1.0
 ## Footstep sounds for the ground you are on, when it is not the usual (water).
 var step_sounds: Array = []
-## Heavy parts (an engine) take two: one holds it, the other helps carry.
-## Alone, you can only drag it along the ground, slowly and loudly.
+## Heavy parts (an engine) take two in co-op: one holds it, the other helps
+## carry. Alone, you can only drag it along the ground, slowly and loudly.
 const HEAVY_PARTS := ["engine"]
 var helping_object: RigidBody3D
 var helping_holder: Node
@@ -287,7 +287,14 @@ func _process(delta: float) -> void:
 
 
 func is_heavy(body: Node) -> bool:
-	return body != null and String(body.get_meta("vehicle_part_type", "")) in HEAVY_PARTS
+	## Only when there are others to help: in co-op (either story) and in the
+	## Salvage Run. Playing alone on the road you carry an engine yourself.
+	if not (NetworkManager.is_online() or NetworkManager.salvage()):
+		return false
+	if body == null or String(body.get_meta("vehicle_part_type", "")) not in HEAVY_PARTS:
+		return false
+	# A motorbike's engine is light enough for one.
+	return String(body.get_meta("engine_variant", "")) != "Bike"
 
 
 func carry_helped() -> bool:

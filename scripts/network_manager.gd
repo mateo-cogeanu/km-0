@@ -22,6 +22,9 @@ var kicked_peers: Dictionary = {}
 ## Which story the session plays: "road" (KM0) or "salvage" (the co-op
 ## Salvage Run in the flooded town).
 var story := "road"
+## The story the host has picked in the lobby, shown to everyone there.
+var lobby_story := "road"
+const STORY_NAMES := {"road": "The Drive", "salvage": "The Salvage Run"}
 const STORY_SCENES := {"road": "res://scenes/main.tscn", "salvage": "res://scenes/salvage.tscn"}
 
 var _discovery_listener := PacketPeerUDP.new()
@@ -93,6 +96,7 @@ func leave_lobby() -> void:
 	is_host = false
 	game_in_progress = false
 	story = "road"
+	lobby_story = "road"
 	kicked_peers.clear()
 	lobby_name = ""
 	players.clear()
@@ -126,9 +130,23 @@ func can_host_start() -> bool:
 	return true
 
 
-func start_game(story_name := "road") -> void:
+func set_lobby_story(story_name: String) -> void:
+	## The host picks what the lobby will play. Everyone else has to ready up
+	## again, so nobody is started into a story they didn't see chosen.
+	if not is_host or game_in_progress or not STORY_SCENES.has(story_name) or story_name == lobby_story:
+		return
+	lobby_story = story_name
+	for peer_id in players:
+		if peer_id != 1:
+			players[peer_id]["ready"] = false
+	_sync_lobby_state()
+
+
+func start_game(story_name := "") -> void:
 	if not can_host_start():
 		return
+	if story_name.is_empty():
+		story_name = lobby_story
 	multiplayer.multiplayer_peer.refuse_new_connections = true
 	begin_game.rpc(players.duplicate(true), story_name)
 
@@ -165,9 +183,10 @@ func set_ready_on_server(ready: bool) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func receive_lobby_state(server_lobby_name: String, server_players: Dictionary) -> void:
+func receive_lobby_state(server_lobby_name: String, server_players: Dictionary, server_story: String) -> void:
 	lobby_name = server_lobby_name
 	players = server_players
+	lobby_story = server_story if STORY_SCENES.has(server_story) else "road"
 	lobby_state_changed.emit()
 
 
@@ -183,7 +202,7 @@ func _sync_lobby_state() -> void:
 	if is_host:
 		for peer_id in multiplayer.get_peers():
 			if not kicked_peers.has(peer_id):
-				receive_lobby_state.rpc_id(peer_id, lobby_name, players)
+				receive_lobby_state.rpc_id(peer_id, lobby_name, players, lobby_story)
 		_broadcast_lobby()
 
 

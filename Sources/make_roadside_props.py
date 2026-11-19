@@ -360,23 +360,90 @@ def dead_tree(seed=760):
     return k.finish("DeadTree")
 
 
-def rock(seed, layered=True):
-    """Weathered sandstone: a lumpy boulder with flat-ish bedding steps."""
-    k = Kit(seed)
-    rng = k.rng
-    k.ico("Rock", V(0, 0.1, 0), 1.0, (1.0, 0.55, 0.8), 3, 0.18)
-    bm = k.bm("Rock")
+def _boulder(rng, center, radius, scale, layered, subdiv, crack=True, seed=0.0):
+    """One eroded boulder in its own bmesh (Godot space): a squashed sphere
+    roughened by layered noise, with sandstone bedding ledges (each band
+    undercut a little, so the lips overhang), a fissure or two, and a base
+    that spreads and sinks into the ground."""
+    from mathutils import noise
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=subdiv, radius=1.0)
+    off = Vector((seed * 3.1, seed * 1.7, seed * 2.3))
+    step = rng.uniform(0.13, 0.19)
+    tilt = Vector((rng.uniform(-0.15, 0.15), 1.0, rng.uniform(-0.15, 0.15))).normalized()
+    cracks = []
+    if crack:
+        for _ in range(rng.randint(1, 2)):
+            a = rng.uniform(0, 2 * pi)
+            cracks.append((Vector((cos(a), 0, sin(a))), rng.uniform(-0.25, 0.25), rng.uniform(0.025, 0.045)))
     for v in bm.verts:
+        n = v.co.normalized()
+        p = Vector((n.x * scale[0], n.y * scale[1], n.z * scale[2]))
+        # Broad lumps, then finer pitting.
+        lump = noise.fractal(p * 1.3 + off, 0.6, 2.0, 3) * 0.22
+        pit = noise.noise(p * 6.0 + off) * 0.035
+        r = 1.0 + lump + pit
+        q = p * r
         if layered:
-            # Terrace the top into ledges.
-            step = 0.16
-            y = v.co.y
-            v.co.y = (int(y / step) + min(1.0, (y % step) / step * 3.0)) * step if y > 0 else y
-        v.co.x += 0.06 * sin(v.co.y * 9 + seed)
-    for i in range(rng.randint(2, 4)):
+            # Bedding: each band's lower part is cut back, its top a ledge.
+            h = q.dot(tilt) + 0.5
+            band = (h / step) % 1.0
+            # Softer beds wear back into grooves between the harder ones.
+            groove = 0.5 - 0.5 * cos(2 * pi * band)
+            # Only on the flanks: the top and the buried underside stay whole.
+            flank = max(0.0, 1.0 - abs(n.y) / 0.75)
+            undercut = 0.045 * groove * flank * max(0.0, min(1.0, h * 2.0))
+            q = q - Vector((n.x, 0.0, n.z)) * undercut
+        for normal, offset, width in cracks:
+            d = abs(q.dot(normal) - offset)
+            if d < width and q.y > -0.25:
+                q = q - n * (width - d) / width * 0.09
+        # Spread and sink the base into the ground.
+        if q.y < 0.0:
+            q = Vector((q.x * (1.0 + 0.25 * min(1.0, -q.y * 2.5)), q.y, q.z * (1.0 + 0.25 * min(1.0, -q.y * 2.5))))
+        v.co = q * radius + Vector(center)
+    return bm
+
+
+def rock(seed, layered=True):
+    """A weathered desert boulder, sitting half buried: eroded sandstone with
+    bedding ledges and a crack (layered), or a rounded, split boulder with a
+    smaller one leaning on it; a few loose stones around either."""
+    rng = Random(seed)
+    merged = bmesh.new()
+    parts = []
+    if layered:
+        parts.append(_boulder(rng, V(0, 0.18, 0), 1.0, (1.15, 0.62, 0.85), True, 5, False, seed))
+    else:
+        parts.append(_boulder(rng, V(0, 0.22, 0), 0.95, (1.0, 0.78, 0.9), False, 5, True, seed))
+        parts.append(_boulder(rng, V(0.95, 0.05, 0.35), 0.5, (1.0, 0.8, 0.95), False, 4, False, seed + 7))
+    for i in range(rng.randint(3, 5)):
         a = rng.uniform(0, 2 * pi)
-        k.ico("Rock", V(cos(a) * 1.0, 0.0, sin(a) * 0.8), rng.uniform(0.15, 0.3), (1, 0.6, 1), 1, 0.3)
-    return k.finish("Rock")
+        dist = rng.uniform(1.15, 1.7)
+        parts.append(_boulder(rng, V(cos(a) * dist, -0.02, sin(a) * dist * 0.8), rng.uniform(0.08, 0.18),
+            (1.0, 0.6, 0.85), False, 3, False, seed + 11 + i))
+    for bm in parts:
+        temp = bpy.data.meshes.new("t")
+        bm.to_mesh(temp)
+        bm.free()
+        merged.from_mesh(temp)
+        bpy.data.meshes.remove(temp)
+    bmesh.ops.transform(merged, matrix=TO_BLENDER, verts=merged.verts)
+    mesh = bpy.data.meshes.new("Rock")
+    merged.to_mesh(mesh)
+    merged.free()
+    mesh.materials.append(material("Rock"))
+    obj = bpy.data.objects.new("Rock", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    # Down to a sensible count: collapse keeps the form, the ledges stay crisp
+    # where the angle is sharp and everything else shades smooth.
+    dec = obj.modifiers.new("Decimate", "DECIMATE")
+    dec.ratio = 0.24
+    bpy.ops.object.modifier_apply(modifier=dec.name)
+    bpy.ops.object.shade_smooth_by_angle(angle=radians(75))
+    return obj
 
 
 build_all([

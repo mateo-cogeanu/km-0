@@ -2,7 +2,12 @@ extends Control
 
 const Style := preload("res://scripts/menu_style.gd")
 
-var salvage_button: Button
+var story_buttons := {}
+var story_blurb: Label
+const STORY_BLURBS := {
+	"road": "KM0’s desert road, together: a car for every four of you, the workshop, the stations and the radio. Engines take two to lift; alone you can only drag one along the ground.",
+	"salvage": "A separate co-op story: strip cars in a flooded town for a scrap buyer before the water rises. Something in the water hunts by sound.",
+}
 var lobby_list: ItemList
 var lobby_name_edit: LineEdit
 var status_label: Label
@@ -138,19 +143,34 @@ func _build_room() -> void:
 	player_list = Style.vbox(5)
 	room_panel.add_child(player_list)
 
+	# What the lobby will play: the host picks, everyone sees it.
+	room_panel.add_child(Style.label("Story", 15, Style.MUTED))
+	var story_row := HBoxContainer.new()
+	story_row.add_theme_constant_override("separation", 8)
+	room_panel.add_child(story_row)
+	var group := ButtonGroup.new()
+	for story_name in ["road", "salvage"]:
+		var pick := Style.button(NetworkManager.STORY_NAMES[story_name], 17)
+		pick.toggle_mode = true
+		pick.button_group = group
+		pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		pick.tooltip_text = STORY_BLURBS[story_name]
+		pick.pressed.connect(NetworkManager.set_lobby_story.bind(story_name))
+		story_row.add_child(pick)
+		story_buttons[story_name] = pick
+	story_blurb = Style.caption("")
+	story_blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	room_panel.add_child(story_blurb)
+
 	launch_hint = Style.caption("")
 	room_panel.add_child(launch_hint)
 	ready_button = Style.button("Ready")
 	ready_button.toggle_mode = true
 	ready_button.toggled.connect(NetworkManager.set_local_ready)
 	room_panel.add_child(ready_button)
-	play_button = Style.button("Start drive")
-	play_button.pressed.connect(NetworkManager.start_game)
+	play_button = Style.button("Start")
+	play_button.pressed.connect(func() -> void: NetworkManager.start_game())
 	room_panel.add_child(play_button)
-	salvage_button = Style.button("Start the Salvage Run")
-	salvage_button.tooltip_text = "A separate co-op story: strip cars in a flooded town for a scrap buyer. Something in the water hunts by sound."
-	salvage_button.pressed.connect(NetworkManager.start_game.bind("salvage"))
-	room_panel.add_child(salvage_button)
 
 
 func _add_field(parent: Control, field_name: String, placeholder: String) -> LineEdit:
@@ -268,14 +288,20 @@ func _refresh_room() -> void:
 	ready_button.disabled = not can_ready
 	ready_button.set_pressed_no_signal(is_ready)
 	ready_button.text = "Unready" if is_ready else "Ready"
+	var chosen := NetworkManager.lobby_story
+	for story_name in story_buttons:
+		var pick: Button = story_buttons[story_name]
+		pick.set_pressed_no_signal(story_name == chosen)
+		# Only the host chooses; everyone else sees the choice.
+		pick.disabled = not host or pending
+	story_blurb.text = STORY_BLURBS.get(chosen, "") + ("" if host else "\nThe host picks the story.")
 	play_button.visible = host
 	play_button.disabled = not NetworkManager.can_host_start()
-	salvage_button.visible = host
-	salvage_button.disabled = play_button.disabled
+	play_button.text = "Start %s" % NetworkManager.STORY_NAMES.get(chosen, "the game")
 	if pending:
 		launch_hint.text = "You can ready up when the lobby connects."
 	elif host:
-		launch_hint.text = "Everyone must be ready before you can start." if play_button.disabled else "Everyone is ready. Start the drive when you’re set."
+		launch_hint.text = "Everyone must be ready before you can start." if play_button.disabled else "Everyone is ready. Start when you’re set."
 	else:
 		launch_hint.text = "The host can start once everyone is ready."
 		_set_status("Connected to the lobby.")
