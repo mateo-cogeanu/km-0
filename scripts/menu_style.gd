@@ -40,8 +40,12 @@ const GAP_L := 20
 const GAP_XL := 32
 # Control sizes.
 const BUTTON_HEIGHT := 48
-const ROW_HEIGHT := 44
-const CONTROL_WIDTH := 210
+const ROW_HEIGHT := 40
+const CONTROL_WIDTH := 200
+## Boxed menus (settings, multiplayer, pause, the pack, notes, dialogs) are
+## dense with rows, so they are drawn smaller than the open title screen.
+const PANEL_SCALE := 0.74
+const MIN_FACTOR := 0.72
 const PANEL_PADDING := 28
 ## Window height at which one design pixel is one screen pixel.
 const DESIGN_HEIGHT := 820.0
@@ -383,10 +387,13 @@ static func screen(host: Control, width: float) -> Dictionary:
 	return {"scroll": scroll, "panel": panel, "content": content, "width": width}
 
 
-static func fit_screen(parts: Dictionary, viewport_size: Vector2, align_left: bool) -> void:
+static func fit_screen(parts: Dictionary, viewport_size: Vector2, align_left: bool, open_layout := false) -> void:
+	## open_layout: the title screen's bare column, drawn at full size. Boxed
+	## screens get PANEL_SCALE.
 	var scroll: ScrollContainer = parts["scroll"]
 	var width: float = parts["width"]
-	var factor := ui_scale(viewport_size)
+	# Never so small that body text drops below about 13 pixels.
+	var factor := maxf(ui_scale(viewport_size) * (1.0 if open_layout else PANEL_SCALE), MIN_FACTOR)
 	# Never wider than the window, with a margin either side.
 	factor = minf(factor, (viewport_size.x - 32.0) / (width + 2.0 * GAP_XL))
 	factor = maxf(factor, 0.5)
@@ -406,7 +413,7 @@ static func fit_panel(panel: Control, viewport_size: Vector2, align_left: bool) 
 	## kept inside the window.
 	var bounds := panel.get_combined_minimum_size()
 	var available := (viewport_size - Vector2(32, 32)).max(Vector2.ONE)
-	var fit := minf(ui_scale(viewport_size), minf(available.x / bounds.x, available.y / bounds.y))
+	var fit := minf(maxf(ui_scale(viewport_size) * PANEL_SCALE, MIN_FACTOR), minf(available.x / bounds.x, available.y / bounds.y))
 	panel.size = bounds
 	panel.scale = Vector2.ONE * fit
 	var centered := (viewport_size - bounds * fit) * 0.5

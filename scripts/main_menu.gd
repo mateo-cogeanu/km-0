@@ -93,7 +93,7 @@ func _build() -> void:
 
 
 func _fit() -> void:
-	Style.fit_screen(screen, size, true)
+	Style.fit_screen(screen, size, true, true)
 	var factor := Style.ui_scale(size)
 	var scrim: Control = get_node("Scrim")
 	scrim.size = Vector2(minf(size.x, (WIDTH + 260.0) * factor), size.y)
