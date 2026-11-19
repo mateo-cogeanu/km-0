@@ -9,6 +9,7 @@ const SHEET := preload("res://assets/desert/weathered_sheet.gdshader")
 const FOLIAGE := preload("res://assets/desert/foliage.gdshader")
 const LEAF_MASK := preload("res://assets/desert/foliage_leaves.png")
 const NEEDLE_MASK := preload("res://assets/desert/foliage_needles.png")
+const GRASS_MASK := preload("res://assets/desert/foliage_grass.png")
 const SHINGLES := preload("res://assets/salvage/shingles.gdshader")
 ## Board by board within this distance, the simpler shell beyond it.
 const NEAR_DETAIL := 28.0
@@ -50,7 +51,7 @@ static func foliage(color: Color, settings := {}) -> ShaderMaterial:
 	## Leaf and needle cards (assets/desert/foliage.gdshader).
 	var made := ShaderMaterial.new()
 	made.shader = FOLIAGE
-	made.set_shader_parameter("mask_tex", NEEDLE_MASK if settings.get("kind", 0) == 1 else LEAF_MASK)
+	made.set_shader_parameter("mask_tex", [LEAF_MASK, NEEDLE_MASK, GRASS_MASK][settings.get("kind", 0)])
 	made.set_shader_parameter("base_color", color)
 	for key: String in settings:
 		if key != "kind":
@@ -120,6 +121,10 @@ static func make_material(title: String) -> Material:
 			return weathered(Color(0.32, 0.43, 0.27), {"bleach": 0.35, "roughness_base": 0.8, "dust": 0.6})
 		"Grass":
 			return weathered(Color(0.62, 0.56, 0.36), {"bleach": 0.35, "roughness_base": 1.0, "dust": 0.0, "streaks": 0.0}, true)
+		"Dry grass":
+			return foliage(Color(0.42, 0.42, 0.22), {"kind": 2, "dry": 0.7, "dry_color": Color(0.62, 0.54, 0.33), "crown_center": Vector3(0, 0.05, 0), "crown_size": Vector3(0.45, 0.6, 0.45), "sway": 0.06})
+		"Green grass":
+			return foliage(Color(0.3, 0.36, 0.16), {"kind": 2, "dry": 0.3, "dry_color": Color(0.58, 0.52, 0.32), "crown_center": Vector3(0, 0.05, 0), "crown_size": Vector3(0.45, 0.6, 0.45), "sway": 0.06})
 		"Green paint":
 			return weathered(Color(0.17, 0.33, 0.23), {"peel": 0.3, "under_color": Color(0.5, 0.5, 0.48), "bleach": 0.55, "streaks": 0.3, "dust": 0.2})
 		"Leaves":

@@ -260,21 +260,23 @@ def cactus(arms=2, seed=720):
     return k.finish("Cactus")
 
 
-def grass(seed=730):
-    """A tuft of dry bunchgrass: a few dozen blades, bending out and over."""
-    k = Kit(seed)
+def grass(seed=730, mat="Dry grass"):
+    """A tuft of bunchgrass: a few crossed cards of blades (the blades are
+    drawn by assets/desert/foliage.gdshader from foliage_grass.png), leaning
+    a little outward, lit as one soft clump."""
+    k = Plant(seed)
     rng = k.rng
-    for i in range(18):
-        a = rng.uniform(0, 2 * pi)
-        lean = rng.uniform(0.15, 0.7)
-        length = rng.uniform(0.3, 0.55)
-        base = V(rng.uniform(-0.05, 0.05), 0, rng.uniform(-0.05, 0.05))
-        d = V(sin(lean) * cos(a), cos(lean), sin(lean) * sin(a))
-        side = V(-sin(a), 0, cos(a)) * 0.012
-        mid = base + d * length * 0.6
-        tip = base + d * length + V(0, -0.05 * lean, 0) + V(cos(a), 0, sin(a)) * 0.06 * lean
-        k.poly("Grass", [base - side, base + side, mid + side * 0.7, mid - side * 0.7])
-        k.poly("Grass", [mid - side * 0.7, mid + side * 0.7, tip])
+    crown, crown_size = V(0, 0.05, 0), (0.45, 0.6, 0.45)
+    cards = 4
+    for i in range(cards):
+        yaw = i / cards * pi + rng.uniform(-0.25, 0.25)
+        right = V(cos(yaw), 0, sin(yaw))
+        out = V(-sin(yaw), 0, cos(yaw)) * rng.uniform(-0.06, 0.06)
+        width = rng.uniform(0.27, 0.34)
+        height = rng.uniform(0.24, 0.3)
+        up = V(0, height, 0) + out
+        centre = V(rng.uniform(-0.04, 0.04), 0, rng.uniform(-0.04, 0.04)) + up - V(0, 0.02, 0)
+        k.card(mat, centre, right * width, up, crown, crown_size)
     return k.finish("Grass")
 
 
@@ -386,6 +388,7 @@ build_all([
     ("cactus", cactus),
     ("cactus_b", lambda: cactus(1, 721)),
     ("grass", grass),
+    ("grass_b", lambda: grass(731, "Green grass")),
     ("tree", tree),
     ("pine", pine),
     ("dead_tree", dead_tree),

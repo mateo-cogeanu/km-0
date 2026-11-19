@@ -14,6 +14,7 @@ exporter turns that into Godot's Y-up, +Z-forward space.
 
 Bones, used by scripts/salvage_listener.gd:
     Pelvis, Spine, Chest, Neck1, Neck2, Head, Jaw, EarL, EarR,
+    EarL0..EarL5 / EarR0..EarR5 (one per ray, so the ears fan open),
     Tail1..Tail4, UpperArmL/R, ForearmL/R, HandL/R
 """
 
@@ -357,6 +358,7 @@ def build_membranes():
                 column.append(p)
             grid.append(column)
         verts = []
+        shares = []
         for n in range(len(rays) - 1):
             strip = []
             for s in range(5):
@@ -370,14 +372,12 @@ def build_membranes():
                     p = p + Vector((side * 0.01, 0.02, -1.0)) * sag
                     p = p + Vector((side * 0.004 * sin(t * 40 + u * 9), 0, 0.003 * sin(t * 31)))
                     col.append(bm.verts.new(p))
+                    shares.append((n, u))
                 strip.append(col)
             verts.append(strip)
         for strip in verts:
             for s in range(4):
                 for r in range(rows):
-                    # The rim between rays is scalloped: drop the outermost cells mid-span.
-                    if r == rows - 1 and 0 < s < 3:
-                        continue
                     face = (strip[s][r], strip[s + 1][r], strip[s + 1][r + 1], strip[s][r + 1])
                     bm.faces.new(face if side > 0 else face[::-1])
         mesh = bpy.data.meshes.new("Ear membrane")
@@ -387,6 +387,14 @@ def build_membranes():
         bpy.context.scene.collection.objects.link(obj)
         mesh.shade_smooth()
         mesh.materials.append(material("Ear membrane", (0.32, 0.22, 0.21), 0.45))
+        # Each strip of skin follows the two rays it hangs between.
+        suffix = "L" if side < 0 else "R"
+        for index, (n, u) in enumerate(shares):
+            for ray, w in ((n, 1.0 - u), (n + 1, u)):
+                if w > 0.001:
+                    name = "Ear%s%d" % (suffix, ray)
+                    group = obj.vertex_groups.get(name) or obj.vertex_groups.new(name=name)
+                    group.add([index], w, "ADD")
         meshes.append(obj)
     return meshes
 
@@ -535,6 +543,8 @@ def build_rig():
     for suffix, side in (("L", -1), ("R", 1)):
         hinge, rays = ear_rays(side)
         bone("Ear" + suffix, hinge, rays[3][2], "Head")
+        for n, (a, m, b) in enumerate(rays):
+            bone("Ear%s%d" % (suffix, n), a, b, "Ear" + suffix)
         shoulder, elbow, wrist, palm = arm_points(side)
         bone("UpperArm" + suffix, shoulder, elbow, "Chest")
         bone("Forearm" + suffix, elbow, wrist, "UpperArm" + suffix)
@@ -574,7 +584,14 @@ def bind_skin(skin, rig):
     skin.select_set(True)
     rig.select_set(True)
     bpy.context.view_layer.objects.active = rig
+    # The ear rays are weighted by hand below; left in, their thin bones
+    # make the heat solve fail for the whole body.
+    rays = [b for b in rig.data.bones if b.name[:-1] in ("EarL", "EarR")]
+    for b in rays:
+        b.use_deform = False
     bpy.ops.object.parent_set(type="ARMATURE_AUTO")
+    for b in rays:
+        b.use_deform = True
     groups = {g.name: g for g in skin.vertex_groups}
     for name in BONES:
         if name not in groups:
@@ -584,8 +601,20 @@ def bind_skin(skin, rig):
         p = v.co
         rigid = None
         for name, (hinge, rays) in ears.items():
-            if min(segment_distance(p, a, b) for a, _, b in rays) < 0.03 or (p - hinge).length < 0.05:
+            if (p - hinge).length < 0.06:
                 rigid = {name: 1.0}
+            else:
+                gaps = [segment_distance(p, a, b) for a, _, b in rays]
+                if min(gaps) < 0.035:
+                    # Shared between the nearest rays, so the bone web at the
+                    # root stretches smoothly as the rays fan apart; near the
+                    # hinge some of it stays with the ear itself.
+                    near = sorted(range(len(gaps)), key=gaps.__getitem__)[:2]
+                    pull = [1.0 / max(gaps[n], 0.002) ** 3 for n in near]
+                    total = sum(pull)
+                    root = smoothstep(0.16, 0.06, (p - hinge).length)
+                    rigid = {"%s%d" % (name, n): (1.0 - root) * w / total for n, w in zip(near, pull)}
+                    rigid[name] = root
         if rigid is None:
             for suffix in ("L", "R"):
                 wrist, tip = BONES["Hand" + suffix]
@@ -604,6 +633,11 @@ def bind_skin(skin, rig):
                         if name not in ("Head", "Jaw"):
                             rigid[name] = rigid.get(name, 0.0) + g.weight * keep
         if rigid is None:
+            # Only the ears themselves move with the ear bones.
+            stray = [g.group for g in v.groups if skin.vertex_groups[g.group].name.startswith("Ear")]
+            if stray and len(stray) < len(v.groups):
+                for group in stray:
+                    skin.vertex_groups[group].remove([v.index])
             continue
         for g in list(v.groups):
             skin.vertex_groups[g.group].remove([v.index])
@@ -633,8 +667,9 @@ def main():
     rig = build_rig()
     bind_skin(skin, rig)
     smooth_weights(skin)
-    bind_fixed(membranes[0], rig, {"EarL": 1.0})
-    bind_fixed(membranes[1], rig, {"EarR": 1.0})
+    for membrane in membranes:
+        membrane.parent = rig
+        membrane.modifiers.new("Armature", "ARMATURE").object = rig
     bind_fixed(teeth["Upper teeth"], rig, {"Head": 1.0})
     bind_fixed(teeth["Lower teeth"], rig, {"Jaw": 1.0})
     bind_fixed(claw_meshes["L"], rig, {"HandL": 1.0})

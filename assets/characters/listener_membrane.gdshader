@@ -1,6 +1,7 @@
 shader_type spatial;
 render_mode cull_disabled;
-// The ear membranes: thin, veined skin you can almost see light through.
+// The ear membranes: thin, dark, veined skin. Lit from in front they are
+// almost black; with light behind them they glow the red of blood.
 
 varying vec3 skin_position;
 
@@ -26,11 +27,14 @@ void vertex() {
 }
 
 void fragment() {
-	float vein = smoothstep(0.9, 0.98, 1.0 - abs(skin_noise(skin_position * 18.0) * 2.0 - 1.0));
-	float mottle = skin_noise(skin_position * 7.0);
-	ALBEDO = mix(vec3(0.36, 0.25, 0.24), vec3(0.18, 0.08, 0.1), vein * 0.8) * (0.85 + 0.3 * mottle);
-	ROUGHNESS = 0.3;
-	SPECULAR = 0.5;
-	BACKLIGHT = vec3(0.45, 0.16, 0.12);
+	// Fine branching veins: two scales of thin ridges in the noise.
+	float big = 1.0 - abs(skin_noise(skin_position * vec3(9.0, 30.0, 9.0)) * 2.0 - 1.0);
+	float fine = 1.0 - abs(skin_noise(skin_position * 55.0 + vec3(2.3)) * 2.0 - 1.0);
+	float vein = max(smoothstep(0.955, 0.99, big), smoothstep(0.97, 0.995, fine) * 0.6);
+	float mottle = skin_noise(skin_position * 11.0);
+	ALBEDO = mix(vec3(0.075, 0.04, 0.035), vec3(0.025, 0.008, 0.01), vein * 0.85) * (0.8 + 0.4 * mottle);
+	ROUGHNESS = 0.38;
+	SPECULAR = 0.35;
+	BACKLIGHT = mix(vec3(0.3, 0.06, 0.035), vec3(0.05, 0.0, 0.0), vein) * (0.7 + 0.5 * mottle);
 	ALPHA = 0.9 - 0.15 * mottle;
 }

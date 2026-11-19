@@ -2,7 +2,8 @@
 
 Draws, once, what the shader would otherwise draw per pixel: small pointed
 leaflets thinning toward the card's edge (leaves.png) and a pine sprig, a
-twig with needles slanting off it (needles.png). Red is coverage, green a
+twig with needles slanting off it (needles.png), and a tuft of grass blades,
+some with seed heads (grass.png). Red is coverage, green a
 per-leaf number for colour variation, blue the twig.
 
 Run with any Python 3 that has numpy:
@@ -79,6 +80,36 @@ def needles():
     return cover, jitter, twig.astype(float)
 
 
+def blades(count=52, seed=5):
+    """A tuft's worth of grass blades on one card: each a tapering, gently
+    bowed strip from near the bottom middle, a few with seed heads."""
+    rng = np.random.default_rng(seed)
+    n = SIZE * SUPER
+    u, v = grid(n)
+    up = 1.0 - v  # 0 at the card's bottom, 1 at its top
+    cover = np.zeros((n, n))
+    ident = np.zeros((n, n))
+    for b in range(count):
+        base = 0.5 + rng.uniform(-0.16, 0.16)
+        lean = rng.uniform(-0.35, 0.35)
+        height = rng.uniform(0.45, 0.97)
+        width = rng.uniform(0.012, 0.022)
+        bow = rng.uniform(-0.12, 0.12)
+        t = np.clip(up / height, 0.0, 1.0)
+        centre = base + lean * t * height + bow * t * t
+        half = width * (1.0 - t) ** 0.8 + 0.002
+        inside = (np.abs(u - centre) < half) & (up < height) & (up > 0.0)
+        cover = np.where(inside, 1.0, cover)
+        ident = np.where(inside, rng.uniform(0.0, 1.0), ident)
+        if b % 6 == 0:
+            # A seed head: an oval at the top of a thin stalk.
+            tip_u = base + lean * height + bow
+            head = ((u - tip_u) / 0.016) ** 2 + ((up - height + 0.05) / 0.06) ** 2 < 1.0
+            cover = np.where(head, 1.0, cover)
+            ident = np.where(head, 0.97, ident)
+    return cover, ident, np.zeros_like(cover)
+
+
 def shrink(a):
     n = SIZE
     return a.reshape(n, SUPER, n, SUPER).mean(axis=(1, 3))
@@ -94,7 +125,7 @@ def write_png(path, rgb):
     print("wrote", path)
 
 
-for name, make in (("leaves", leaflets), ("needles", needles)):
+for name, make in (("leaves", leaflets), ("needles", needles), ("grass", blades)):
     cover, ident, twig = make()
     # Coverage is averaged for soft edges; the leaf number is taken from the
     # middle sample so it stays one value per leaf.

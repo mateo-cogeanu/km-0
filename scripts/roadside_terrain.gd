@@ -4,8 +4,11 @@ const Desert := preload("res://scripts/desert_models.gd")
 const GROUND := preload("res://assets/desert/desert_ground.gdshader")
 
 const SAND := Color("#aa8b64")
-const MEADOW := Color("#848d4a")
-const FOREST := Color("#646f51")
+const MEADOW := Color("#7b7c46")
+const FOREST := Color("#5d6545")
+## How much of each biome is grass (the ground shader reads it from the
+## vertex alpha, 1 - grass, so meshes without colours stay bare).
+const GRASSY := [0.0, 1.0, 1.0, 0.0]
 const BADLANDS := Color("#ad7553")
 const COLORS := [SAND, MEADOW, FOREST, BADLANDS]
 const BIOME_LENGTH := 880.0
@@ -21,7 +24,7 @@ func _init() -> void:
 	terrain_material.shader = GROUND
 	terrain_material.set_shader_parameter("noise_tex", Desert.noise_texture())
 	# Plants and rocks from Sources/make_roadside_props.py, standing on their origins.
-	for kind in ["scrub", "scrub_b", "cactus", "cactus_b", "grass", "tree", "pine", "dead_tree", "rock", "rock_b"]:
+	for kind in ["scrub", "scrub_b", "cactus", "cactus_b", "grass", "grass_b", "tree", "pine", "dead_tree", "rock", "rock_b"]:
 		plants[kind] = Desert.mesh_of(kind)
 
 
@@ -58,7 +61,9 @@ func _ground_color(x: float, z: float) -> Color:
 	var blend := smoothstep(1.0 - BLEND_DISTANCE / BIOME_LENGTH, 1.0, fposmod(climate, 1.0))
 	var color: Color = COLORS[region % COLORS.size()].lerp(COLORS[(region + 1) % COLORS.size()], blend)
 	var variation := sin(x * 0.069 + z * 0.025) * cos(z * 0.036 - x * 0.021) * 0.055
-	return color.lightened(maxf(variation, 0.0)).darkened(maxf(-variation, 0.0))
+	color = color.lightened(maxf(variation, 0.0)).darkened(maxf(-variation, 0.0))
+	color.a = 1.0 - lerpf(GRASSY[region % GRASSY.size()], GRASSY[(region + 1) % GRASSY.size()], blend)
+	return color
 
 
 func populate(segment: Node3D, start: float, length: float, index: int, clear_start: bool, stop_side: float, road_x: Callable) -> void:
@@ -102,7 +107,7 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 		var turn := rng.randf_range(0.0, TAU)
 		var roll := rng.randf()
 		if point >= 128 and biome in [1, 2]:
-			_grass(batches, at, size * 0.72, turn)
+			_grass(batches, at, size * 0.9, turn, roll < (0.55 if biome == 1 else 0.7))
 			continue
 		if point >= 128:
 			continue
@@ -117,11 +122,11 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 				elif roll < 0.75:
 					_grass(batches, at, size * 0.8, turn)
 			1:
-				_grass(batches, at, size, turn)
+				_grass(batches, at, size, turn, roll < 0.5)
 				if roll < 0.085 and absf(offset) > 16.0:
 					_tree(batches, at, size, turn, false)
 			2:
-				_grass(batches, at, size, turn)
+				_grass(batches, at, size, turn, roll < 0.7)
 				if roll < 0.38 and absf(offset) > 12.0:
 					_tree(batches, at, size, turn, true)
 			3:
@@ -129,6 +134,25 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 					_instance(batches, "rock" if roll < 0.13 else "rock_b", at + Vector3.DOWN * 0.15 * size, size * 1.6, turn)
 				elif roll < 0.49:
 					_scrub(batches, at, size * 0.8, turn)
+	# Grassland: a thick sward along the verge, thinning out with distance
+	# (the tufts further out are drawn only while near).
+	if grassy_region:
+		for point in range(1500):
+			var z := rng.randf_range(start, start + length)
+			var offset := pow(rng.randf(), 1.4) * 28.0 + 6.6
+			offset *= 1.0 if point % 2 == 0 else -1.0
+			var x: float = road_x.call(z) + offset
+			if clear_start and x > -24.0 and x < 40.0 and absf(z) < 44.0:
+				continue
+			if stop_side * offset > 0 and absf(offset) < 25.0 and absf(z - start - length * 0.5) < 12.0:
+				continue
+			var climate := _climate(z)
+			var blend := smoothstep(1.0 - BLEND_DISTANCE / BIOME_LENGTH, 1.0, fposmod(climate, 1.0))
+			var biome := (floori(climate) + (1 if rng.randf() < blend else 0)) % COLORS.size()
+			if biome not in [1, 2]:
+				continue
+			var roll := rng.randf()
+			_grass(batches, Vector3(x, LEVEL, z - start), rng.randf_range(0.9, 1.9), rng.randf_range(0.0, TAU), roll < (0.5 if biome == 1 else 0.7))
 	for kind in batches:
 		var instances := MultiMesh.new()
 		instances.transform_format = MultiMesh.TRANSFORM_3D
@@ -139,9 +163,9 @@ func populate(segment: Node3D, start: float, length: float, index: int, clear_st
 		var visual := MultiMeshInstance3D.new()
 		visual.name = kind.capitalize()
 		visual.multimesh = instances
-		if kind in ["grass", "scrub", "scrub_b", "dead_tree"]:
-			visual.visibility_range_end = 140.0 if kind != "grass" else 70.0
-		if kind in ["grass", "scrub", "scrub_b"]:
+		if kind in ["grass", "grass_b", "scrub", "scrub_b", "dead_tree"]:
+			visual.visibility_range_end = 70.0 if kind.begins_with("grass") else 140.0
+		if kind in ["grass", "grass_b", "scrub", "scrub_b"]:
 			visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		segment.add_child(visual)
 
@@ -157,8 +181,8 @@ func _scrub(batches: Dictionary, at: Vector3, size: float, turn: float) -> void:
 	_instance(batches, "scrub" if fmod(turn, 1.0) < 0.5 else "scrub_b", at, size * 1.1, turn)
 
 
-func _grass(batches: Dictionary, at: Vector3, size: float, turn: float) -> void:
-	_instance(batches, "grass", at, size * 1.1, turn, 0.0)
+func _grass(batches: Dictionary, at: Vector3, size: float, turn: float, green := false) -> void:
+	_instance(batches, "grass_b" if green else "grass", at, size * 1.1, turn, 0.0)
 
 
 func _tree(batches: Dictionary, at: Vector3, size: float, turn: float, pine: bool) -> void:

@@ -29,7 +29,7 @@ func _ready() -> void:
 			player.look_rotation_x = atan2(to.y, Vector2(to.x, to.z).length())
 			player.head.rotation.x = player.look_rotation_x
 			player.set_flashlight(pass_index == 1, true)
-			await _frames(70)
+			await _frames(240)
 			player.rotation.y = atan2(-to.x, -to.z)
 			for n in 2:
 				await _frames(6)

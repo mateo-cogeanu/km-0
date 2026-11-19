@@ -21,7 +21,10 @@ const SPLASHES := [
 
 enum State { ROAM, HUNT, LISTEN, GRAB, RETREAT }
 const SPEED := {State.ROAM: 1.6, State.HUNT: 6.5, State.LISTEN: 0.0, State.GRAB: 0.0, State.RETREAT: 5.0}
-const SURFACED := {State.ROAM: 0.12, State.HUNT: 0.04, State.LISTEN: 0.75, State.GRAB: 1.0, State.RETREAT: 0.0}
+## How deep it rides (the model's height against the water line): roaming and
+## hunting it is a shape under the murk and a wake; only listening and taking
+## someone does it come up.
+const DEPTH := {State.ROAM: -0.3, State.HUNT: -0.4, State.LISTEN: -0.1, State.GRAB: 0.0, State.RETREAT: -0.65}
 ## It notices sounds that reach it at least this loud.
 const NOTICE := 0.05
 const REACH := 2.3
@@ -41,8 +44,16 @@ var victim: Node3D
 var spared: Node3D
 var spared_until := 0.0
 var grab_level := 0.0
-var surfaced := 0.1
+var depth := -0.65
 var ears := 0.0
+var ears_speed := 0.0
+## Its head, listening: held still, then snapped to a new angle.
+var head_turn := Vector2.ZERO
+var head_goal := Vector2.ZERO
+var head_wait := 0.0
+## For each ear: how to swing it out from the head, and the axis its rays fan on.
+var ear_flare := {}
+var ray_axis := {}
 var send_wait := 0.0
 var remote_position := Vector3.ZERO
 var remote_yaw := 0.0
@@ -92,6 +103,7 @@ func _build() -> void:
 	for index in rig.get_bone_count():
 		bones[rig.get_bone_name(index)] = index
 		rests[rig.get_bone_name(index)] = rig.get_bone_rest(index).basis.get_rotation_quaternion()
+	_measure_ears()
 	var skin := ShaderMaterial.new()
 	skin.shader = load("res://assets/characters/listener_skin.gdshader")
 	var membrane := ShaderMaterial.new()
@@ -107,6 +119,11 @@ func _build() -> void:
 				mesh.set_surface_override_material(surface, membrane)
 			elif material is BaseMaterial3D and (title.begins_with("Old ivory") or title.begins_with("Gum") or title.begins_with("Mouth")):
 				var wet := (material as BaseMaterial3D).duplicate() as BaseMaterial3D
+				if title.begins_with("Old ivory"):
+					# Teeth stained by years in the water.
+					wet.albedo_color = Color(0.46, 0.39, 0.27)
+				else:
+					wet.albedo_color = wet.albedo_color.darkened(0.55)
 				wet.roughness = 0.2
 				wet.metallic_specular = 0.7
 				mesh.set_surface_override_material(surface, wet)
@@ -172,6 +189,26 @@ func _build() -> void:
 	mimic_voice.unit_size = 8.0
 	mimic_voice.max_distance = 120.0
 	get_parent().add_child.call_deferred(mimic_voice)
+
+
+func _measure_ears() -> void:
+	## Flared, each ear swings out from the side of the head, a little up and
+	## forward, like a dish turned to the sound; its six rays fan apart.
+	var head_rest := rig.get_bone_global_rest(bones["Head"]).basis.orthonormalized()
+	for side in ["L", "R"]:
+		var ear: String = "Ear" + side
+		if not bones.has(ear):
+			continue
+		var folded: Vector3 = (rests[ear] * Vector3.UP).normalized()
+		var out := Vector3(-1.0 if side == "L" else 1.0, 0.55, 0.3).normalized()
+		var wanted := (head_rest.inverse() * out).normalized()
+		ear_flare[ear] = Quaternion(folded, wanted)
+		var first: String = ear + "0"
+		var last: String = ear + "5"
+		if bones.has(first) and bones.has(last):
+			var a: Vector3 = rests[first] * Vector3.UP
+			var b: Vector3 = rests[last] * Vector3.UP
+			ray_axis[ear] = a.cross(b).normalized()
 
 
 # --- Thinking (host) ------------------------------------------------------------
@@ -465,25 +502,45 @@ func _pose(bone: String, euler: Vector3) -> void:
 func _animate(delta: float) -> void:
 	var now: int = state
 	var ease := 1.0 - exp(-3.0 * delta)
-	surfaced = lerpf(surfaced, SURFACED[now], ease)
-	ears = lerpf(ears, 1.0 if now == State.LISTEN else (0.7 if now == State.GRAB else 0.0), 1.0 - exp(-4.0 * delta))
-	neck_raise = lerpf(neck_raise, 1.0 if now == State.LISTEN else (0.75 if now == State.GRAB else 0.0), 1.0 - exp(-2.5 * delta))
-	jaw_open = lerpf(jaw_open, 1.0 if now == State.GRAB else (0.08 + 0.05 * sin(clock * 3.0) if now == State.LISTEN else 0.0), 1.0 - exp(-8.0 * delta))
+	# It sinks fast and rises slowly.
+	var goal_depth: float = DEPTH[now]
+	depth = lerpf(depth, goal_depth, 1.0 - exp(-(3.5 if goal_depth < depth else 1.1) * delta))
+	# The ears snap open on a spring, overshoot, and shudder; they fold slowly.
+	var ear_goal := 1.0 if now == State.LISTEN else (1.15 if now == State.GRAB else 0.0)
+	var stiffness := 90.0 if ear_goal > ears else 14.0
+	ears_speed += ((ear_goal - ears) * stiffness - ears_speed * (9.0 if ear_goal > ears else 7.5)) * delta
+	ears = clampf(ears + ears_speed * delta, -0.05, 1.35)
+	neck_raise = lerpf(neck_raise, 1.0 if now == State.LISTEN else (0.75 if now == State.GRAB else 0.0), 1.0 - exp(-1.6 * delta))
+	jaw_open = lerpf(jaw_open, 1.0 if now == State.GRAB else (0.12 + 0.06 * sin(clock * 2.1) if now == State.LISTEN else 0.0), 1.0 - exp(-8.0 * delta))
 	reach = lerpf(reach, 1.0 if now == State.GRAB else 0.0, 1.0 - exp(-6.0 * delta))
 	swim = lerpf(swim, clampf(SPEED[now] / 6.5, 0.0, 1.0), ease)
 	swim_phase += delta * (2.0 + 7.0 * swim)
-	# It lies just under the surface: only the spines break it. Hunting, it
-	# drops lower; listening or holding someone, it rises a little.
-	model.position.y = lerpf(-0.14, 0.02, surfaced)
-	# The neck lifts the head clear of the water, the head stays level and
-	# turns slowly from side to side, listening.
-	var look := sin(clock * 0.45) * 0.5 * ears
+	model.position.y = depth
+	# Listening, the head holds dead still, then jerks to a new angle, as if
+	# something just moved over there.
+	head_wait -= delta
+	if head_wait <= 0.0:
+		head_wait = randf_range(0.5, 1.6)
+		head_goal = Vector2(randf_range(-0.7, 0.7), randf_range(-0.35, 0.35)) if now == State.LISTEN else Vector2.ZERO
+	head_turn = head_turn.lerp(head_goal, 1.0 - exp(-16.0 * delta))
+	var look := head_turn.x * neck_raise
 	_pose("Neck1", Vector3(-0.62 * neck_raise, 0, 0))
 	_pose("Neck2", Vector3(-0.45 * neck_raise, 0, look * 0.6))
-	_pose("Head", Vector3(0.95 * neck_raise + 0.04 * sin(clock * 1.3), 0, look * 0.4 + sin(clock * 0.7) * 0.12 * ears))
+	_pose("Head", Vector3(0.95 * neck_raise + 0.04 * sin(clock * 1.3), 0, look * 0.4 + head_turn.y * neck_raise))
 	_pose("Jaw", Vector3(-0.7 * jaw_open, 0, 0))
-	_pose("EarL", Vector3(0, 0, 1.3 * ears))
-	_pose("EarR", Vector3(0, 0, -1.3 * ears))
+	# The ears: swung out from the head, rays fanned wide, the skin quivering.
+	var shudder := sin(clock * 37.0) * 0.04 * clampf(absf(ears_speed) * 0.3 + 0.15, 0.0, 1.0) * ears
+	for ear: String in ear_flare:
+		var open := clampf(ears, 0.0, 1.35)
+		var swing: Quaternion = Quaternion.IDENTITY.slerp(ear_flare[ear], minf(open, 1.0))
+		rig.set_bone_pose_rotation(bones[ear], swing * rests[ear])
+		# Unfolding, they open out larger than they lie folded.
+		rig.set_bone_pose_scale(bones[ear], Vector3.ONE * (1.0 + 0.25 * minf(open, 1.2)))
+		if ray_axis.has(ear):
+			for n in 6:
+				var ray: String = ear + str(n)
+				var angle := (n - 2.5) * (0.24 * open + shudder * (1.0 + n * 0.3))
+				rig.set_bone_pose_rotation(bones[ray], Quaternion(ray_axis[ear], angle) * rests[ray])
 	# Swimming: a wave down the body and tail, stronger the faster it goes.
 	var amp := 0.06 + 0.3 * swim
 	_pose("Spine", Vector3(0, 0, sin(swim_phase) * amp * 0.25))

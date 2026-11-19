@@ -71,6 +71,14 @@ func _ready() -> void:
 		cam.global_position = at + Vector3(3.4, 1.4, 2.6)
 		cam.look_at(at + Vector3(1.6, 0.25, 0))
 		await _shot("form_%d_%s_head" % [i + 1, FORMS[i].to_lower()])
+		if FORMS[i] in ["LISTEN", "GRAB"]:
+			# Face on, the way you'd meet it, and from above: the ears' spread.
+			cam.global_position = at + Vector3(5.6, 0.7, 0.4)
+			cam.look_at(at + Vector3(1.7, 0.45, 0))
+			await _shot("form_%d_%s_front" % [i + 1, FORMS[i].to_lower()])
+			cam.global_position = at + Vector3(1.9, 5.0, 0.01)
+			cam.look_at(at + Vector3(1.9, 0.0, 0))
+			await _shot("form_%d_%s_top" % [i + 1, FORMS[i].to_lower()])
 	cam.fov = 30.0
 	cam.global_position = Vector3(9.0, 6.5, 19.0)
 	cam.look_at(Vector3(9.0, -0.2, 0))
