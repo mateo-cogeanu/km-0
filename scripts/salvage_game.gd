@@ -64,6 +64,7 @@ func _ready() -> void:
 	_build_ground()
 	town.build_terrain()
 	town.build_street()
+	town.build_valley()
 	_build_camp()
 	noise = NoiseField.new()
 	noise.name = "Noise"
@@ -94,11 +95,13 @@ static func is_host() -> bool:
 func ground_height(x: float, z: float) -> float:
 	if z > RAMP_BOTTOM and absf(x) < 6.0:
 		return lerpf(FLOOR_Y, 0.0, clampf((z - RAMP_BOTTOM) / (RAMP_TOP - RAMP_BOTTOM), 0.0, 1.0))
-	if z > -44.0:
+	if z > -44.0 and x > Town.CORE_X.x and x < Town.CORE_X.y and z < Town.CORE_Z.y:
 		return maxf(town.terrain_height(x, z), FLOOR_Y)
 	if absf(x) > STREET_HALF and absf(x) < 14.0 and z < -44.0 and z > STREET_END:
 		return KERB_TOP
-	return FLOOR_Y
+	if absf(x) < 45.0 and z < -44.0 and z > STREET_END:
+		return FLOOR_Y
+	return town.valley_height(x, z)
 
 
 func in_water(point: Vector3) -> bool:
@@ -134,13 +137,13 @@ func _build_ground() -> void:
 	water = MeshInstance3D.new()
 	water.name = "Floodwater"
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(120, 190)
+	plane.size = Vector2(1400, 1400)
 	plane.subdivide_width = 0
 	water.mesh = plane
 	water.material_override = water_material
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(water)
-	water.position = Vector3(0, water_level, -85)
+	water.position = Vector3(0, water_level, -300)
 	lap = AudioStreamPlayer3D.new()
 	lap.stream = _looped(WATER_BED)
 	lap.unit_size = 30.0
