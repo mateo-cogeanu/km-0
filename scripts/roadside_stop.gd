@@ -84,11 +84,14 @@ func _ready() -> void:
 	var lean := clampf((station - 3) / 8.0, 0.0, 1.0)
 	var wrecked := not legacy_layout and station >= 4 and posmod(hash("wrecked:%d" % stop_index), 4) == 0
 	var canister := FUEL.instantiate() as RigidBody3D
+	# Fixed names: co-op finds things by path, so both screens must agree.
+	canister.name = "FuelCanister"
 	canister.position = Vector3(2.57, 0.16, -0.97)
 	canister.fuel_amount = rng.randf_range(8.0, 20.0) * lerpf(1.0, 0.55, lean) * (0.15 if wrecked else 1.0)
 	finds.add_child(canister)
 	if old_style == 1 or rng.randf() < lerpf(0.45, 0.22, lean):
 		var spare := FUEL.instantiate() as RigidBody3D
+		spare.name = "SpareCanister"
 		spare.position = Vector3(2.47, 0.16, -1.52)
 		finds.add_child(spare)
 

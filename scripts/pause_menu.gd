@@ -7,7 +7,7 @@ var overlay: Control
 var card: PanelContainer
 var resume_button: Button
 var settings_button: Button
-var settings_panel: PanelContainer
+var settings_panel: Control
 var tutorial: Control
 var tutorial_card: PanelContainer
 var tutorial_button: Button
@@ -15,6 +15,8 @@ var tutorial_button: Button
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Above every other overlay (captions, the job sheet, ending overlays).
+	layer = 40
 	_build_ui()
 	_build_tutorial()
 	get_viewport().size_changed.connect(_fit_layout)
@@ -54,32 +56,35 @@ func _build_ui() -> void:
 	overlay.hide()
 
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.48)
+	dim.color = Color(0, 0, 0, 0.6)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.add_child(dim)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	card = PanelContainer.new()
-	card.custom_minimum_size.x = 300
+	card.custom_minimum_size.x = 360
 	overlay.add_child(card)
 
-	var items := Style.vbox(10)
+	var items := Style.vbox(Style.GAP_M)
 	card.add_child(items)
-	items.add_child(Style.heading("Paused", 46))
-	resume_button = Style.button("Resume", 24)
+	items.add_child(Style.heading("Paused", Style.H1))
+	if NetworkManager.is_online():
+		items.add_child(Style.caption("The game keeps going for everyone else."))
+	resume_button = Style.primary("Resume")
 	resume_button.pressed.connect(_resume_game)
 	items.add_child(resume_button)
-	settings_button = Style.button("Settings", 24)
+	settings_button = Style.button("Settings")
 	settings_button.pressed.connect(_open_settings)
 	items.add_child(settings_button)
-	tutorial_button = Style.button("Show tutorial again", 24)
+	tutorial_button = Style.button("Show tutorial again")
 	tutorial_button.pressed.connect(_toggle_tutorial)
 	tutorial_button.visible = not NetworkManager.salvage()
 	items.add_child(tutorial_button)
-	var main_menu := Style.button("Main menu" if NetworkManager.is_online() else "Save & main menu", 24)
+	items.add_child(Style.divider())
+	var main_menu := Style.quiet("Leave to main menu" if NetworkManager.is_online() else "Save and go to main menu")
 	main_menu.pressed.connect(_return_to_menu)
 	items.add_child(main_menu)
-	var quit := Style.button("Quit game" if NetworkManager.is_online() else "Save & quit", 24)
+	var quit := Style.quiet("Quit game" if NetworkManager.is_online() else "Save and quit")
 	quit.pressed.connect(_quit_game)
 	items.add_child(quit)
 
@@ -105,7 +110,11 @@ func _pause_game() -> void:
 func _resume_game() -> void:
 	get_tree().paused = false
 	overlay.hide()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Back to whatever was on screen: a conversation, a note or the pack
+	# still needs the mouse; otherwise the camera has it.
+	var player := get_tree().get_first_node_in_group("local_player")
+	var busy: bool = player != null and player.has_method("gameplay_ui_open") and (player.gameplay_ui_open() or is_instance_valid(player.get("talking_to")))
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if busy else Input.MOUSE_MODE_CAPTURED
 
 
 func _return_to_menu() -> void:
@@ -129,12 +138,8 @@ func _quit_game() -> void:
 func show_save_error() -> void:
 	if not get_tree().paused:
 		_pause_game()
-	var dialog := AcceptDialog.new()
-	dialog.dialog_text = "Could not save your trip. Check available disk space and try again."
-	overlay.add_child(dialog)
-	dialog.confirmed.connect(dialog.queue_free)
-	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	Style.confirm(overlay, "Couldn’t save your trip", "Check there is free disk space, then try again. If you quit now, progress since the last save is lost.",
+		"Quit without saving", "Back to the game", func() -> void: TripSave.quit_without_saving(), func() -> void: resume_button.grab_focus())
 
 
 func _open_settings() -> void:

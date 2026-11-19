@@ -8,6 +8,10 @@ signal player_disconnected(peer_id: int)
 
 const GAME_PORT := 24680
 const DISCOVERY_PORT := 24681
+## Several copies of the game on one computer can't all listen on one port:
+## each listens on the first free one of these, and hosts announce to all.
+const DISCOVERY_PORT_COUNT := 8
+const JOIN_TIMEOUT := 10.0
 const BROADCAST_INTERVAL := 1.0
 const LOBBY_TIMEOUT := 3.5
 const MAX_PLAYERS := 8
@@ -30,6 +34,10 @@ const STORY_SCENES := {"road": "res://scenes/main.tscn", "salvage": "res://scene
 var _discovery_listener := PacketPeerUDP.new()
 var _discovery_broadcaster := PacketPeerUDP.new()
 var _broadcast_elapsed := 0.0
+## Tells this lobby's announcements apart when they arrive by several routes.
+var _lobby_token := ""
+var _join_address := ""
+var _join_clock := -1.0
 
 
 func _ready() -> void:
@@ -44,6 +52,12 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_read_discovery_packets()
 	_expire_lobbies()
+	if _join_clock >= 0.0:
+		_join_clock += delta
+		if _join_clock > JOIN_TIMEOUT:
+			var address := _join_address
+			leave_lobby()
+			connection_failed.emit("Couldn’t reach the lobby at %s. Check you’re both on the same network, and that the host’s firewall lets KM0 accept incoming connections." % address)
 	if is_host and is_online() and not game_in_progress:
 		_broadcast_elapsed += delta
 		if _broadcast_elapsed >= BROADCAST_INTERVAL:
@@ -52,11 +66,23 @@ func _process(delta: float) -> void:
 
 
 func _setup_discovery() -> void:
-	var error := _discovery_listener.bind(DISCOVERY_PORT)
-	if error != OK:
-		push_warning("LAN lobby discovery could not listen on port %d." % DISCOVERY_PORT)
+	for offset in DISCOVERY_PORT_COUNT:
+		if _discovery_listener.bind(DISCOVERY_PORT + offset) == OK:
+			break
+	if not _discovery_listener.is_bound():
+		push_warning("LAN lobby discovery could not listen on ports %d-%d." % [DISCOVERY_PORT, DISCOVERY_PORT + DISCOVERY_PORT_COUNT - 1])
 	_discovery_broadcaster.set_broadcast_enabled(true)
-	_discovery_broadcaster.set_dest_address("255.255.255.255", DISCOVERY_PORT)
+
+
+static func local_addresses() -> PackedStringArray:
+	## This computer's addresses on its local networks (IPv4), for showing the
+	## host's address and for announcing lobbies on each network.
+	var found := PackedStringArray()
+	for address in IP.get_local_addresses():
+		if address.count(".") != 3 or address.begins_with("127.") or address.begins_with("169.254."):
+			continue
+		found.append(address)
+	return found
 
 
 func create_lobby(new_lobby_name: String, player_name: String) -> Error:
@@ -64,9 +90,13 @@ func create_lobby(new_lobby_name: String, player_name: String) -> Error:
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_server(GAME_PORT, MAX_PLAYERS - 1, 4)
 	if error != OK:
-		connection_failed.emit("Could not create lobby (error %s)." % error)
+		if error == ERR_CANT_CREATE or error == ERR_ALREADY_IN_USE:
+			connection_failed.emit("Couldn’t host: another lobby is already running on this computer. Join it from the list instead.")
+		else:
+			connection_failed.emit("Couldn’t create the lobby (error %s)." % error)
 		return error
 	is_host = true
+	_lobby_token = "%d-%d" % [Time.get_ticks_usec(), randi()]
 	lobby_name = _clean_name(new_lobby_name, "Lobby")
 	local_player_name = _clean_name(player_name, "Host")
 	players = {1: {"name": local_player_name, "ready": false}}
@@ -79,11 +109,23 @@ func create_lobby(new_lobby_name: String, player_name: String) -> Error:
 func join_lobby(address: String, player_name: String) -> Error:
 	leave_lobby()
 	var peer := ENetMultiplayerPeer.new()
+	address = address.strip_edges()
+	if address.is_empty():
+		connection_failed.emit("Type the host’s address first.")
+		return ERR_INVALID_PARAMETER
+	if not address.is_valid_ip_address():
+		var resolved := IP.resolve_hostname(address, IP.TYPE_IPV4)
+		if resolved.is_empty():
+			connection_failed.emit("Couldn’t find a computer called “%s”." % address)
+			return ERR_CANT_RESOLVE
+		address = resolved
 	var error := peer.create_client(address, GAME_PORT, 4)
 	if error != OK:
-		connection_failed.emit("Could not connect to that lobby (error %s)." % error)
+		connection_failed.emit("Couldn’t connect to that lobby (error %s)." % error)
 		return error
 	is_host = false
+	_join_address = address
+	_join_clock = 0.0
 	local_player_name = _clean_name(player_name, "Player")
 	multiplayer.multiplayer_peer = peer
 	return OK
@@ -94,7 +136,9 @@ func leave_lobby() -> void:
 		multiplayer.multiplayer_peer.close()
 		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	is_host = false
+	_join_clock = -1.0
 	game_in_progress = false
+	trip_started = false
 	story = "road"
 	lobby_story = "road"
 	kicked_peers.clear()
@@ -155,6 +199,14 @@ func start_game(story_name := "") -> void:
 func begin_game(roster: Dictionary, story_name := "road") -> void:
 	players = roster
 	game_in_progress = true
+	arrived.clear()
+	trip_started = false
+	# A fresh shared trip: nothing carried over from earlier solo play on any
+	# one machine, so everyone starts the story in the same place.
+	var house_script: GDScript = load("res://scripts/road_end_house.gd")
+	house_script.story = {}
+	house_script.seen = false
+	(load("res://scripts/story_notes.gd") as GDScript).read = {}
 	story = story_name if STORY_SCENES.has(story_name) else "road"
 	game_start_requested.emit()
 	get_tree().change_scene_to_file(STORY_SCENES[story])
@@ -162,6 +214,56 @@ func begin_game(roster: Dictionary, story_name := "road") -> void:
 
 func salvage() -> bool:
 	return story == "salvage"
+
+
+# --- In the game: everyone loaded, and the story kept by the host ----------------
+
+## Peers whose game scene is up (host only).
+var arrived := {}
+## The host has started the trip; anyone arriving after that is caught up.
+var trip_started := false
+signal everyone_arrived
+signal arrived_late(peer_id: int)
+
+
+func report_arrived() -> void:
+	## Called by a guest's game scene once its players exist.
+	if is_online() and not is_host:
+		_arrived.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _arrived() -> void:
+	if not is_host:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	arrived[sender] = true
+	if trip_started:
+		arrived_late.emit(sender)
+	elif all_arrived():
+		everyone_arrived.emit()
+
+
+func all_arrived() -> bool:
+	for peer_id in players:
+		if peer_id != 1 and not arrived.has(peer_id):
+			return false
+	return true
+
+
+func report_heard(which: int) -> void:
+	## A guest heard a broadcast on a radio: the host keeps the story.
+	if is_online() and not is_host:
+		_heard.rpc_id(1, which)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _heard(which: int) -> void:
+	if is_host:
+		var story_data: Dictionary = (load("res://scripts/road_end_house.gd") as GDScript).story
+		var heard: Dictionary = story_data.get("heard", {})
+		heard[str(which)] = true
+		story_data["heard"] = heard
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -184,6 +286,7 @@ func set_ready_on_server(ready: bool) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func receive_lobby_state(server_lobby_name: String, server_players: Dictionary, server_story: String) -> void:
+	_join_clock = -1.0
 	lobby_name = server_lobby_name
 	players = server_players
 	lobby_story = server_story if STORY_SCENES.has(server_story) else "road"
@@ -245,8 +348,21 @@ func _broadcast_lobby() -> void:
 		"name": lobby_name,
 		"players": players.size(),
 		"max_players": MAX_PLAYERS,
+		"token": _lobby_token,
+		"story": lobby_story,
 	}
-	_discovery_broadcaster.put_packet(JSON.stringify(packet).to_utf8_buffer())
+	var bytes := JSON.stringify(packet).to_utf8_buffer()
+	# Everywhere a player might be listening: the whole network, each local
+	# network's own broadcast address (macOS often drops 255.255.255.255), and
+	# this computer, on every discovery port.
+	var targets := PackedStringArray(["255.255.255.255", "127.0.0.1"])
+	for address in local_addresses():
+		var parts := address.split(".")
+		targets.append("%s.%s.%s.255" % [parts[0], parts[1], parts[2]])
+	for target in targets:
+		for offset in DISCOVERY_PORT_COUNT:
+			_discovery_broadcaster.set_dest_address(target, DISCOVERY_PORT + offset)
+			_discovery_broadcaster.put_packet(bytes)
 
 
 func _read_discovery_packets() -> void:
@@ -258,10 +374,20 @@ func _read_discovery_packets() -> void:
 			continue
 		if is_host or data.get("version") != ProjectSettings.get_setting("application/config/version"):
 			continue
-		data["address"] = sender_ip
+		# The same lobby arrives by several routes: list it once, by the
+		# address that reaches it most directly (this computer, if it's here).
+		var token := str(data.get("token", sender_ip))
+		var known: Dictionary = discovered_lobbies.get(token, {})
+		var address := sender_ip
+		if not known.is_empty() and str(known.get("address", "")).begins_with("127.") and not sender_ip.begins_with("127."):
+			address = str(known["address"])
+		var fresh: bool = known.is_empty() or known.get("address") != address or known.get("players") != data.get("players") \
+			or known.get("name") != data.get("name") or known.get("story") != data.get("story")
+		data["address"] = address
 		data["last_seen"] = Time.get_ticks_msec() / 1000.0
-		discovered_lobbies[sender_ip] = data
-		lobby_list_changed.emit()
+		discovered_lobbies[token] = data
+		if fresh:
+			lobby_list_changed.emit()
 
 
 func _expire_lobbies() -> void:

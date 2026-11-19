@@ -35,6 +35,17 @@ func has_wreck(index: int) -> bool:
 	return posmod(hash("wreck:%d" % index), EVERY) == 0
 
 
+func wreck_spot(index: int) -> Vector3:
+	## Where the wreck stands, worked out the same way populate() does, so it
+	## is known without the road there being streamed in.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("km0:wreck:%d" % index)
+	var side := 1.0 if rng.randf() < 0.5 else -1.0
+	var z: float = (index + rng.randf_range(0.25, 0.75)) * road.segment_length
+	var lateral: float = side * (road.road_width * 0.5 + road.shoulder_width + rng.randf_range(0.8, 2.6))
+	return road._sample(z, lateral)
+
+
 func ordinal(index: int) -> int:
 	## How many wrecks come before this one, from the workshop out.
 	var count := 0
@@ -94,10 +105,36 @@ func populate(segment: Node3D, index: int) -> void:
 	if order < NOTES.size():
 		var note := NoteItem.new()
 		note.note_id = NOTES[order]
+		note.name = "Note"
 		car.add_child(note)
 		note.position = Vector3(0.38 * (1.0 if side > 0.0 else -1.0), 0.62, 0.1)
 		note.rotation.y = rng.randf_range(-0.5, 0.5)
-	spawn_finds.call_deferred(index)
+	_want_finds.call_deferred(index)
+
+
+func _want_finds(index: int) -> void:
+	## Alone, the finds appear with the wreck. In co-op the host puts them
+	## down for everyone at once, the first time either player comes near,
+	## so a can taken on one screen isn't still sitting there on the other.
+	if finds.has(index):
+		return
+	if not NetworkManager.is_online():
+		spawn_finds(index)
+	elif multiplayer.is_server():
+		_spawn_finds_everywhere.rpc(index)
+	else:
+		_request_finds.rpc_id(1, index)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_finds(index: int) -> void:
+	if multiplayer.is_server() and has_wreck(index) and not finds.has(index):
+		_spawn_finds_everywhere.rpc(index)
+
+
+@rpc("authority", "call_local", "reliable")
+func _spawn_finds_everywhere(index: int) -> void:
+	spawn_finds(index)
 
 
 func spawn_finds(index: int) -> void:
@@ -109,15 +146,12 @@ func spawn_finds(index: int) -> void:
 		world = road.get_parent()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("km0:wreck-finds:%d" % index)
-	var side := 1.0 if hash("km0:wreck:%d" % index) % 2 == 0 else -1.0
 	var holder := Node3D.new()
 	holder.name = "WreckFinds_%d" % index
 	world.add_child(holder)
 	finds[index] = holder
 	# The finds wait on the road side of the wreck, by the open door.
-	var segment_z: float = index * road.segment_length
-	var wreck := road.get_node_or_null("Road_%d/Wreck" % index) as Node3D
-	var origin: Vector3 = wreck.global_position if wreck else road._sample(segment_z + road.segment_length * 0.5, side * 7.0)
+	var origin: Vector3 = wreck_spot(index)
 	var toward_road := Vector3(-signf(origin.x - road._road_x(origin.z)), 0, 0)
 	holder.global_position = Vector3(origin.x, 0.0, origin.z) + toward_road * 1.6
 	var count := 1 + int(rng.randf() < 0.45)

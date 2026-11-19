@@ -23,6 +23,21 @@ func _ready() -> void:
 
 
 func _add_landscape() -> void:
+	# The same road surface and gravel verge as the real road, so the title
+	# screen shows the game as it looks.
+	var Desert := preload("res://scripts/desert_models.gd")
+	var asphalt := ($Road as MeshInstance3D).get_surface_override_material(0) as ShaderMaterial
+	if asphalt:
+		asphalt.set_shader_parameter("noise_tex", Desert.noise_texture())
+	var verge := ShaderMaterial.new()
+	verge.shader = preload("res://assets/desert/desert_ground.gdshader")
+	verge.set_shader_parameter("noise_tex", Desert.noise_texture())
+	verge.set_shader_parameter("use_vertex_color", 0.0)
+	verge.set_shader_parameter("flat_color", Color("#8a7a62"))
+	verge.set_shader_parameter("pebbles", 3.0)
+	verge.set_shader_parameter("ripples", 0.0)
+	verge.set_shader_parameter("cracks", 0.0)
+	($Shoulders as MeshInstance3D).set_surface_override_material(0, verge)
 	var terrain := Terrain.new()
 	for index in range(-6, 1):
 		var terrain_section := Node3D.new()

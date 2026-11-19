@@ -115,8 +115,17 @@ func save_settings() -> void:
 
 func apply_settings() -> void:
 	Engine.max_fps = fps_cap
-	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync_enabled else DisplayServer.VSYNC_DISABLED)
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen_enabled else DisplayServer.WINDOW_MODE_WINDOWED)
+	# Only touch the window when the setting actually differs from it, so a
+	# maximized window stays maximized and dragging a slider doesn't stall.
+	var vsync := DisplayServer.VSYNC_ENABLED if vsync_enabled else DisplayServer.VSYNC_DISABLED
+	if DisplayServer.window_get_vsync_mode() != vsync:
+		DisplayServer.window_set_vsync_mode(vsync)
+	var mode := DisplayServer.window_get_mode()
+	var full := mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+	if fullscreen_enabled and not full:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	elif not fullscreen_enabled and full:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(master_volume, 0.001)))
 	AudioServer.set_bus_mute(0, master_volume <= 0.001)
 	var voices := voice_bus()
@@ -173,7 +182,27 @@ func _notification(what: int) -> void:
 		_apply_frame_cap()
 
 
+## Settings are written a moment after the last change, not on every step of
+## a slider; anything pending is written when the game closes.
+const SAVE_DELAY := 0.6
+var save_wait := -1.0
+
+
+func queue_save() -> void:
+	save_wait = SAVE_DELAY
+
+
+func _exit_tree() -> void:
+	if save_wait >= 0.0:
+		save_settings()
+		save_wait = -1.0
+
+
 func _process(delta: float) -> void:
+	if save_wait >= 0.0:
+		save_wait -= delta
+		if save_wait < 0.0:
+			save_settings()
 	idle_check -= delta
 	if idle_check <= 0.0:
 		idle_check = 0.25
@@ -185,7 +214,10 @@ func _apply_frame_cap() -> void:
 		return
 	var cap := fps_cap
 	var scene := get_tree().current_scene
-	if not window_focused or get_tree().paused:
+	if get_tree().paused and get_tree().root.disable_3d:
+		# An ending cinematic: the tree is paused but the film is moving.
+		cap = mini(fps_cap, MENU_FPS)
+	elif not window_focused or get_tree().paused:
 		cap = IDLE_FPS
 	elif scene and scene.scene_file_path == "res://scenes/menu.tscn":
 		cap = mini(fps_cap, MENU_FPS)
@@ -201,65 +233,65 @@ func _apply_frame_cap() -> void:
 func set_fps_cap(value: int) -> void:
 	fps_cap = value
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_vsync_enabled(value: bool) -> void:
 	vsync_enabled = value
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_fullscreen_enabled(value: bool) -> void:
 	fullscreen_enabled = value
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_master_volume(value: float) -> void:
 	master_volume = clampf(value, 0.0, 1.0)
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_mouse_sensitivity_scale(value: float) -> void:
 	mouse_sensitivity_scale = clampf(value, 0.35, 2.0)
-	save_settings()
+	queue_save()
 
 
 func set_show_fps(value: bool) -> void:
 	show_fps = value
-	save_settings()
+	queue_save()
 	settings_changed.emit()
 
 
 func set_render_scale(value: float) -> void:
 	render_scale = _nearest_render_scale(value)
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_shadow_quality(value: int) -> void:
 	shadow_quality = clampi(value, 0, SHADOW_OPTIONS.size() - 1)
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_lighting_quality(value: int) -> void:
 	lighting_quality = clampi(value, 0, LIGHTING_OPTIONS.size() - 1)
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_headlight_shadows(value: bool) -> void:
 	headlight_shadows = value
 	apply_settings()
-	save_settings()
+	queue_save()
 
 
 func set_ui_scale(value: float) -> void:
 	ui_scale = clampf(value, 1.0, 1.8)
-	save_settings()
+	queue_save()
 	settings_changed.emit()
 
 
@@ -309,7 +341,7 @@ func lamp_shadows() -> bool:
 
 func set_option(key: String, value: Variant) -> void:
 	set(key, value)
-	save_settings()
+	queue_save()
 	apply_settings()
 
 
@@ -326,5 +358,5 @@ func apply_preset(index: int) -> void:
 			render_scale = 1.0; shadow_quality = 2; lighting_quality = 2; low_end = false; draw_distance = 1; headlight_shadows = true
 		_:
 			render_scale = 1.0; shadow_quality = 3; lighting_quality = 2; low_end = false; draw_distance = 2; headlight_shadows = true
-	save_settings()
+	queue_save()
 	apply_settings()

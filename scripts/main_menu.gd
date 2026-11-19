@@ -1,10 +1,18 @@
 extends Control
+## The title screen: the road behind, the menu down the left over a dark
+## gradient so it reads against the sky and the sand.
 
 const Style := preload("res://scripts/menu_style.gd")
 const SettingsPanel := preload("res://scripts/settings_panel.gd")
+const WIDTH := 400.0
 
-var settings_panel: PanelContainer
-var name_panel: PanelContainer
+var settings_panel: Control
+var name_panel: Control
+var screen: Dictionary
+var menu: VBoxContainer
+var version_label: Label
+var first_button: Button
+var settings_button: Button
 
 
 func _ready() -> void:
@@ -12,35 +20,95 @@ func _ready() -> void:
 	NetworkManager.story = "road"
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	GameSettings.apply_settings()
-	resized.connect(_apply_menu_scale)
-	GameSettings.settings_changed.connect(_apply_menu_scale)
-	$Menu/Version.text = "Version %s" % ProjectSettings.get_setting("application/config/version")
-	var can_continue := TripSave.has_trip()
-	$Menu/ContinueButton.visible = can_continue
-	$Menu/ContinueButton.pressed.connect(func() -> void: TripSave.start_trip(true))
-	$Menu/StartButton.text = "New trip" if can_continue else "Start"
-	_apply_menu_scale()
-	$Menu.minimum_size_changed.connect(_apply_menu_scale)
+	theme = Style.make_theme()
+	_build()
 	_create_settings_panel()
-	$Menu/StartButton.pressed.connect(_start_game)
-	$Menu/MultiplayerButton.pressed.connect(_open_multiplayer)
-	$Menu/SettingsButton.pressed.connect(_open_settings)
-	$Menu/QuitButton.pressed.connect(_quit_game)
+	resized.connect(_fit)
+	GameSettings.settings_changed.connect(_fit)
+	_fit()
 	if GameSettings.player_name.is_empty():
 		_prompt_for_name.call_deferred()
+	else:
+		first_button.grab_focus.call_deferred()
+
+
+func _build() -> void:
+	# A dark band down the left: the menu stays readable whatever the sky does.
+	var scrim := TextureRect.new()
+	scrim.name = "Scrim"
+	var fade := Gradient.new()
+	fade.set_color(0, Color(0, 0, 0, 0.78))
+	fade.set_color(1, Color(0, 0, 0, 0.0))
+	fade.add_point(0.45, Color(0, 0, 0, 0.55))
+	var ramp := GradientTexture2D.new()
+	ramp.gradient = fade
+	ramp.fill_from = Vector2(0, 0)
+	ramp.fill_to = Vector2(1, 0)
+	scrim.texture = ramp
+	scrim.stretch_mode = TextureRect.STRETCH_SCALE
+	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(scrim)
+	scrim.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
+
+	screen = Style.screen(self, WIDTH)
+	(screen["panel"] as PanelContainer).add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	menu = screen["content"]
+	menu.add_theme_constant_override("separation", Style.GAP_M)
+	var title := Style.heading("KM 0", Style.TITLE)
+	title.add_theme_constant_override("shadow_offset_x", 3)
+	title.add_theme_constant_override("shadow_offset_y", 3)
+	menu.add_child(title)
+	menu.add_child(Style.spacer(Style.GAP_L))
+
+	var can_continue := TripSave.has_trip()
+	if can_continue:
+		var continue_button := Style.primary("Continue")
+		continue_button.name = "ContinueButton"
+		continue_button.pressed.connect(func() -> void: TripSave.start_trip(true))
+		menu.add_child(continue_button)
+		first_button = continue_button
+	var start := Style.button("New trip") if can_continue else Style.primary("Start")
+	start.name = "StartButton"
+	start.pressed.connect(_start_game)
+	menu.add_child(start)
+	if first_button == null:
+		first_button = start
+	var multiplayer_button := Style.button("Multiplayer")
+	multiplayer_button.name = "MultiplayerButton"
+	multiplayer_button.pressed.connect(_open_multiplayer)
+	menu.add_child(multiplayer_button)
+	settings_button = Style.button("Settings")
+	settings_button.name = "SettingsButton"
+	settings_button.pressed.connect(_open_settings)
+	menu.add_child(settings_button)
+	menu.add_child(Style.spacer(Style.GAP_S))
+	var quit := Style.quiet("Quit")
+	quit.name = "QuitButton"
+	quit.pressed.connect(_quit_game)
+	menu.add_child(quit)
+
+	version_label = Style.label("Version %s" % ProjectSettings.get_setting("application/config/version"), Style.SMALL, Style.FAINT)
+	version_label.name = "Version"
+	add_child(version_label)
+
+
+func _fit() -> void:
+	Style.fit_screen(screen, size, true)
+	var factor := Style.ui_scale(size)
+	var scrim: Control = get_node("Scrim")
+	scrim.size = Vector2(minf(size.x, (WIDTH + 260.0) * factor), size.y)
+	version_label.scale = Vector2.ONE * factor
+	version_label.position = Vector2(size.x - (version_label.size.x + 24.0) * factor, size.y - (version_label.size.y + 16.0) * factor)
+	if is_instance_valid(name_panel):
+		Style.fit_panel(name_panel, size, true)
 
 
 func _start_game() -> void:
 	if not TripSave.has_trip():
 		TripSave.start_trip(false)
 		return
-	var dialog := ConfirmationDialog.new()
-	dialog.dialog_text = "Starting a new trip will replace your saved trip the next time the game saves."
-	dialog.ok_button_text = "Start new trip"
-	add_child(dialog)
-	dialog.confirmed.connect(func() -> void: TripSave.start_trip(false))
-	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	Style.confirm(self, "Start a new trip?", "Your saved trip will be replaced the next time the game saves.",
+		"Start new trip", "Keep my trip", func() -> void: TripSave.start_trip(false))
 
 
 func _open_multiplayer() -> void:
@@ -60,42 +128,35 @@ func _create_settings_panel() -> void:
 
 
 func _open_settings() -> void:
-	$Menu.hide()
+	(screen["scroll"] as Control).hide()
 	settings_panel.open()
 
 
 func _close_settings() -> void:
-	$Menu.show()
-	$Menu/SettingsButton.grab_focus()
-
-
-func _apply_menu_scale() -> void:
-	Style.fit_panel($Menu, size, true)
-	if is_instance_valid(name_panel):
-		Style.fit_panel(name_panel, size, true)
+	(screen["scroll"] as Control).show()
+	settings_button.grab_focus()
 
 
 func _prompt_for_name() -> void:
-	$Menu.hide()
+	(screen["scroll"] as Control).hide()
 	name_panel = PanelContainer.new()
 	name_panel.name = "NamePrompt"
-	name_panel.theme = Style.make_theme()
-	name_panel.custom_minimum_size.x = $Menu.custom_minimum_size.x
+	name_panel.custom_minimum_size.x = WIDTH + 40.0
 	add_child(name_panel)
 
-	var content := Style.vbox(12)
+	var content := Style.vbox(Style.GAP_M)
 	name_panel.add_child(content)
-	content.add_child(Style.heading("Your name", 34))
-	content.add_child(Style.label("This is the name other players will see."))
+	content.add_child(Style.heading("Your name", Style.H1))
+	content.add_child(Style.body("This is the name other players see in multiplayer. You can change it later in Settings."))
 
 	var field := LineEdit.new()
 	field.name = "PlayerName"
 	field.max_length = 24
 	field.placeholder_text = "Player name"
-	field.custom_minimum_size.y = 42
+	field.custom_minimum_size.y = Style.BUTTON_HEIGHT
 	content.add_child(field)
 
-	var next := Style.button("Continue")
+	var next := Style.primary("Continue")
 	next.disabled = true
 	content.add_child(next)
 	field.text_changed.connect(func(value: String) -> void:
@@ -105,8 +166,8 @@ func _prompt_for_name() -> void:
 	next.pressed.connect(func() -> void:
 		_save_first_name(field.text)
 	)
-	name_panel.minimum_size_changed.connect(_apply_menu_scale)
-	_apply_menu_scale()
+	name_panel.minimum_size_changed.connect(_fit)
+	_fit()
 	field.grab_focus()
 
 
@@ -116,8 +177,5 @@ func _save_first_name(value: String) -> void:
 	GameSettings.set_player_name(value)
 	name_panel.queue_free()
 	name_panel = null
-	$Menu.show()
-	if $Menu/ContinueButton.visible:
-		$Menu/ContinueButton.grab_focus()
-	else:
-		$Menu/StartButton.grab_focus()
+	(screen["scroll"] as Control).show()
+	first_button.grab_focus()

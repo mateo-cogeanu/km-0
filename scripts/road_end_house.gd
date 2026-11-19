@@ -237,6 +237,10 @@ func _ready() -> void:
 	trigger.body_entered.connect(_on_entry)
 	entry_trigger = trigger
 	_build_wet_patches()
+	# Burned down on an earlier visit: it stands as a charred shell, closed.
+	if story.get("burned", false):
+		scorch(0.7)
+		trigger.monitoring = false
 
 
 func _build_house() -> void:
@@ -664,15 +668,39 @@ func _on_entry(body: Node3D) -> void:
 	interior.ambient_light_sky_contribution = 0.0
 	player.camera.environment = interior
 	var sun := get_tree().current_scene.get_node("Sun") as DirectionalLight3D
+	if outdoor_masks.is_empty():
+		outdoor_masks[sun] = sun.light_cull_mask
 	sun.light_cull_mask &= ~(Creature.LIGHT_LAYER | HOUSE_LAYER)
 	var sky_fill := get_tree().current_scene.get_node_or_null("DayNightCycle/SkyFillLight") as DirectionalLight3D
 	if sky_fill:
+		if not outdoor_masks.has(sky_fill):
+			outdoor_masks[sky_fill] = sky_fill.light_cull_mask
 		sky_fill.light_cull_mask &= ~(Creature.LIGHT_LAYER | HOUSE_LAYER)
 	# An ordinary, quiet house first: a clock and the hum of the wiring.
 	if ambience.is_empty():
 		if not revisit:
 			ambience.append(_loop(CLOCK_TICK, Vector3(-3.3, 2.05, -1.3), -15.0))
 		ambience.append(_loop(HOUSE_HUM, Vector3(-2.4, 1.0, -3.2), -21.0))
+
+
+## The sun's and sky fill's light masks from before you went in.
+var outdoor_masks := {}
+
+
+func _exit_tree() -> void:
+	# Its stretch of road freed (or the trip over): never leave the camera
+	# stuck with the inside light.
+	_restore_outdoor_light()
+
+
+func _restore_outdoor_light() -> void:
+	## Back outside: the day's own light and sky again.
+	if is_instance_valid(player) and player.camera and player.camera.environment == interior:
+		player.camera.environment = null
+	for light in outdoor_masks:
+		if is_instance_valid(light):
+			light.light_cull_mask = outdoor_masks[light]
+	outdoor_masks.clear()
 
 
 func _roam(delta: float) -> void:
@@ -694,6 +722,7 @@ func _roam(delta: float) -> void:
 		if at.z > LEAVE_Z + 1.5 or at.distance_to(Vector3.ZERO) > 9.0:
 			roaming = false
 			looked = false
+			_restore_outdoor_light()
 		return
 	# Only once you are properly in does turning back count as leaving.
 	if at.z < LEAVE_Z - 0.45:
@@ -1970,7 +1999,7 @@ func _all_doused() -> bool:
 
 func handle_r(by: Node3D) -> bool:
 	## The player pressed R near the house. Pour, or light it.
-	if prop_only or burning or seen or roaming or interior:
+	if prop_only or burning or seen or roaming or interior or story.get("burned", false):
 		return false
 	var held: Node3D = by.held_object if "held_object" in by else null
 	if held == null:
@@ -1988,7 +2017,7 @@ func _outside(delta: float) -> void:
 	if burning:
 		_burn(delta)
 		return
-	if seen or roaming or interior:
+	if seen or roaming or interior or story.get("burned", false):
 		return
 	var player := get_tree().get_first_node_in_group("local_player") as Node3D
 	if player == null or global_position.distance_to(player.global_position) > 20.0:

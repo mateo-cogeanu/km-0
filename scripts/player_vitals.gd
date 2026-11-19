@@ -87,10 +87,19 @@ func setup(owner_player: CharacterBody3D, layer: CanvasLayer) -> void:
 	layout()
 
 
+var _laid_out_for := Vector4.ZERO
+
+
 func layout() -> void:
-	# Bottom right, clear of the driving and fuel readouts on the left.
-	var ui := GameSettings.ui_scale
+	# Bottom right, clear of the driving and fuel readouts on the left. Only
+	# redone when the screen, the UI scale or the panel's size changes.
 	var screen := player.get_viewport().get_visible_rect().size
+	# Scaled with the window like the menus, so it stays readable on big screens.
+	var ui := preload("res://scripts/menu_style.gd").ui_scale(screen)
+	var key := Vector4(screen.x, screen.y, ui, panel.size.y)
+	if key == _laid_out_for:
+		return
+	_laid_out_for = key
 	panel.scale = Vector2.ONE * ui
 	panel.position = Vector2(screen.x - 220 * ui, screen.y - (panel.get_combined_minimum_size().y + 22) * ui)
 
@@ -258,6 +267,16 @@ func sleep_until_morning(where: String) -> void:
 		var cycle := player.get_tree().current_scene.get_node_or_null("DayNightCycle")
 		if cycle and not NetworkManager.is_online():
 			var morning := 0.29
+			# Slept through a night: it still counts for the story, unless the
+			# road already counted the one you lay down in.
+			var road := player.get_tree().current_scene.get_node_or_null("InfiniteRoad")
+			var passes_night: bool = cycle.time_of_day > morning or cycle.time_of_day < 0.25
+			var counted: bool = road != null and "was_night" in road and road.was_night
+			if passes_night and not counted:
+				var story: Dictionary = preload("res://scripts/road_end_house.gd").story
+				story["nights"] = int(story.get("nights", 0)) + 1
+			if road and "was_night" in road:
+				road.was_night = false
 			cycle.time_of_day = morning)
 	fade.tween_interval(1.6)
 	fade.tween_property(blackout, "color:a", 0.0, 1.5)

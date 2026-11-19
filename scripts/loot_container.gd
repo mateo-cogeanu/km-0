@@ -147,7 +147,44 @@ func _release() -> void:
 			_tuck(item, false)
 
 
+static func untuck(item: RigidBody3D) -> void:
+	## Another player took this out of a box this peer never saw opened: bring
+	## it back to the world (visible, colliding) so it can be seen and held.
+	if item.get_meta("in_container", false) or item.has_meta("loot_layers"):
+		item.set_meta("in_container", false)
+		item.visible = true
+		if item.has_meta("loot_layers"):
+			var layers: Vector2i = item.get_meta("loot_layers")
+			item.collision_layer = layers.x
+			item.collision_mask = layers.y
+			item.remove_meta("loot_layers")
+
+
 func open(instant: bool = false) -> void:
+	## In co-op the host opens it for everyone, so the lid and what's inside
+	## are the same on every screen. Restoring a saved trip opens it in place.
+	if opened:
+		return
+	if instant or not NetworkManager.is_online():
+		_open_here(instant)
+	elif multiplayer.is_server():
+		_open_synced.rpc()
+	else:
+		_request_open.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_open() -> void:
+	if multiplayer.is_server() and not opened:
+		_open_synced.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func _open_synced() -> void:
+	_open_here(false)
+
+
+func _open_here(instant: bool) -> void:
 	if opened:
 		return
 	opened = true

@@ -330,6 +330,10 @@ func _rest_cars(delta: float) -> void:
 			continue
 		car.set_process(awake)
 		car.set_physics_process(awake)
+		# Only the host simulates the cars; on everyone else they are frozen
+		# kinematic bodies following the host, and must stay that way.
+		if not car.is_multiplayer_authority():
+			continue
 		car.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
 		car.freeze = not awake
 		if not awake:
@@ -406,12 +410,15 @@ func end_night(how: String) -> void:
 		label.custom_minimum_size.x = 760
 		label.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		column.add_child(label)
-	var button := Style.button("Back to the menu", 22)
+	var button := Style.primary("Back to the menu")
+	button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	button.custom_minimum_size.x = 240
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.pressed.connect(func() -> void:
 		NetworkManager.leave_lobby()
 		get_tree().change_scene_to_file("res://scenes/menu.tscn"))
 	column.add_child(button)
+	button.grab_focus.call_deferred()
 	create_tween().tween_property(card, "color:a", 0.88, 2.5)
 
 

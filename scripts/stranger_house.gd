@@ -262,7 +262,30 @@ func use_door(who: Node3D) -> void:
 
 
 func toggle_door() -> void:
-	door_open = not door_open
+	## In co-op the host swings it for everyone.
+	if not NetworkManager.is_online():
+		_swing_door(not door_open)
+	elif multiplayer.is_server():
+		_door_synced.rpc(not door_open)
+	else:
+		_request_door.rpc_id(1, not door_open)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_door(open: bool) -> void:
+	if multiplayer.is_server():
+		_door_synced.rpc(open)
+
+
+@rpc("authority", "call_local", "reliable")
+func _door_synced(open: bool) -> void:
+	_swing_door(open)
+
+
+func _swing_door(open: bool) -> void:
+	if open == door_open:
+		return
+	door_open = open
 	var swing := create_tween()
 	swing.tween_property(door_hinge, "rotation:y", deg_to_rad(100.0) if door_open else 0.0, 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	var creak := AudioStreamPlayer3D.new()
@@ -310,6 +333,14 @@ func _build_stranger() -> void:
 
 func _process(delta: float) -> void:
 	var local := get_tree().get_first_node_in_group("local_player") as Node3D
+	# Waiting on your choice: after a pause (or anything else that took the
+	# mouse), give the pointer and the focus back to the choices.
+	if choosing and local and local.has_method("pause_open") and not local.pause_open() and choices.get_child_count() > 0:
+		if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		var focused := get_viewport().gui_get_focus_owner()
+		if focused == null or not choices.is_ancestor_of(focused):
+			(choices.get_child(0) as Control).grab_focus()
 	var eye := Vector3.ZERO
 	if local:
 		eye = to_local(local.camera.global_position) if "camera" in local else to_local(local.global_position)

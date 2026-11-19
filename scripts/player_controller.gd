@@ -48,6 +48,8 @@ const SAFE_FALL_SPEED := 9.5
 @export var spray_strength: float = 1.8
 
 const CameraBlend := preload("res://scripts/camera_blend.gd")
+const LootBox := preload("res://scripts/loot_container.gd")
+const LooseBodySync := preload("res://scripts/loose_body_sync.gd")
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var look_rotation_x: float = 0.0
 var held_object: RigidBody3D
@@ -195,6 +197,8 @@ func _ready() -> void:
 		remote_rotation_y = rotation.y
 		return
 	add_to_group("local_player")
+	if NetworkManager.is_online():
+		LooseBodySync.ensure.call_deferred(get_tree().current_scene)
 	GameSettings.player_name_changed.connect(_update_player_name)
 	_create_interaction_tip()
 	vitals = Vitals.new()
@@ -232,6 +236,9 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_smooth_view()
 	_animate_body(delta)
+	# Every frame, on foot or driving.
+	if is_multiplayer_authority():
+		_update_fps_label()
 	if is_multiplayer_authority() and vitals:
 		_update_drinking(delta)
 		_cough_like_mick(delta)
@@ -405,7 +412,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if ending_locked or not is_multiplayer_authority() or gameplay_ui_open():
 		return
 	if is_instance_valid(active_vehicle):
-		if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_L, KEY_H]:
+		# L is the headlights; H is the horn (lights only on a vehicle with no horn).
+		var lights_key: bool = event is InputEventKey and event.pressed and not event.echo \
+			and (event.keycode == KEY_L or (event.keycode == KEY_H and not active_vehicle.has_method("press_horn")))
+		if lights_key:
 			_toggle_vehicle_lights(active_vehicle)
 			get_viewport().set_input_as_handled()
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
@@ -537,7 +547,6 @@ func _physics_process(delta: float) -> void:
 	_update_interaction_tip()
 	_update_fuel_hud()
 	_update_refuel_hud()
-	_update_fps_label()
 	_send_network_transform(delta)
 
 
@@ -689,6 +698,7 @@ func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
 	if not _can_grab_body(object):
 		return
 
+	LooseBodySync.release_follow(object)
 	held_object = object
 	held_local_grab_point = held_object.to_local(grab_position)
 	# Smoothed like the view it is held in front of, so it does not shake.
@@ -724,6 +734,8 @@ func _begin_grab_object(object: RigidBody3D, grab_position: Vector3) -> void:
 		_apply_spray_can_color(held_object, spray_colors[spray_color_index])
 	if NetworkManager.is_online():
 		sync_held_object_state.rpc(held_object.get_path(), true)
+		if _is_spray_can(held_object):
+			_sync_spray_color.rpc(held_object.get_path(), spray_color_index)
 
 
 func _drop_held_object() -> void:
@@ -732,6 +744,8 @@ func _drop_held_object() -> void:
 	if NetworkManager.is_online() and held_object != null:
 		sync_held_object_transform.rpc(held_object.get_path(), held_object.global_transform, held_object.linear_velocity, held_object.angular_velocity)
 		sync_held_object_state.rpc(held_object.get_path(), false)
+		# Where it lands is decided here and sent to the others.
+		LooseBodySync.mark_dropped(held_object, multiplayer.get_unique_id())
 	_restore_held_object_physics()
 	if held_object != null:
 		remove_collision_exception_with(held_object)
@@ -794,6 +808,9 @@ func sync_held_object_state(object_path: NodePath, is_held: bool) -> void:
 	var object := get_node_or_null(object_path) as RigidBody3D
 	if object == null:
 		return
+	# Taken from a box this screen never saw opened: it must still be seen.
+	LootBox.untuck(object)
+	LooseBodySync.release_follow(object)
 
 	if is_held:
 		object.freeze = true
@@ -804,6 +821,21 @@ func sync_held_object_state(object_path: NodePath, is_held: bool) -> void:
 	else:
 		object.freeze = false
 		object.remove_meta("held_by")
+		LooseBodySync.mark_dropped(object, get_multiplayer_authority())
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_spray_color(object_path: NodePath, index: int) -> void:
+	var object := get_node_or_null(object_path)
+	if object and index >= 0 and index < spray_colors.size():
+		_apply_spray_can_color(object, spray_colors[index])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _sync_amount(object_path: NodePath, value: float) -> void:
+	var object := get_node_or_null(object_path)
+	if object and object.has_method("set_amount"):
+		object.set_amount(value)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 2)
@@ -828,6 +860,8 @@ func _cycle_spray_color() -> void:
 
 	spray_color_index = (spray_color_index + 1) % spray_colors.size()
 	_apply_spray_can_color(held_object, spray_colors[spray_color_index])
+	if NetworkManager.is_online():
+		_sync_spray_color.rpc(held_object.get_path(), spray_color_index)
 
 
 func _update_spray_paint(delta: float) -> void:
@@ -1011,6 +1045,9 @@ func _can_grab_body(body: RigidBody3D) -> bool:
 		return false
 	if body.has_meta("welded_vehicle"):
 		return false
+	# Someone else already has hold of it (heavy things are helped, not grabbed).
+	if body.has_meta("held_by") and int(body.get_meta("held_by")) != multiplayer.get_unique_id():
+		return false
 
 	return true
 
@@ -1067,7 +1104,7 @@ func _handle_interaction() -> void:
 		radio.get_parent().get_parent().use_door(self)
 		return
 	if radio and radio.is_in_group("road_radio"):
-		if radio == listening_radio and RoadEndHouseState.seen and radio.has_method("answer"):
+		if radio == listening_radio and can_answer_radio() and radio.has_method("answer"):
 			radio.answer(self)
 			return
 		if is_instance_valid(listening_radio) and listening_radio != radio:
@@ -1617,7 +1654,7 @@ func _interaction_text() -> String:
 		return ""
 	if target.is_in_group("road_radio") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
 		if target == listening_radio:
-			return "E  Answer it" if RoadEndHouseState.seen else "E  Turn off radio"
+			return "E  Answer it" if can_answer_radio() else "E  Turn off radio"
 		return "E  Tune radio" if RoadEndHouseState.seen else "E  Check in on the radio"
 	if target.is_in_group("house_front_door") and camera.global_position.distance_squared_to(hit["position"]) <= grab_distance * grab_distance:
 		return "E  Open front door"
@@ -1988,6 +2025,8 @@ func _set_stowed(item: RigidBody3D, stowed: bool) -> void:
 func _sync_stowed(path: NodePath, stowed: bool) -> void:
 	var item := get_node_or_null(path) as RigidBody3D
 	if item:
+		LootBox.untuck(item)
+		LooseBodySync.release_follow(item)
 		_set_stowed(item, stowed)
 
 
@@ -2101,6 +2140,8 @@ func _update_drinking(delta: float) -> void:
 	if drink_time >= DRINK_TIME:
 		vitals.drink(34.0)
 		drinking.set_amount(drinking.amount - 0.34)
+		if NetworkManager.is_online():
+			_sync_amount.rpc(drinking.get_path(), drinking.amount)
 		drinking.freeze = false
 		_show_tip("That's better" if drinking.amount > 0.05 else "That was the last of it")
 		drinking = null
@@ -2122,7 +2163,7 @@ func _load_batteries(pack: RigidBody3D) -> void:
 
 
 func _try_sleep(where: String) -> void:
-	if vitals == null:
+	if vitals == null or vitals.passing_out:
 		return
 	if is_instance_valid(active_vehicle) and active_vehicle.linear_velocity.length() > 1.0:
 		_show_tip("Stop the car first")
@@ -2142,6 +2183,28 @@ func start_talking(other: Node) -> void:
 
 func stop_talking() -> void:
 	talking_to = null
+	capture_mouse_if_playing()
+
+
+func can_answer_radio() -> bool:
+	## After the house the radios can be answered, once: that ending, done,
+	## doesn't start again on a continued trip.
+	return RoadEndHouseState.seen and not RoadEndHouseState.story.get("replaced", false)
+
+
+func pause_open() -> bool:
+	## The pause card is up (in co-op the game keeps running behind it).
+	var world := get_tree().current_scene
+	var pause_menu := world.get_node_or_null("PauseMenu") if world else null
+	return get_tree().paused or (pause_menu != null and "overlay" in pause_menu and pause_menu.overlay != null and pause_menu.overlay.visible)
+
+
+func capture_mouse_if_playing() -> void:
+	## Back to looking around, unless the pause card is open over everything:
+	## closing a note, the pack or a conversation behind it must not grab the
+	## mouse away from the menu.
+	if pause_open():
+		return
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
@@ -2161,6 +2224,8 @@ func give_item(item: RigidBody3D) -> void:
 	if inventory.refusal(item).is_empty():
 		_set_stowed(item, true)
 		inventory.add(item)
+		if NetworkManager.is_online():
+			_sync_stowed.rpc(item.get_path(), true)
 	elif held_object == null:
 		_set_stowed(item, false)
 		item.global_position = camera.global_transform * Vector3(0.15, -0.21, -0.42)
@@ -2172,6 +2237,8 @@ func use_up(item: RigidBody3D) -> void:
 		_drop_held_object()
 	if inventory.items.has(item):
 		inventory.remove_at(inventory.items.find(item))
+	if NetworkManager.is_online():
+		_sync_eaten.rpc(item.get_path())
 	item.queue_free()
 
 
@@ -2212,10 +2279,10 @@ func read_note(note: Node) -> void:
 		hint.text = "E or Esc to put it down"
 		hint.add_theme_color_override("font_color", Color(0.25, 0.22, 0.18, 0.7))
 		column.add_child(hint)
-	var ui := GameSettings.ui_scale
-	reader_title.add_theme_font_size_override("font_size", roundi(22 * ui))
-	reader_text.add_theme_font_size_override("font_size", roundi(17 * ui))
-	reader_text.custom_minimum_size.x = 460 * ui
+	# Sized like every menu (menu_style.gd) and kept inside the window.
+	reader_title.add_theme_font_size_override("font_size", 26)
+	reader_text.add_theme_font_size_override("font_size", 19)
+	reader_text.custom_minimum_size.x = 480
 	reader_title.text = note.title()
 	reader_text.text = note.text()
 	note.mark_read()
@@ -2227,14 +2294,13 @@ func read_note(note: Node) -> void:
 
 
 func _center_note(paper: Control) -> void:
-	paper.size = paper.get_combined_minimum_size()
-	paper.position = (reader.size - paper.size) * 0.5
+	preload("res://scripts/menu_style.gd").fit_panel(paper, reader.size, false)
 
 
 func close_note() -> void:
 	if reader:
 		reader.hide()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	capture_mouse_if_playing()
 
 
 func _cough_like_mick(delta: float) -> void:

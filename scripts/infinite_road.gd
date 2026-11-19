@@ -59,6 +59,7 @@ var terrain := Terrain.new()
 var stream_stops := false
 var furthest := 0.0
 var was_night := false
+var night_noted := false
 var pole_mesh: Mesh
 var wire_mesh := CylinderMesh.new()
 var pole_shape := CylinderShape3D.new()
@@ -135,6 +136,9 @@ func _watch_for_the_house() -> void:
 	var story := RoadEndHouse.story
 	if story.has("house_z"):
 		return
+	# In co-op the host keeps the story and tells everyone where the road ends.
+	if NetworkManager.is_online() and not multiplayer.is_server():
+		return
 	# Trips from before this came in, and anyone who has been there already.
 	if RoadEndHouse.seen:
 		story["house_z"] = HOUSE_NEAREST
@@ -142,13 +146,30 @@ func _watch_for_the_house() -> void:
 	var cycle := get_tree().current_scene.get_node_or_null("DayNightCycle") if get_tree().current_scene else null
 	if cycle and "daylight" in cycle:
 		var night: bool = cycle.daylight < 0.12
+		# The first look only notes whether it is night (a trip continued at
+		# night has already counted this one).
+		if not night_noted:
+			night_noted = true
+			was_night = night
 		if night and not was_night:
 			story["nights"] = int(story.get("nights", 0)) + 1
 		was_night = night
 	var heard: Dictionary = story.get("heard", {})
 	if heard.size() < HEARD_NEEDED or int(story.get("nights", 0)) < NIGHTS_NEEDED:
 		return
-	story["house_z"] = minf(HOUSE_NEAREST, furthest - HOUSE_AHEAD)
+	var at_z := minf(HOUSE_NEAREST, furthest - HOUSE_AHEAD)
+	if NetworkManager.is_online():
+		_house_at.rpc(at_z)
+	else:
+		_house_at(at_z)
+
+
+@rpc("authority", "call_local", "reliable")
+func _house_at(z: float) -> void:
+	var story := RoadEndHouse.story
+	if story.has("house_z"):
+		return
+	story["house_z"] = z
 	# Any stretch of road already built where the house now goes is rebuilt.
 	var at := floori(float(story["house_z"]) / segment_length)
 	for index in range(at - 2, at + 2):
@@ -170,8 +191,49 @@ func _process(delta: float) -> void:
 	var player := get_tree().get_first_node_in_group("local_player") as Node3D
 	if player:
 		furthest = minf(furthest, player.global_position.z)
+	# The host counts how far anyone has got, not just itself.
+	if NetworkManager.is_online() and multiplayer.is_server():
+		for other: Node3D in get_tree().get_nodes_in_group("road_stream_player"):
+			furthest = minf(furthest, other.global_position.z)
 	_watch_for_the_house()
 	_update_segments()
+
+
+## A vehicle further than this from everyone sleeps; it wakes inside PARK_WAKE.
+const PARK_SLEEP := 300.0
+const PARK_WAKE := 220.0
+
+
+func _can_park(vehicle: Node) -> bool:
+	if vehicle.get("driver") != null:
+		return false
+	if vehicle is RigidBody3D and (vehicle as RigidBody3D).linear_velocity.length() > 0.5:
+		return false
+	return true
+
+
+func _park(vehicle: Node, sleep: bool) -> void:
+	if sleep:
+		vehicle.set_meta("parked_far", true)
+	else:
+		vehicle.remove_meta("parked_far")
+	vehicle.set_process(not sleep)
+	vehicle.set_physics_process(not sleep)
+	# Only whoever simulates it changes its physics; elsewhere it already
+	# follows them as a frozen body.
+	if vehicle is RigidBody3D and (not NetworkManager.is_online() or vehicle.is_multiplayer_authority()):
+		var body := vehicle as RigidBody3D
+		if sleep:
+			body.set_meta("parked_freeze", [body.freeze, body.freeze_mode])
+			body.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+			body.freeze = true
+			body.linear_velocity = Vector3.ZERO
+			body.angular_velocity = Vector3.ZERO
+		elif body.has_meta("parked_freeze"):
+			var was: Array = body.get_meta("parked_freeze")
+			body.remove_meta("parked_freeze")
+			body.freeze_mode = was[1]
+			body.freeze = was[0]
 
 
 func _update_segments(budget := 1) -> void:
@@ -194,7 +256,22 @@ func _update_segments(budget := 1) -> void:
 		urgent[index] = true
 	for player: Node3D in players:
 		urgent[floori(player.global_position.z / segment_length)] = true
+	var waking: Array = []
 	for vehicle in get_tree().get_nodes_in_group("drivable"):
+		# A vehicle left far behind is put to sleep where it stands: it stops
+		# being simulated and stops holding road built under it, which would
+		# otherwise pile up with every car you pass. It wakes as you come back.
+		var nearest := absf(vehicle.global_position.z - tracking.z)
+		for player: Node3D in players:
+			nearest = minf(nearest, absf(vehicle.global_position.z - player.global_position.z))
+		var parked: bool = vehicle.get_meta("parked_far", false)
+		if parked and nearest < PARK_WAKE:
+			waking.append(vehicle)
+		elif not parked and nearest > PARK_SLEEP and _can_park(vehicle):
+			_park(vehicle, true)
+			parked = true
+		if parked and not waking.has(vehicle):
+			continue
 		# Parked vehicles still need the same road height after a player leaves the area.
 		var vehicle_index := floori(vehicle.global_position.z / segment_length)
 		for index in range(vehicle_index - 1, vehicle_index + 2):
@@ -211,6 +288,10 @@ func _update_segments(budget := 1) -> void:
 		else:
 			# More to build: come back next frame.
 			update_timer = 0.0
+	# The road under a waking vehicle is built now (it was urgent): let it go.
+	for vehicle: Node3D in waking:
+		if segments.has(floori(vehicle.global_position.z / segment_length)):
+			_park(vehicle, false)
 	for index in wanted:
 		if segments.has(index):
 			_update_stop(index, tracking, segments[index], players)
@@ -596,6 +677,12 @@ func _update_stop(index: int, tracking: Vector3, segment: Node3D, players: Array
 			if absf(player.global_position.z - z) <= segment_length * 3.0:
 				spawn_stop.rpc(index)
 				break
+
+
+func replay_stops_to(peer_id: int) -> void:
+	## A guest who arrived late gets every station already out on the road.
+	for index in stops:
+		spawn_stop.rpc_id(peer_id, index)
 
 
 @rpc("authority", "call_local", "reliable")

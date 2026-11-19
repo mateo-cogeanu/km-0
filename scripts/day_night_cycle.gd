@@ -46,6 +46,7 @@ func _process(delta: float) -> void:
 		return
 
 	_advance_clock(delta)
+	_share_clock(delta)
 	lighting_update_timer -= delta
 	if lighting_update_timer <= 0.0:
 		lighting_update_timer = lighting_update_interval
@@ -55,6 +56,26 @@ func _process(delta: float) -> void:
 		cloud_time += delta
 		sky_dome_material.set_shader_parameter("cloud_time", cloud_time)
 	_update_sky_dome_position()
+
+
+var _clock_send := 0.0
+
+
+func _share_clock(delta: float) -> void:
+	## In co-op the host's clock is the time of day for everyone.
+	if not NetworkManager.is_online() or not multiplayer.is_server() or not is_inside_tree():
+		return
+	_clock_send -= delta
+	if _clock_send <= 0.0:
+		_clock_send = 3.0
+		_host_time.rpc(time_of_day)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func _host_time(host_time: float) -> void:
+	var gap := wrapf(host_time - time_of_day, -0.5, 0.5)
+	# Small drift is eased out; a big gap (just arrived) is jumped.
+	time_of_day = wrapf(time_of_day + (gap if absf(gap) > 0.01 else gap * 0.5), 0.0, 1.0)
 
 
 func _advance_clock(delta: float) -> void:

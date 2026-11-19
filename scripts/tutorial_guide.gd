@@ -36,36 +36,37 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	panel = PanelContainer.new()
 	panel.theme = Style.make_theme()
-	panel.add_theme_stylebox_override("panel", Style.box(Color(0.06, 0.06, 0.05, 0.82), Style.LINE, 10))
+	panel.add_theme_stylebox_override("panel", Style.box(Color(0.045, 0.05, 0.05, 0.86), Style.LINE, 16, 1, 8))
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(panel)
-	var column := Style.vbox(6)
+	var column := Style.vbox(Style.GAP_S)
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(column)
-	var heading := Style.label("COUNTY JOB SHEET", 15, Style.AMBER)
+	var heading := Style.section("County job sheet")
 	column.add_child(heading)
 	for entry: Array in STEPS:
-		var row := Style.label("", 16)
+		var row := Style.label("", Style.BODY)
 		column.add_child(row)
 		rows.append(row)
-	parts = Style.label("", 14)
-	parts.add_theme_color_override("font_color", Color("#cfc6b4"))
+	parts = Style.label("", Style.SMALL, Style.MUTED)
 	column.add_child(parts)
-	hint = Style.label("", 14)
+	hint = Style.label("", Style.SMALL, Style.MUTED)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.custom_minimum_size.x = 360
-	hint.add_theme_color_override("font_color", Color("#d9cfba"))
+	hint.custom_minimum_size.x = 380
 	column.add_child(hint)
-	var skip := Style.label("Esc  ·  Skip tutorial in the pause menu", 12)
-	skip.add_theme_color_override("font_color", Color("#8d8576"))
+	var skip := Style.label("You can skip the tutorial from the pause menu (Esc).", Style.SMALL, Style.FAINT)
 	column.add_child(skip)
 	_layout()
 	get_viewport().size_changed.connect(_layout)
+	GameSettings.settings_changed.connect(_layout)
 
 
 func _layout() -> void:
-	panel.scale = Vector2.ONE * GameSettings.ui_scale * 0.85
-	panel.position = Vector2(18, 18)
+	# A side sheet: a little smaller than a menu, in the top-left corner.
+	var screen := get_viewport().get_visible_rect().size
+	var factor := Style.ui_scale(screen) * 0.8
+	panel.scale = Vector2.ONE * factor
+	panel.position = Vector2(20, 20) * factor
 
 
 func _process(delta: float) -> void:

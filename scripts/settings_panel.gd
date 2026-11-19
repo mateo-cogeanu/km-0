@@ -1,45 +1,56 @@
-extends PanelContainer
+extends Control
+## Settings, shared by the title screen and the pause menu: three pages
+## (Video, Sound, Game), settings grouped under small headings, one row style,
+## and every yes-or-no setting the same On/Off switch that says what it is now.
 
 signal closed
 
 const Style := preload("res://scripts/menu_style.gd")
+const WIDTH := 560.0
 
 var align_left := false
+var screen: Dictionary
+var pages := {}
+var tabs := {}
+var first_controls := {}
+var page := "Video"
+
 var player_name_edit: LineEdit
+var preset_option: OptionButton
 var fps_option: OptionButton
 var render_scale_option: OptionButton
 var shadow_option: OptionButton
 var lighting_option: OptionButton
-var vsync_check: CheckBox
-var fullscreen_check: CheckBox
-var headlight_shadows_check: CheckBox
+var draw_option: OptionButton
+var vsync_check: Button
+var fullscreen_check: Button
+var headlight_shadows_check: Button
+var show_fps_check: Button
+var low_end_check: Button
+var subtitles_check: Button
+var scares_check: Button
 var volume_slider: HSlider
 var volume_value: Label
+var voice_slider: HSlider
+var voice_value: Label
 var sensitivity_slider: HSlider
 var sensitivity_value: Label
 var camera_motion_slider: HSlider
 var camera_motion_value: Label
 var ui_scale_slider: HSlider
 var ui_scale_value: Label
-var show_fps_check: CheckBox
-var low_end_check: CheckBox
-var draw_option: OptionButton
-var voice_slider: HSlider
-var voice_value: Label
-var subtitles_check: CheckBox
 var fov_slider: HSlider
 var fov_value: Label
-var scares_check: CheckBox
 
 
 func _ready() -> void:
 	visible = false
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	theme = Style.make_theme()
-	custom_minimum_size = Vector2(420, 0)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_build_ui()
 	_sync_from_settings()
 	get_viewport().size_changed.connect(_fit_layout)
-	minimum_size_changed.connect(_fit_layout)
 	GameSettings.settings_changed.connect(_fit_layout)
 
 
@@ -47,8 +58,7 @@ func open() -> void:
 	_sync_from_settings()
 	visible = true
 	_fit_layout()
-	var first_control: Control = fps_option if fps_option.is_visible_in_tree() else volume_slider
-	first_control.grab_focus()
+	_show_page(page)
 
 
 func close() -> void:
@@ -59,326 +69,244 @@ func close() -> void:
 
 func _fit_layout() -> void:
 	if visible:
-		Style.fit_panel(self, get_viewport().get_visible_rect().size, align_left)
+		Style.fit_screen(screen, get_viewport().get_visible_rect().size, align_left)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if is_visible_in_tree() and event.is_action_pressed("ui_cancel"):
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		close()
+	elif event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_TAB:
+		# Ctrl+Tab moves between the pages.
+		var names := pages.keys()
+		_show_page(names[(names.find(page) + (names.size() - 1 if event.shift_pressed else 1)) % names.size()])
+		get_viewport().set_input_as_handled()
 
 
 func _build_ui() -> void:
-	var root := Style.vbox(10)
-	add_child(root)
-	root.add_child(Style.heading("Settings", 38))
+	screen = Style.screen(self, WIDTH)
+	var root: VBoxContainer = screen["content"]
+	root.add_child(Style.heading("Settings", Style.H1))
 
-	var tabs := HBoxContainer.new()
-	root.add_child(tabs)
+	var tab_row := Style.hbox(Style.GAP_S)
+	root.add_child(tab_row)
 	var group := ButtonGroup.new()
-	var graphics := _add_tab(tabs, group, "Graphics")
-	var gameplay := _add_tab(tabs, group, "Gameplay")
-	var pages := PanelContainer.new()
-	pages.add_theme_stylebox_override("panel", Style.box(Style.FIELD, Style.LINE, 12))
-	root.add_child(pages)
-	var display_controls := Style.vbox(4)
-	pages.add_child(display_controls)
-	var game_controls := Style.vbox(4)
-	pages.add_child(game_controls)
-	game_controls.hide()
-	graphics.set_pressed_no_signal(true)
-	graphics.pressed.connect(func() -> void:
-		game_controls.hide()
-		display_controls.show()
-	)
-	gameplay.pressed.connect(func() -> void:
-		display_controls.hide()
-		game_controls.show()
-	)
+	for title in ["Video", "Sound", "Game"]:
+		var tab := Style.button(title)
+		tab.toggle_mode = true
+		tab.button_group = group
+		tab.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tab.pressed.connect(_show_page.bind(title))
+		tab_row.add_child(tab)
+		tabs[title] = tab
+		var holder := Style.vbox(Style.GAP_XS)
+		root.add_child(holder)
+		pages[title] = holder
+	root.add_child(Style.divider())
 
-	var preset_option := OptionButton.new()
-	preset_option.add_item("Choose…")
-	for value in GameSettings.PRESETS:
-		preset_option.add_item(value)
+	_build_video(pages["Video"])
+	_build_sound(pages["Sound"])
+	_build_game(pages["Game"])
+	# Every page as tall as the tallest, so the tabs and Back never jump.
+	var tallest := 0.0
+	for holder: Control in pages.values():
+		tallest = maxf(tallest, holder.get_combined_minimum_size().y)
+	for holder: Control in pages.values():
+		holder.custom_minimum_size.y = tallest
+
+	var back := Style.quiet("Back")
+	back.pressed.connect(close)
+	root.add_child(back)
+
+
+func _show_page(title: String) -> void:
+	page = title
+	for name in pages:
+		(pages[name] as Control).visible = name == title
+		(tabs[name] as Button).set_pressed_no_signal(name == title)
+	if visible and first_controls.has(title):
+		(first_controls[title] as Control).grab_focus()
+
+
+func _build_video(holder: VBoxContainer) -> void:
+	holder.add_child(Style.section("Quality"))
+	preset_option = Style.dropdown(["Custom"] + Array(GameSettings.PRESETS))
 	preset_option.item_selected.connect(func(index: int) -> void:
 		if index > 0:
 			GameSettings.apply_preset(index - 1)
-			_sync_from_settings()
-			preset_option.select(0))
-	_add_row(display_controls, "Quality preset", preset_option)
+			_sync_from_settings())
+	Style.row(holder, "Preset", preset_option, "Sets resolution, shadows, lighting and draw distance in one go.")
+	first_controls["Video"] = preset_option
+	low_end_check = Style.toggle(false, func(on: bool) -> void:
+		GameSettings.set_option("low_end", on)
+		_sync_preset())
+	Style.row(holder, "Older computer mode", low_end_check, "Simpler effects for old or integrated graphics.")
+	render_scale_option = Style.dropdown(GameSettings.RENDER_SCALE_OPTIONS.map(func(value: float) -> String: return GameSettings.get_render_scale_label(value)))
+	render_scale_option.item_selected.connect(func(index: int) -> void:
+		GameSettings.set_render_scale(GameSettings.RENDER_SCALE_OPTIONS[index])
+		_sync_preset())
+	Style.row(holder, "3D resolution", render_scale_option)
+	shadow_option = Style.dropdown(GameSettings.SHADOW_OPTIONS)
+	shadow_option.item_selected.connect(func(index: int) -> void:
+		GameSettings.set_shadow_quality(index)
+		_sync_preset())
+	Style.row(holder, "Shadows", shadow_option)
+	lighting_option = Style.dropdown(GameSettings.LIGHTING_OPTIONS)
+	lighting_option.item_selected.connect(func(index: int) -> void:
+		GameSettings.set_lighting_quality(index)
+		_sync_preset())
+	Style.row(holder, "Lighting", lighting_option)
+	draw_option = Style.dropdown(GameSettings.DRAW_OPTIONS)
+	draw_option.item_selected.connect(func(index: int) -> void:
+		GameSettings.set_option("draw_distance", index)
+		_sync_preset())
+	Style.row(holder, "Draw distance", draw_option)
+	headlight_shadows_check = Style.toggle(false, func(on: bool) -> void:
+		GameSettings.set_headlight_shadows(on)
+		_sync_preset())
+	Style.row(holder, "Headlight shadows", headlight_shadows_check)
 
-	low_end_check = CheckBox.new()
-	low_end_check.text = "On"
-	low_end_check.toggled.connect(func(on: bool) -> void: GameSettings.set_option("low_end", on))
-	_add_row(display_controls, "Older computer mode", low_end_check)
+	holder.add_child(Style.spacer(Style.GAP_S))
+	holder.add_child(Style.section("Display"))
+	fullscreen_check = Style.toggle(false, func(on: bool) -> void: GameSettings.set_fullscreen_enabled(on))
+	Style.row(holder, "Fullscreen", fullscreen_check)
+	vsync_check = Style.toggle(false, func(on: bool) -> void: GameSettings.set_vsync_enabled(on))
+	Style.row(holder, "VSync", vsync_check, "Stops tearing; caps the frame rate to your screen.")
+	fps_option = Style.dropdown(GameSettings.FPS_OPTIONS.map(func(value: int) -> String: return GameSettings.get_fps_label(value)))
+	fps_option.item_selected.connect(func(index: int) -> void: GameSettings.set_fps_cap(GameSettings.FPS_OPTIONS[index]))
+	Style.row(holder, "Frame rate limit", fps_option)
+	show_fps_check = Style.toggle(false, func(on: bool) -> void: GameSettings.set_show_fps(on))
+	Style.row(holder, "Show frame rate", show_fps_check)
 
-	draw_option = OptionButton.new()
-	for value in GameSettings.DRAW_OPTIONS:
-		draw_option.add_item(value)
-	draw_option.item_selected.connect(func(index: int) -> void: GameSettings.set_option("draw_distance", index))
-	_add_row(display_controls, "Draw distance", draw_option)
 
-	fps_option = OptionButton.new()
-	for value in GameSettings.FPS_OPTIONS:
-		fps_option.add_item(GameSettings.get_fps_label(value))
-	fps_option.item_selected.connect(_on_fps_selected)
-	_add_row(display_controls, "FPS cap", fps_option)
-
-	render_scale_option = OptionButton.new()
-	for value in GameSettings.RENDER_SCALE_OPTIONS:
-		render_scale_option.add_item(GameSettings.get_render_scale_label(value))
-	render_scale_option.item_selected.connect(_on_render_scale_selected)
-	_add_row(display_controls, "3D resolution", render_scale_option)
-
-	shadow_option = OptionButton.new()
-	for value in GameSettings.SHADOW_OPTIONS:
-		shadow_option.add_item(value)
-	shadow_option.item_selected.connect(_on_shadow_selected)
-	_add_row(display_controls, "Shadows", shadow_option)
-
-	lighting_option = OptionButton.new()
-	for value in GameSettings.LIGHTING_OPTIONS:
-		lighting_option.add_item(value)
-	lighting_option.item_selected.connect(_on_lighting_selected)
-	_add_row(display_controls, "Lighting", lighting_option)
-
-	vsync_check = CheckBox.new()
-	vsync_check.text = "On"
-	vsync_check.toggled.connect(_on_vsync_toggled)
-	_add_row(display_controls, "VSync", vsync_check)
-
-	headlight_shadows_check = CheckBox.new()
-	headlight_shadows_check.text = "On"
-	headlight_shadows_check.toggled.connect(_on_headlight_shadows_toggled)
-	_add_row(display_controls, "Headlight shadows", headlight_shadows_check)
-
-	fullscreen_check = CheckBox.new()
-	fullscreen_check.text = "On"
-	fullscreen_check.toggled.connect(_on_fullscreen_toggled)
-	_add_row(display_controls, "Fullscreen", fullscreen_check)
-
-	player_name_edit = LineEdit.new()
-	player_name_edit.max_length = 24
-	player_name_edit.placeholder_text = "Player name"
-	player_name_edit.text_submitted.connect(func(_value: String) -> void: _save_player_name())
-	_add_row(game_controls, "Player name", player_name_edit)
-
-	volume_slider = _create_slider(0.0, 1.0, 0.01)
-	volume_slider.value_changed.connect(_on_volume_changed)
-	volume_value = Label.new()
-	volume_value.custom_minimum_size = Vector2(52.0, 0.0)
-	_add_slider_row(game_controls, "Master volume", volume_slider, volume_value)
-
-	voice_slider = _create_slider(0.0, 1.0, 0.01)
-	voice_value = Label.new()
-	voice_value.custom_minimum_size = Vector2(52.0, 0.0)
+func _build_sound(holder: VBoxContainer) -> void:
+	holder.add_child(Style.section("Volume"))
+	volume_slider = Style.slider(0.0, 1.0, 0.01)
+	volume_value = Style.value_label()
+	volume_slider.value_changed.connect(func(value: float) -> void:
+		GameSettings.set_master_volume(value)
+		volume_value.text = "%d%%" % roundi(value * 100.0))
+	Style.slider_row(holder, "Master", volume_slider, volume_value)
+	first_controls["Sound"] = volume_slider
+	voice_slider = Style.slider(0.0, 1.0, 0.01)
+	voice_value = Style.value_label()
 	voice_slider.value_changed.connect(func(value: float) -> void:
 		voice_value.text = "%d%%" % roundi(value * 100.0)
 		GameSettings.set_option("voice_volume", value))
-	_add_slider_row(game_controls, "Voice volume", voice_slider, voice_value)
+	Style.slider_row(holder, "Voices", voice_slider, voice_value)
+	holder.add_child(Style.spacer(Style.GAP_S))
+	holder.add_child(Style.section("Text"))
+	subtitles_check = Style.toggle(true, func(on: bool) -> void: GameSettings.set_option("subtitles", on))
+	Style.row(holder, "Subtitles", subtitles_check, "Show what is said on radios and by people.")
 
-	subtitles_check = CheckBox.new()
-	subtitles_check.text = "On"
-	subtitles_check.toggled.connect(func(on: bool) -> void: GameSettings.set_option("subtitles", on))
-	_add_row(game_controls, "Subtitles", subtitles_check)
 
-	fov_slider = _create_slider(60.0, 100.0, 1.0)
-	fov_value = Label.new()
-	fov_value.custom_minimum_size = Vector2(52.0, 0.0)
+func _build_game(holder: VBoxContainer) -> void:
+	holder.add_child(Style.section("You"))
+	player_name_edit = LineEdit.new()
+	player_name_edit.max_length = 24
+	player_name_edit.placeholder_text = "Player name"
+	player_name_edit.custom_minimum_size = Vector2(Style.CONTROL_WIDTH, Style.ROW_HEIGHT - 4)
+	player_name_edit.text_submitted.connect(func(_value: String) -> void: _save_player_name())
+	player_name_edit.focus_exited.connect(_save_player_name)
+	Style.row(holder, "Player name", player_name_edit, "The name other players see in multiplayer.")
+	first_controls["Game"] = player_name_edit
+
+	holder.add_child(Style.spacer(Style.GAP_S))
+	holder.add_child(Style.section("Controls"))
+	sensitivity_slider = Style.slider(0.35, 2.0, 0.05)
+	sensitivity_value = Style.value_label()
+	sensitivity_slider.value_changed.connect(func(value: float) -> void:
+		GameSettings.set_mouse_sensitivity_scale(value)
+		sensitivity_value.text = "%.2f×" % value)
+	Style.slider_row(holder, "Mouse sensitivity", sensitivity_slider, sensitivity_value)
+	fov_slider = Style.slider(60.0, 100.0, 1.0)
+	fov_value = Style.value_label()
 	fov_slider.value_changed.connect(func(value: float) -> void:
 		fov_value.text = "%d°" % roundi(value)
 		GameSettings.set_option("fov", value))
-	_add_slider_row(game_controls, "Field of view", fov_slider, fov_value)
+	Style.slider_row(holder, "Field of view", fov_slider, fov_value)
 
-	scares_check = CheckBox.new()
-	scares_check.text = "On"
-	scares_check.toggled.connect(func(on: bool) -> void: GameSettings.set_option("reduce_scares", on))
-	_add_row(game_controls, "Reduce scares", scares_check)
-
-	sensitivity_slider = _create_slider(0.35, 2.0, 0.05)
-	sensitivity_slider.value_changed.connect(_on_sensitivity_changed)
-	sensitivity_value = Label.new()
-	sensitivity_value.custom_minimum_size = Vector2(52.0, 0.0)
-	_add_slider_row(game_controls, "Mouse sensitivity", sensitivity_slider, sensitivity_value)
-
-	camera_motion_slider = _create_slider(0.0, 1.0, 0.05)
-	camera_motion_value = Label.new()
-	camera_motion_value.custom_minimum_size.x = 72
-	camera_motion_slider.value_changed.connect(_on_camera_motion_changed)
-	_add_slider_row(game_controls, "Camera motion", camera_motion_slider, camera_motion_value)
-
-	ui_scale_slider = _create_slider(1.0, 1.8, 0.05)
-	ui_scale_slider.value_changed.connect(_on_ui_scale_changed)
-	ui_scale_value = Label.new()
-	ui_scale_value.custom_minimum_size = Vector2(72.0, 0.0)
-	_add_slider_row(game_controls, "UI scale", ui_scale_slider, ui_scale_value)
-
-	show_fps_check = CheckBox.new()
-	show_fps_check.text = "On"
-	show_fps_check.toggled.connect(_on_show_fps_toggled)
-	_add_row(display_controls, "FPS counter", show_fps_check)
-	# Keep the tabs in place when switching to the shorter Gameplay page.
-	pages.custom_minimum_size.y = pages.get_combined_minimum_size().y
-
-	var close_button := Style.button("Back")
-	close_button.pressed.connect(close)
-	root.add_child(close_button)
+	holder.add_child(Style.spacer(Style.GAP_S))
+	holder.add_child(Style.section("Comfort"))
+	camera_motion_slider = Style.slider(0.0, 1.0, 0.05)
+	camera_motion_value = Style.value_label()
+	camera_motion_slider.value_changed.connect(func(value: float) -> void:
+		GameSettings.camera_motion = value
+		GameSettings.save_settings()
+		_show_camera_motion_value(value))
+	Style.slider_row(holder, "Camera motion", camera_motion_slider, camera_motion_value, "Head bob and sway while walking and driving.")
+	ui_scale_slider = Style.slider(1.0, 1.8, 0.05)
+	ui_scale_value = Style.value_label()
+	# Applied when let go, so the menu doesn't resize under the mouse.
+	ui_scale_slider.value_changed.connect(func(value: float) -> void: ui_scale_value.text = _percent_size(value))
+	ui_scale_slider.drag_ended.connect(func(_changed: bool) -> void: GameSettings.set_ui_scale(ui_scale_slider.value))
+	ui_scale_slider.focus_exited.connect(func() -> void:
+		if not is_equal_approx(GameSettings.ui_scale, ui_scale_slider.value):
+			GameSettings.set_ui_scale(ui_scale_slider.value))
+	Style.slider_row(holder, "Interface size", ui_scale_slider, ui_scale_value)
+	scares_check = Style.toggle(false, func(on: bool) -> void: GameSettings.set_option("reduce_scares", on))
+	Style.row(holder, "Reduce scares", scares_check, "Fewer sudden loud sounds and jump scares.")
 
 
-func _add_tab(row: HBoxContainer, group: ButtonGroup, text: String) -> Button:
-	var button := Style.button(text, 17)
-	button.toggle_mode = true
-	button.button_group = group
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(button)
-	return button
-
-
-func _add_row(root: VBoxContainer, label_text: String, control: Control) -> void:
-	var row := HBoxContainer.new()
-	row.custom_minimum_size = Vector2(0, 32)
-	root.add_child(row)
-
-	var label := Label.new()
-	label.text = label_text
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 16)
-	row.add_child(label)
-
-	control.custom_minimum_size = Vector2(145, 32)
-	if control is Button:
-		(control as Button).add_theme_font_size_override("font_size", 15)
-	row.add_child(control)
-
-
-func _add_slider_row(root: VBoxContainer, label_text: String, slider: HSlider, value_label: Label) -> void:
-	var row := HBoxContainer.new()
-	row.custom_minimum_size = Vector2(0, 32)
-	root.add_child(row)
-
-	var label := Label.new()
-	label.text = label_text
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 16)
-	row.add_child(label)
-
-	slider.custom_minimum_size = Vector2(105, 32)
-	row.add_child(slider)
-	value_label.add_theme_font_size_override("font_size", 15)
-	row.add_child(value_label)
-
-
-func _create_slider(minimum: float, maximum: float, step: float) -> HSlider:
-	var slider := HSlider.new()
-	slider.min_value = minimum
-	slider.max_value = maximum
-	slider.step = step
-	return slider
+func _sync_preset() -> void:
+	## Shows which preset the current settings match, or Custom.
+	var current := [GameSettings.render_scale, GameSettings.shadow_quality, GameSettings.lighting_quality,
+		GameSettings.low_end, GameSettings.draw_distance, GameSettings.headlight_shadows]
+	var presets := [
+		[0.5, 0, 0, true, 0, false], [0.67, 1, 0, true, 0, false], [0.75, 1, 1, false, 1, true],
+		[1.0, 2, 2, false, 1, true], [1.0, 3, 2, false, 2, true],
+	]
+	var match_index := 0
+	for index in presets.size():
+		var preset: Array = presets[index]
+		if is_equal_approx(preset[0], current[0]) and preset.slice(1) == current.slice(1):
+			match_index = index + 1
+	preset_option.select(match_index)
 
 
 func _sync_from_settings() -> void:
 	if fps_option == null:
 		return
-
 	player_name_edit.text = GameSettings.player_name
-	var fps_index := maxi(GameSettings.FPS_OPTIONS.find(GameSettings.fps_cap), 0)
-	fps_option.select(fps_index)
-	var render_index := maxi(GameSettings.RENDER_SCALE_OPTIONS.find(GameSettings.render_scale), 0)
-	render_scale_option.select(render_index)
+	fps_option.select(maxi(GameSettings.FPS_OPTIONS.find(GameSettings.fps_cap), 0))
+	render_scale_option.select(maxi(GameSettings.RENDER_SCALE_OPTIONS.find(GameSettings.render_scale), 0))
 	shadow_option.select(GameSettings.shadow_quality)
 	lighting_option.select(GameSettings.lighting_quality)
-	vsync_check.button_pressed = GameSettings.vsync_enabled
-	fullscreen_check.button_pressed = GameSettings.fullscreen_enabled
-	headlight_shadows_check.button_pressed = GameSettings.headlight_shadows
-	volume_slider.value = GameSettings.master_volume
-	_update_volume_label()
-	sensitivity_slider.value = GameSettings.mouse_sensitivity_scale
-	_update_sensitivity_label()
+	draw_option.select(GameSettings.draw_distance)
+	Style.set_toggle(vsync_check, GameSettings.vsync_enabled)
+	Style.set_toggle(fullscreen_check, GameSettings.fullscreen_enabled)
+	Style.set_toggle(headlight_shadows_check, GameSettings.headlight_shadows)
+	Style.set_toggle(show_fps_check, GameSettings.show_fps)
+	Style.set_toggle(low_end_check, GameSettings.low_end)
+	Style.set_toggle(subtitles_check, GameSettings.subtitles)
+	Style.set_toggle(scares_check, GameSettings.reduce_scares)
+	volume_slider.set_value_no_signal(GameSettings.master_volume)
+	volume_value.text = "%d%%" % roundi(GameSettings.master_volume * 100.0)
+	voice_slider.set_value_no_signal(GameSettings.voice_volume)
+	voice_value.text = "%d%%" % roundi(GameSettings.voice_volume * 100.0)
+	sensitivity_slider.set_value_no_signal(GameSettings.mouse_sensitivity_scale)
+	sensitivity_value.text = "%.2f×" % GameSettings.mouse_sensitivity_scale
+	fov_slider.set_value_no_signal(GameSettings.fov)
+	fov_value.text = "%d°" % roundi(GameSettings.fov)
 	camera_motion_slider.set_value_no_signal(GameSettings.camera_motion)
 	_show_camera_motion_value(GameSettings.camera_motion)
 	ui_scale_slider.set_value_no_signal(GameSettings.ui_scale)
-	_update_ui_scale_label()
-	show_fps_check.button_pressed = GameSettings.show_fps
-	low_end_check.set_pressed_no_signal(GameSettings.low_end)
-	draw_option.select(GameSettings.draw_distance)
-	voice_slider.set_value_no_signal(GameSettings.voice_volume)
-	voice_value.text = "%d%%" % roundi(GameSettings.voice_volume * 100.0)
-	subtitles_check.set_pressed_no_signal(GameSettings.subtitles)
-	fov_slider.set_value_no_signal(GameSettings.fov)
-	fov_value.text = "%d°" % roundi(GameSettings.fov)
-	scares_check.set_pressed_no_signal(GameSettings.reduce_scares)
-
-
-func _on_fps_selected(index: int) -> void:
-	GameSettings.set_fps_cap(GameSettings.FPS_OPTIONS[index])
-
-
-func _on_render_scale_selected(index: int) -> void:
-	GameSettings.set_render_scale(GameSettings.RENDER_SCALE_OPTIONS[index])
-
-
-func _on_shadow_selected(index: int) -> void:
-	GameSettings.set_shadow_quality(index)
-
-
-func _on_lighting_selected(index: int) -> void:
-	GameSettings.set_lighting_quality(index)
-
-
-func _on_vsync_toggled(enabled: bool) -> void:
-	GameSettings.set_vsync_enabled(enabled)
-
-
-func _on_fullscreen_toggled(enabled: bool) -> void:
-	GameSettings.set_fullscreen_enabled(enabled)
-
-
-func _on_headlight_shadows_toggled(enabled: bool) -> void:
-	GameSettings.set_headlight_shadows(enabled)
-
-
-func _on_volume_changed(value: float) -> void:
-	GameSettings.set_master_volume(value)
-	_update_volume_label()
-
-
-func _on_sensitivity_changed(value: float) -> void:
-	GameSettings.set_mouse_sensitivity_scale(value)
-	_update_sensitivity_label()
-
-
-func _on_ui_scale_changed(value: float) -> void:
-	GameSettings.set_ui_scale(value)
-	_update_ui_scale_label()
-
-
-func _on_show_fps_toggled(enabled: bool) -> void:
-	GameSettings.set_show_fps(enabled)
-
-
-func _update_volume_label() -> void:
-	volume_value.text = "%d%%" % roundi(GameSettings.master_volume * 100.0)
-
-
-func _update_sensitivity_label() -> void:
-	sensitivity_value.text = "%.2fx" % GameSettings.mouse_sensitivity_scale
-
-
-func _update_ui_scale_label() -> void:
-	ui_scale_value.text = "%.2fx" % GameSettings.ui_scale
+	ui_scale_value.text = _percent_size(GameSettings.ui_scale)
+	_sync_preset()
 
 
 func _save_player_name() -> void:
+	if player_name_edit == null:
+		return
 	GameSettings.set_player_name(player_name_edit.text)
 	player_name_edit.text = GameSettings.player_name
 
 
-func _on_camera_motion_changed(value: float) -> void:
-	GameSettings.camera_motion = value
-	GameSettings.save_settings()
-	_show_camera_motion_value(value)
+func _percent_size(value: float) -> String:
+	return "%d%%" % roundi(value / Style.UI_SCALE_NORMAL * 100.0)
 
 
 func _show_camera_motion_value(value: float) -> void:

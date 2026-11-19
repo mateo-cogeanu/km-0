@@ -57,7 +57,45 @@ func _ready() -> void:
 	# Select the local view after all player and car cameras have entered the viewport.
 	var local_player := get_node(str(multiplayer.get_unique_id()))
 	local_player.camera.make_current()
+	# Nobody moves and nothing is handed out until every machine has loaded:
+	# anything the host sent before a slower machine was here would be lost.
+	local_player.ending_locked = true
+	local_player.tip_override = "Waiting for everyone to arrive…"
+	local_player.tip_time = 60.0
+	if multiplayer.is_server():
+		NetworkManager.arrived_late.connect(_catch_up)
+		var waited := 0.0
+		while not NetworkManager.all_arrived() and waited < ARRIVAL_TIMEOUT:
+			await get_tree().create_timer(0.25).timeout
+			waited += 0.25
+		_start_trip.rpc()
+	else:
+		NetworkManager.report_arrived()
+
+
+const ARRIVAL_TIMEOUT := 45.0
+var started := false
+
+
+@rpc("authority", "call_local", "reliable")
+func _start_trip() -> void:
+	if started:
+		return
+	started = true
+	NetworkManager.trip_started = true
+	var local_player := get_node_or_null(str(multiplayer.get_unique_id()))
+	if local_player:
+		local_player.ending_locked = false
+		local_player.tip_override = ""
+		local_player.tip_time = 0.0
 	$InfiniteRoad.begin_streaming()
+
+
+func _catch_up(peer_id: int) -> void:
+	## Someone loaded after the trip had already started: let them in and
+	## hand them the stations already out on the road.
+	_start_trip.rpc_id(peer_id)
+	$InfiniteRoad.replay_stops_to(peer_id)
 
 
 func _garage_car_transform(garage: Node3D, index: int) -> Transform3D:

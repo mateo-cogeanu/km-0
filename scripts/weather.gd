@@ -69,7 +69,17 @@ func _ready() -> void:
 
 
 func start_storm(seconds: float) -> void:
-	## A storm right now, for when the story wants one.
+	## A storm right now, for when the story wants one. In co-op only the host
+	## brings storms, and everyone gets the same one.
+	if NetworkManager.is_online():
+		if multiplayer.is_server():
+			_storm.rpc(seconds)
+		return
+	_storm(seconds)
+
+
+@rpc("authority", "call_local", "reliable")
+func _storm(seconds: float) -> void:
 	if left > 0.0:
 		left = maxf(left, seconds)
 		length = maxf(length, seconds)
@@ -95,10 +105,9 @@ func _process(delta: float) -> void:
 	else:
 		level = 0.0
 		wait -= delta
-		if wait <= 0.0 and not player.ending_locked:
-			length = randf_range(150.0, 240.0)
-			left = length
-			wait = randf_range(900.0, 1800.0)
+		var decides := not NetworkManager.is_online() or multiplayer.is_server()
+		if wait <= 0.0 and decides and not player.ending_locked:
+			start_storm(randf_range(150.0, 240.0))
 	if player.ending_locked:
 		level = move_toward(level, 0.0, delta * 0.5)
 	cycle.storm = level

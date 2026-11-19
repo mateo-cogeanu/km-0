@@ -391,11 +391,25 @@ static func mark_heard(which: int) -> void:
 	## Remembered with the trip: the road ends only after it has been listened to.
 	var story: Dictionary = preload("res://scripts/road_end_house.gd").story
 	var heard: Dictionary = story.get("heard", {})
+	if heard.has(str(which)):
+		return
 	heard[str(which)] = true
 	story["heard"] = heard
+	# In co-op the host decides when the road ends (told once per broadcast).
+	NetworkManager.report_heard(which)
+
+
+static var carrier_cache: AudioStreamWAV
 
 
 func _carrier_sound() -> AudioStreamWAV:
+	## Made once and shared by every radio: building it is slow in script.
+	if carrier_cache == null:
+		carrier_cache = _make_carrier()
+	return carrier_cache
+
+
+static func _make_carrier() -> AudioStreamWAV:
 	var samples := PackedByteArray()
 	var rate := 12000
 	samples.resize(rate * 3 * 2)

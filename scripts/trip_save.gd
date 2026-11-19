@@ -2,6 +2,7 @@ extends Node
 
 const RoadEndHouse := preload("res://scripts/road_end_house.gd")
 const StoryNotes := preload("res://scripts/story_notes.gd")
+const LootBox := preload("res://scripts/loot_container.gd")
 
 const SAVE_PATH := "user://trip.save"
 const SAVE_VERSION := 1
@@ -18,15 +19,30 @@ func _ready() -> void:
 	get_tree().auto_accept_quit = false
 
 
+## When saving failed on closing the window: closing it again soon after
+## quits without saving, so a full or read-only disk can never trap you.
+var _close_failed_at := -100.0
+
+
 func _notification(what: int) -> void:
 	if what != NOTIFICATION_WM_CLOSE_REQUEST:
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _close_failed_at < 20.0:
+		quit_without_saving()
 		return
 	if save_trip():
 		get_tree().quit()
 	else:
+		_close_failed_at = now
 		var world := _world()
 		if world:
 			world.get_node("PauseMenu").show_save_error()
+
+
+func quit_without_saving() -> void:
+	## For the save-error dialog's "Quit without saving" (and a second close).
+	get_tree().quit()
 
 
 func _process(delta: float) -> void:
@@ -45,7 +61,17 @@ func has_trip() -> bool:
 func start_trip(resume: bool) -> void:
 	continue_requested = resume
 	elapsed = 0
+	if not resume:
+		clear_story()
 	get_tree().change_scene_to_file(MAIN)
+
+
+static func clear_story() -> void:
+	## A new trip starts the story from the beginning: nothing remembered from
+	## an earlier trip played in this same session (Continue restores its own).
+	RoadEndHouse.story = {}
+	RoadEndHouse.seen = false
+	StoryNotes.read.clear()
 
 
 func _world() -> Node:
@@ -283,6 +309,12 @@ func restore_trip(world: Node) -> void:
 			destination[0].install_part(body, destination[1])
 
 	var objects: Dictionary = data["objects"]
+	# The County car's can is made only when her stretch of road is first
+	# built, which on a restore comes after this: make it now if it was saved.
+	if objects.has("InfiniteRoad/CountyCan") and road.get_node_or_null("CountyCan") == null:
+		var can := road.FUEL.instantiate() as RigidBody3D
+		can.name = "CountyCan"
+		road.add_child(can)
 	var bodies := get_tree().get_nodes_in_group("vehicle_loose_part")
 	bodies.append_array(get_tree().get_nodes_in_group("fuel_canister"))
 	bodies.append_array(get_tree().get_nodes_in_group("spray_can"))
@@ -317,6 +349,11 @@ func restore_trip(world: Node) -> void:
 			body.collision_mask = 17
 		if saved.has("in_container") or body.get_meta("in_container", false):
 			body.set_meta("in_container", saved.get("in_container", false))
+		# Taken out of a cooler or toolbox before the save: back in the world,
+		# visible and solid (the box tucks everything away when it is filled).
+		if not saved.get("in_container", false) and body.has_meta("loot_layers"):
+			LootBox.untuck(body)
+			body.freeze = false
 		if saved.get("stowed", false):
 			player.restore_stowed(body)
 		if saved.has("welded"):

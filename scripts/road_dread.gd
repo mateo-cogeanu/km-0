@@ -148,7 +148,8 @@ func _inside_building(player: Node3D) -> bool:
 
 
 func way_out_open() -> bool:
-	if RoadEndHouse.seen or RoadEndHouse.story.get("caught", false):
+	# Closed once you've been caught, or once you've already got away.
+	if RoadEndHouse.seen or RoadEndHouse.story.get("caught", false) or RoadEndHouse.story.get("escaped", false):
 		return false
 	for page: String in PAGES:
 		if not Notes.read.has(page):
@@ -161,6 +162,12 @@ func _way_out(player: Node3D) -> void:
 	## going, whatever you hear behind you.
 	if escaping or caught or not way_out_open():
 		return
+	# What already happened on the way out is kept with the trip, so Continue
+	# doesn't make the calls, the storm and the breakdown happen again.
+	var story := RoadEndHouse.story
+	calls_made = maxi(calls_made, int(story.get("way_calls", 0)))
+	stormed = stormed or bool(story.get("way_stormed", false))
+	broke_down = broke_down or bool(story.get("way_broke_down", false))
 	var out := player.global_position.z
 	if calls_made < CALLS.size() and out > CALLS[calls_made][0]:
 		if caller == null:
@@ -177,8 +184,10 @@ func _way_out(player: Node3D) -> void:
 		caller.global_position = player.global_position + Vector3(randf_range(-8.0, 8.0), 1.0, -24.0)
 		caller.play()
 		calls_made += 1
+		story["way_calls"] = calls_made
 	if out > STORM_AT and not stormed:
 		stormed = true
+		story["way_stormed"] = true
 		var weather := get_parent().get_node_or_null("Weather") if get_parent() else null
 		if weather and weather.has_method("start_storm"):
 			weather.start_storm(220.0)
@@ -194,12 +203,11 @@ func _way_out(player: Node3D) -> void:
 func _break_down(player: Node3D) -> void:
 	## Halfway out, a front wheel comes off. On foot, it simply starts coming.
 	broke_down = true
+	RoadEndHouse.story["way_broke_down"] = true
 	var car: Node3D = player.active_vehicle if is_instance_valid(player.active_vehicle) else null
-	if car and "removable_parts" in car and car.removable_parts.has("wheel_fl"):
-		var area: Area3D = car.removable_parts["wheel_fl"].get("area")
-		var wheel: RigidBody3D = car.remove_installed_part(area, true) if area else null
-		if wheel:
-			wheel.apply_central_impulse(car.global_basis.x * -6.0 + Vector3.UP * 2.0)
+	if car and "removable_parts" in car and car.removable_parts.has("wheel_fl") and car.has_method("request_break_off"):
+		# The host takes it off, so it comes off on every screen.
+		car.request_break_off("wheel_fl", car.global_basis.x * -6.0 + Vector3.UP * 2.0)
 		player.tip_override = "A wheel has come off. Get out and put it back on. Quickly."
 		player.tip_time = 8.0
 	_start_chase(player)

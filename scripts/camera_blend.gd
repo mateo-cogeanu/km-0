@@ -14,6 +14,12 @@ static func between(from: Camera3D, to: Camera3D, length := 0.4) -> void:
 		return
 	if GameSettings.camera_motion < 0.05:
 		return
+	# A blend still running (in and straight back out again) gives way: it
+	# would otherwise finish later and cut to its own, now stale, target.
+	for old in to.get_tree().current_scene.get_children():
+		if old is Camera3D and old.name.begins_with("CameraBlend") and old.get_script() == (load("res://scripts/camera_blend.gd") as GDScript):
+			old.target = null
+			old.queue_free()
 	var blend: Camera3D = (load("res://scripts/camera_blend.gd") as GDScript).new()
 	blend.name = "CameraBlend"
 	blend.from_transform = from.get_global_transform_interpolated()

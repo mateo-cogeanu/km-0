@@ -199,6 +199,10 @@ func set_card(lines: Array, button: Control) -> void:
 		words.add_child(label)
 	if button:
 		button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		if button is Button:
+			# Centred, wide enough to hit, and focused so Enter or a pad works.
+			(button as Button).alignment = HORIZONTAL_ALIGNMENT_CENTER
+			button.custom_minimum_size.x = maxf(button.custom_minimum_size.x, 220.0 * GameSettings.ui_scale)
 		words.add_child(button)
 
 

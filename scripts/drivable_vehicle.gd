@@ -52,6 +52,8 @@ const COOLANT_RESERVOIR_MODEL := preload("res://assets/vehicles/parts/coolantres
 @export var throttle_fuel_burn_rate: float = 0.11
 @export var part_snap_distance: float = 1.35
 @export var start_with_random_body_color: bool = true
+## How many times each slot's part has come off, for naming loose parts.
+var loose_serials := {}
 ## How long the car has stood in the sun (0 new, past 0.5 a rusting wreck).
 @export_range(0.0, 0.5) var car_wear := 0.42
 const BODY_COLORS: Array[Color] = [
@@ -384,12 +386,40 @@ func _read_driver_controls() -> Vector4:
 	var pause_menu := world.get_node_or_null("PauseMenu") if world else null
 	if pause_menu and pause_menu.gameplay_ui_open():
 		return Vector4.ZERO
+	# Asleep (or blacked out) at the wheel: foot off, handbrake on.
+	var local := get_tree().get_first_node_in_group("local_player")
+	if local and local.get("vitals") and local.vitals.passing_out:
+		return Vector4(0, 0, 0, 1)
 	return Vector4(
 		_action_or_keys("Throttle", [KEY_W, KEY_UP]),
 		_action_or_keys("Brakes", [KEY_S, KEY_DOWN]),
 		_action_or_keys("SteerLeft", [KEY_A, KEY_LEFT]) - _action_or_keys("SteerRight", [KEY_D, KEY_RIGHT]),
 		_action_or_keys("Handbrake", [KEY_SPACE])
 	)
+
+
+func request_break_off(part_type: String, push: Vector3) -> void:
+	## Something tears a part off (a wheel, in the chase): the host removes it
+	## so every screen loses the same part, whoever is driving.
+	if not NetworkManager.is_online() or multiplayer.is_server():
+		_break_off(part_type, push)
+	else:
+		_request_break_off.rpc_id(1, part_type, push)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_break_off(part_type: String, push: Vector3) -> void:
+	if multiplayer.is_server() and push.is_finite() and push.length() < 20.0:
+		_break_off(part_type, push)
+
+
+func _break_off(part_type: String, push: Vector3) -> void:
+	if not removable_parts.has(part_type):
+		return
+	var area: Area3D = removable_parts[part_type].get("area")
+	var part: RigidBody3D = remove_installed_part(area, true) if area else null
+	if part:
+		part.apply_central_impulse(push)
 
 
 func request_work(action: String, target: Variant, value: Variant = null) -> void:
@@ -1066,6 +1096,13 @@ func set_headlights_enabled(enabled: bool) -> void:
 			continue
 		light.visible = true
 		light.light_energy = float(light.get_meta("headlight_energy", 32.0)) if headlights_enabled else 0.0
+		light.shadow_enabled = _headlight_shadows()
+
+
+func _headlight_shadows() -> bool:
+	## The Headlight shadows setting, for lights that are on (an unlit lamp's
+	## shadow costs as much as a lit one's), never on older-computer mode.
+	return headlights_enabled and GameSettings.headlight_shadows and not GameSettings.low_end
 
 
 func toggle_headlights() -> void:
@@ -1074,10 +1111,13 @@ func toggle_headlights() -> void:
 
 
 func _apply_graphics_quality() -> void:
+	# The view from the car follows the field-of-view setting too.
+	if driver_camera:
+		driver_camera.fov = GameSettings.fov
 	for light in headlight_nodes:
 		if light == null:
 			continue
-		light.shadow_enabled = false
+		light.shadow_enabled = _headlight_shadows()
 		if light is SpotLight3D:
 			var spot := light as SpotLight3D
 			spot.set_meta("headlight_energy", 24.0)
@@ -1557,7 +1597,10 @@ func _detach_part(part_type: String) -> RigidBody3D:
 	var body := RigidBody3D.new()
 	body.collision_layer = 16
 	body.collision_mask = 17
-	body.name = "%s_%sLoose" % [name, data.get("name", part_type)]
+	# Named by where the car is and how many times this slot has come off,
+	# not by Godot's per-process numbering, so every peer names it the same.
+	loose_serials[part_type] = int(loose_serials.get(part_type, 0)) + 1
+	body.name = "%s_%s_%sLoose%d" % [get_parent().name if get_parent() else "", name, data.get("name", part_type), loose_serials[part_type]]
 	body.mass = _loose_part_mass(part_type)
 	body.contact_monitor = true
 	body.max_contacts_reported = 8

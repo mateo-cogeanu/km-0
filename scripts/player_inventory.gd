@@ -21,25 +21,21 @@ func setup(layer: CanvasLayer, titles: Callable) -> void:
 	title_for = titles
 	screen = ColorRect.new()
 	screen.name = "Inventory"
-	(screen as ColorRect).color = Color(0, 0, 0, 0.45)
+	(screen as ColorRect).color = Color(0, 0, 0, 0.55)
 	screen.theme = Style.make_theme()
 	layer.add_child(screen)
 	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var card := PanelContainer.new()
 	screen.add_child(card)
 	card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	card.custom_minimum_size = Vector2(380, 0)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
+	card.custom_minimum_size = Vector2(420, 0)
+	var box := Style.vbox(Style.GAP_M)
 	card.add_child(box)
-	var heading := Style.label("Inventory", 24)
-	box.add_child(heading)
-	list = VBoxContainer.new()
-	list.add_theme_constant_override("separation", 6)
+	box.add_child(Style.heading("Your pack", Style.H2 + 6))
+	list = Style.vbox(Style.GAP_S)
 	box.add_child(list)
-	var hint := Style.label("Q or Esc to close", 13)
-	hint.modulate = Color(1, 1, 1, 0.6)
-	box.add_child(hint)
+	box.add_child(Style.divider())
+	box.add_child(Style.caption("Q or Esc to close"))
 	screen.hide()
 
 
@@ -71,7 +67,6 @@ func remove_at(index: int) -> RigidBody3D:
 func open() -> void:
 	_refresh()
 	var card := screen.get_child(0) as Control
-	card.scale = Vector2.ONE * GameSettings.ui_scale * 1.25
 	screen.show()
 	card.size = Vector2.ZERO
 	_center.call_deferred(card)
@@ -79,38 +74,56 @@ func open() -> void:
 
 
 func _center(card: Control) -> void:
-	card.size = card.get_combined_minimum_size()
-	card.pivot_offset = card.size * 0.5
-	card.position = (screen.size - card.size) * 0.5
+	# Same size rules as every menu, and always inside the window.
+	Style.fit_panel(card, screen.size, false)
+	var first := _first_button()
+	if first:
+		first.grab_focus()
+
+
+func _first_button() -> Button:
+	for button: Button in list.find_children("*", "Button", true, false):
+		if button.is_visible_in_tree() and not button.disabled:
+			return button
+	return null
 
 
 func close() -> void:
 	screen.hide()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Not while the pause card is up: it needs the pointer.
+	var player := screen.get_tree().get_first_node_in_group("local_player")
+	if player and player.has_method("capture_mouse_if_playing"):
+		player.capture_mouse_if_playing()
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _refresh() -> void:
 	if list == null:
 		return
 	for child in list.get_children():
+		list.remove_child(child)
 		child.queue_free()
-	var torch := Style.label("Flashlight  (F to switch on and off)", 16)
+	var torch := Style.hbox(Style.GAP_S)
 	list.add_child(torch)
+	var torch_name := Style.label("Flashlight")
+	torch_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	torch.add_child(torch_name)
+	torch.add_child(Style.label("F  on / off", Style.SMALL, Style.FAINT))
 	if items.is_empty():
-		var empty := Style.label("Nothing else. Hold something and press Q to put it away.", 14)
-		empty.autowrap_mode = TextServer.AUTOWRAP_WORD
-		empty.modulate = Color(1, 1, 1, 0.7)
-		list.add_child(empty)
+		list.add_child(Style.caption("Nothing else yet. Hold something and press Q to put it in your pack."))
 	for i in items.size():
 		var body := items[i]
 		if not is_instance_valid(body):
 			continue
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
+		var row := Style.hbox(Style.GAP_S)
+		row.custom_minimum_size.y = Style.ROW_HEIGHT
 		list.add_child(row)
 		var title := String(title_for.call(body))
-		var name_label := Style.label(title.left(1).to_upper() + title.substr(1), 16)
+		var name_label := Style.label(title.left(1).to_upper() + title.substr(1))
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		row.add_child(name_label)
 		var use := ""
 		if body.is_in_group("food"):
@@ -120,15 +133,19 @@ func _refresh() -> void:
 		elif body.is_in_group("battery_pack"):
 			use = "Load"
 		if not use.is_empty():
-			var eat := Style.button(use, 15)
+			var eat := Style.button(use)
+			eat.alignment = HORIZONTAL_ALIGNMENT_CENTER
+			eat.custom_minimum_size = Vector2(90, Style.ROW_HEIGHT - 4)
 			eat.pressed.connect(func() -> void: eat_requested.emit(i))
 			row.add_child(eat)
-		var take := Style.button("Take", 15)
+		var take := Style.button("Take out")
+		take.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		take.custom_minimum_size = Vector2(110, Style.ROW_HEIGHT - 4)
 		take.pressed.connect(func() -> void: take_requested.emit(i))
 		row.add_child(take)
-	var count := Style.label("%d / %d" % [items.size(), CAPACITY], 13)
-	count.modulate = Color(1, 1, 1, 0.6)
-	list.add_child(count)
+	list.add_child(Style.label("%d of %d slots used" % [items.size(), CAPACITY], Style.SMALL, Style.FAINT))
+	if screen != null and screen.visible:
+		_center.call_deferred(screen.get_child(0) as Control)
 
 
 static func _longest_side(body: Node3D) -> float:
