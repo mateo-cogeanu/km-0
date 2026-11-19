@@ -19,9 +19,9 @@ const WAGON := 2
 const DOORS := {"FL_Door": [-1, true], "FR_Door": [1, true], "RL_Door": [-1, false], "RR_Door": [1, false]}
 
 var paint: StandardMaterial3D
-var trim := Shapes.material(Color("#303331"), 0.12, 0.78)
-var rubber := Shapes.material(Color("#222323"), 0.0, 0.92)
-var alloy := Shapes.material(Color("#a3a8a4"), 0.68, 0.44)
+var trim := Shapes.material(Color("#2f302d"), 0.06, 0.86)
+var rubber := Shapes.material(Color("#2a2a28"), 0.0, 0.93)
+var alloy := Shapes.material(Color("#7f827d"), 0.55, 0.58)
 var glass: StandardMaterial3D
 var headlamp := Shapes.material(Color("#d9d5bb"), 0.25, 0.29)
 var amber := Shapes.material(Color("#b86c2b"), 0.22, 0.37)
@@ -38,9 +38,8 @@ var wear := 0.2
 
 func _init(color := Color("#728b85"), age := 0.2) -> void:
 	wear = age
-	paint = Shapes.material(color, 0.24, 0.47)
-	paint.clearcoat_enabled = true
-	paint.clearcoat_roughness = 0.48
+	# Old single-stage paint: no metal flake, no clear coat, gone flat in the sun.
+	paint = Shapes.material(color, 0.04, lerpf(0.5, 0.7, wear))
 	Looks.age_paint(paint, wear)
 	if wear > 0.5:
 		paint.clearcoat_enabled = false
@@ -224,7 +223,8 @@ func _bumpers(body: Node3D, style: int) -> void:
 	var nose := Vector2(rows.front()[1], rows.front()[0])
 	var rear := Vector2(rows.back()[1], rows.back()[0])
 	var bumper_top: float = [0.475, 0.49, 0.54][style]
-	var bumper_material := trim if style != WAGON else Shapes.material(Color("#454a48"), 0.12, 0.73)
+	# Rubbing strip and bumpers gone grey and dusty in the sun.
+	var bumper_material := Shapes.material(Color("#3a3935") if style != WAGON else Color("#4a4c48"), 0.05, 0.9)
 	var front_bumper := _skin(body, "FrontBumper", [[nose.y - 0.078, nose.x - 0.06, nose.x - 0.005, 0.285, bumper_top],
 		[nose.y - 0.015, nose.x - 0.015, nose.x + 0.035, 0.25, bumper_top],
 		[nose.y + 0.12, nose.x, nose.x + 0.049, 0.25, bumper_top - 0.012]], bumper_material)

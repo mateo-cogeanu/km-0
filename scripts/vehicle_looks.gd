@@ -37,12 +37,13 @@ static func _ramp(points: Array) -> Gradient:
 	return gradient
 
 
-static func _grime(wear: float) -> ImageTexture:
-	## Dust (or, on wrecks, rust and bare primer) for a body panel, in panel UV2
-	## space: u runs along the car, v from the roof (0) down to the sills (1).
-	## The alpha says where it lies: mostly low down and in streaks under the
-	## belt line; on wrecks it climbs higher. (The detail mask itself would be
-	## read through UV1, so the mask lives here.)
+static func grime(wear: float) -> ImageTexture:
+	## Age for a body panel, in panel UV2 space: u runs along the car, v from
+	## the roof (0) down to the sills (1). The alpha says where it lies: a
+	## chalky sun fade over the upper body, dust thickening low down with runs
+	## under the belt line, and stone chips along the sills and arches. On
+	## wrecks it is rust and bare primer instead. (The detail mask itself would
+	## be read through UV1, so the mask lives here.)
 	var key := "grime_%d" % roundi(wear * 10.0)
 	if textures.has(key):
 		return textures[key]
@@ -51,25 +52,41 @@ static func _grime(wear: float) -> ImageTexture:
 	noise.frequency = 0.035
 	noise.fractal_octaves = 4
 	noise.seed = 21
+	var chips := FastNoiseLite.new()
+	chips.noise_type = FastNoiseLite.TYPE_CELLULAR
+	chips.cellular_return_type = FastNoiseLite.RETURN_CELL_VALUE
+	chips.frequency = 0.16
+	chips.seed = 5
 	var rusty := wear > 0.5
 	var image := Image.create(256, 256, false, Image.FORMAT_RGBA8)
 	var reach := lerpf(0.72, 0.35, wear)
+	var sun := clampf(wear * 1.35, 0.0, 0.7)
+	var chalk := Color("#c4bcab")
 	for y in 256:
 		var v := y / 255.0
 		var low := smoothstep(reach, 1.0, v)
+		var high := 1.0 - smoothstep(0.38, 0.66, v)
 		for x in 256:
 			var n := noise.get_noise_2d(x, y * 0.35) * 0.5 + 0.5
 			var grain := noise.get_noise_2d(x * 4.0 + 300.0, y * 4.0) * 0.5 + 0.5
 			var streak := noise.get_noise_2d(x * 3.0, 40.0) * 0.5 + 0.5
-			var amount := clampf(low * (0.55 + 0.6 * n) + smoothstep(0.62, 0.9, streak) * smoothstep(0.4, 0.8, v) * 0.35 * wear, 0.0, 1.0)
-			if v < 0.04:
-				amount = 0.0
+			var dust := clampf(low * (0.55 + 0.6 * n) + smoothstep(0.62, 0.9, streak) * smoothstep(0.4, 0.8, v) * 0.35 * wear, 0.0, 1.0)
 			var color: Color
 			if rusty:
 				color = Color("#5e3420").lerp(Color("#8a5233"), grain).lerp(Color("#a8987a"), smoothstep(0.55, 0.8, n))
+				color.a = dust
 			else:
-				color = Color("#a08a68").lerp(Color("#bba783"), grain)
-			color.a = amount
+				var mottle := noise.get_noise_2d(x * 3.5 + 90.0, y * 2.5) * 0.5 + 0.5
+				var fade := high * sun * (0.6 + 0.4 * smoothstep(0.3, 0.75, mottle))
+				var dirt := Color("#9a8564").lerp(Color("#b9a582"), grain)
+				color = chalk.lerp(dirt, smoothstep(0.0, 0.25, dust))
+				color.a = maxf(fade, dust * (0.6 + 0.4 * wear))
+				# Stone chips: small dark flecks of primer and surface rust low on the body.
+				var chip := chips.get_noise_2d(x, y) * 0.5 + 0.5
+				var fleck := noise.get_noise_2d(x * 9.0, y * 9.0 + 500.0) * 0.5 + 0.5
+				if v > 0.6 and chip > 1.0 - 0.07 * wear * smoothstep(0.6, 0.95, v) and fleck > 0.45:
+					color = Color("#4b3527").lerp(Color("#7a4a2c"), grain)
+					color.a = 0.95
 			image.set_pixel(x, y, color)
 	image.generate_mipmaps()
 	var texture := ImageTexture.create_from_image(image)
@@ -83,13 +100,13 @@ static func age_paint(paint: StandardMaterial3D, wear: float) -> void:
 	var w := clampf(wear, 0.0, 1.0)
 	paint.uv1_triplanar = true
 	paint.uv1_scale = Vector3.ONE * 0.45
-	var fade := lerpf(0.93, 0.72, w)
-	paint.albedo_texture = _noise("fade_%d" % roundi(w * 10.0), 0.01, _ramp([[0.0, Color(fade, fade, fade * 0.98)], [1.0, Color.WHITE]]), 11)
-	paint.roughness_texture = _noise("gloss", 0.015, _ramp([[0.0, Color(0.75, 0.75, 0.75)], [1.0, Color.WHITE]]), 12)
+	var fade := lerpf(0.94, 0.8, w)
+	paint.albedo_texture = _noise("fade_%d" % roundi(w * 10.0), 0.03, _ramp([[0.0, Color(fade, fade, fade * 0.97)], [0.55, Color(0.97, 0.97, 0.96)], [1.0, Color.WHITE]]), 11)
+	paint.roughness_texture = _noise("gloss", 0.02, _ramp([[0.0, Color(0.7, 0.7, 0.7)], [1.0, Color.WHITE]]), 12)
 	paint.detail_enabled = true
 	paint.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MIX
 	paint.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
-	paint.detail_albedo = _grime(w)
+	paint.detail_albedo = grime(w)
 
 
 static func material(title: String, wear := 0.0) -> Material:
@@ -100,23 +117,22 @@ static func material(title: String, wear := 0.0) -> Material:
 	var rusty := wear > 0.5
 	match title:
 		"Rubber", "Tread":
-			var rubber := StandardMaterial3D.new()
-			rubber.albedo_color = Color(0.05, 0.05, 0.048) if title == "Rubber" else Color(0.035, 0.035, 0.034)
+			# Sun-greyed rubber with road dust in it, never ink black.
+			var tone := Color(0.085, 0.082, 0.078) if title == "Rubber" else Color(0.06, 0.058, 0.055)
 			if rusty:
-				rubber.albedo_color = rubber.albedo_color.lerp(Color("#8d806a"), 0.25)
-			rubber.roughness = 0.9
-			rubber.cull_mode = BaseMaterial3D.CULL_DISABLED
-			made = rubber
+				tone = tone.lerp(Color("#8d806a"), 0.25)
+			made = Desert.weathered(tone, {"roughness_base": 0.95, "bleach": 0.15, "dust": 0.45, "streaks": 0.0}, true)
 		"Steel", "Chrome":
 			if rusty:
 				made = Desert.weathered(Color(0.32, 0.25, 0.2), {"metallic_base": 0.3, "roughness_base": 0.8, "rust": 0.9, "dust": 0.3}, true)
+			elif title == "Steel":
+				# Painted pressed steel, chipped, brake-dusted and spotted with rust.
+				made = Desert.weathered(Color(0.3, 0.3, 0.29), {"metallic_base": 0.35, "roughness_base": 0.72, "rust": 0.25,
+					"dust": 0.55, "bleach": 0.2, "streaks": 0.25}, true)
 			else:
-				var metal := StandardMaterial3D.new()
-				metal.albedo_color = Color(0.6, 0.6, 0.58) if title == "Steel" else Color(0.85, 0.85, 0.83)
-				metal.metallic = 0.75 if title == "Steel" else 1.0
-				metal.roughness = 0.42 if title == "Steel" else 0.16
-				metal.cull_mode = BaseMaterial3D.CULL_DISABLED
-				made = metal
+				# Hubcaps and brightwork gone dull and milky, dust in the dish.
+				made = Desert.weathered(Color(0.5, 0.5, 0.48), {"metallic_base": 0.7, "roughness_base": 0.42, "rust": 0.08,
+					"dust": 0.4, "bleach": 0.1, "streaks": 0.2}, true)
 		"Gauge":
 			var dark := StandardMaterial3D.new()
 			dark.albedo_color = Color(0.03, 0.03, 0.03)

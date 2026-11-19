@@ -52,6 +52,13 @@ const COOLANT_RESERVOIR_MODEL := preload("res://assets/vehicles/parts/coolantres
 @export var throttle_fuel_burn_rate: float = 0.11
 @export var part_snap_distance: float = 1.35
 @export var start_with_random_body_color: bool = true
+## How long the car has stood in the sun (0 new, past 0.5 a rusting wreck).
+@export_range(0.0, 0.5) var car_wear := 0.42
+const BODY_COLORS: Array[Color] = [
+	Color("#6f8790"), Color("#4f6676"), Color("#5f7a63"), Color("#7b8a5c"), Color("#9a8a5e"),
+	Color("#a8916a"), Color("#c2b48f"), Color("#d0c7ad"), Color("#7a3d33"), Color("#8e5a3c"),
+	Color("#a5532f"), Color("#6b6d6a"), Color("#9c9d97"), Color("#5a5048"), Color("#3f4d45"),
+]
 @export var start_with_removed_panels: bool = true
 @export_range(0, 12, 1) var minimum_missing_starting_parts: int = 2
 @export_range(0, 12, 1) var maximum_missing_starting_parts: int = 4
@@ -153,7 +160,7 @@ func _ready() -> void:
 	_setup_snap_ghost_material()
 	_setup_sound_effects()
 	if wheel_model_root:
-		CarModel.new().build(wheel_model_root, body_style)
+		CarModel.new(Color("#728b85"), car_wear).build(wheel_model_root, body_style)
 		for title in ["SpeedNeedle", "RpmNeedle", "FuelNeedle"]:
 			dashboard_needles.append(wheel_model_root.find_child(title, true, false) as Node3D)
 	_setup_interactables()
@@ -1991,7 +1998,11 @@ func _apply_random_body_color() -> void:
 		rng.seed = hash(str(get_path()))
 	else:
 		rng.randomize()
-	var color := Color.from_hsv(rng.randf(), rng.randf_range(0.55, 0.9), rng.randf_range(0.45, 0.95), 1.0)
+	# Colours a car from the seventies or eighties would have left the factory
+	# in, then twenty summers of sun: muted, a little chalky, never candy.
+	var color: Color = BODY_COLORS[rng.randi_range(0, BODY_COLORS.size() - 1)]
+	color = Color.from_hsv(fposmod(color.h + rng.randf_range(-0.02, 0.02), 1.0), color.s * rng.randf_range(0.85, 1.1),
+		color.v * rng.randf_range(0.9, 1.08), 1.0)
 	paint_named_part("Chassis", color, 1.0)
 	for door_name in ["FL_Door", "FR_Door", "RL_Door", "RR_Door"]:
 		paint_named_part(door_name, color, 1.0)
@@ -2024,11 +2035,11 @@ func _apply_automotive_finish_recursive(node: Node, target_name: String) -> void
 		var mesh_instance := node as MeshInstance3D
 		if _is_paintable_mesh(mesh_instance, target_name):
 			var material := _get_or_create_paint_material(mesh_instance)
-			material.metallic = 0.24
-			material.roughness = 0.43
-			material.metallic_specular = 0.38
-			material.clearcoat_enabled = true
-			material.clearcoat_roughness = 0.38
+			# Old single-stage paint, flattened by the sun.
+			material.metallic = 0.04
+			material.roughness = 0.62
+			material.metallic_specular = 0.4
+			material.clearcoat_enabled = false
 
 	for child in node.get_children():
 		_apply_automotive_finish_recursive(child, target_name)

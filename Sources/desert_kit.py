@@ -36,7 +36,7 @@ COLORS = {
     "Yellow paint": (0.75, 0.58, 0.2), "Lamp": (0.9, 0.86, 0.75), "Stone": (0.34, 0.32, 0.29),
     "Bark": (0.25, 0.22, 0.18), "Scrub": (0.36, 0.34, 0.22), "Rock": (0.5, 0.42, 0.34),
     "Tin": (0.62, 0.62, 0.6), "Paper": (0.75, 0.7, 0.6), "Green paint": (0.18, 0.35, 0.24),
-    "Cactus": (0.32, 0.43, 0.27), "Grass": (0.62, 0.58, 0.36), "Leaves": (0.36, 0.42, 0.26), "Needles": (0.22, 0.33, 0.25),
+    "Cactus": (0.32, 0.43, 0.27), "Grass": (0.62, 0.58, 0.36), "Leaves": (0.36, 0.42, 0.26), "Needles": (0.22, 0.33, 0.25), "Dead wood": (0.5, 0.47, 0.42), "Pine bark": (0.3, 0.2, 0.15),
 }
 
 
@@ -195,7 +195,8 @@ def build_all(builds):
     for name, build in builds:
         reset()
         obj = build()
-        fix_normals(obj)
+        if not obj.get("keep_normals"):
+            fix_normals(obj)
         export([obj], name)
 
 

@@ -6,6 +6,9 @@ extends RefCounted
 
 const SURFACE := preload("res://assets/desert/weathered_surface.gdshader")
 const SHEET := preload("res://assets/desert/weathered_sheet.gdshader")
+const FOLIAGE := preload("res://assets/desert/foliage.gdshader")
+const LEAF_MASK := preload("res://assets/desert/foliage_leaves.png")
+const NEEDLE_MASK := preload("res://assets/desert/foliage_needles.png")
 const SHINGLES := preload("res://assets/salvage/shingles.gdshader")
 ## Board by board within this distance, the simpler shell beyond it.
 const NEAR_DETAIL := 28.0
@@ -40,6 +43,18 @@ static func weathered(color: Color, settings := {}, sheet := false) -> ShaderMat
 	made.set_shader_parameter("base_color", color)
 	for key: String in settings:
 		made.set_shader_parameter(key, settings[key])
+	return made
+
+
+static func foliage(color: Color, settings := {}) -> ShaderMaterial:
+	## Leaf and needle cards (assets/desert/foliage.gdshader).
+	var made := ShaderMaterial.new()
+	made.shader = FOLIAGE
+	made.set_shader_parameter("mask_tex", NEEDLE_MASK if settings.get("kind", 0) == 1 else LEAF_MASK)
+	made.set_shader_parameter("base_color", color)
+	for key: String in settings:
+		if key != "kind":
+			made.set_shader_parameter(key, settings[key])
 	return made
 
 
@@ -94,9 +109,13 @@ static func make_material(title: String) -> Material:
 		"Rock":
 			return weathered(Color(0.6, 0.48, 0.37), {"bleach": 0.35, "roughness_base": 0.95, "dust": 0.9, "streaks": 0.5})
 		"Bark":
-			return weathered(Color(0.32, 0.27, 0.22), {"bleach": 0.6, "wood_grain": 1.0, "roughness_base": 1.0})
+			return weathered(Color(0.24, 0.19, 0.15), {"bleach": 0.2, "wood_grain": 1.0, "roughness_base": 1.0, "streaks": 0.2, "dust": 0.3})
 		"Scrub":
-			return weathered(Color(0.42, 0.42, 0.26), {"bleach": 0.3, "roughness_base": 1.0, "dust": 0.6})
+			return foliage(Color(0.4, 0.41, 0.25), {"dry": 0.15, "crown_center": Vector3(0, 0.55, 0), "crown_size": Vector3(0.6, 0.45, 0.6), "sway": 0.015})
+		"Pine bark":
+			return weathered(Color(0.3, 0.19, 0.13), {"bleach": 0.15, "wood_grain": 1.0, "roughness_base": 1.0, "streaks": 0.1, "dust": 0.2})
+		"Dead wood":
+			return weathered(Color(0.3, 0.27, 0.23), {"bleach": 0.25, "wood_grain": 1.0, "roughness_base": 1.0, "streaks": 0.3})
 		"Cactus":
 			return weathered(Color(0.32, 0.43, 0.27), {"bleach": 0.35, "roughness_base": 0.8, "dust": 0.6})
 		"Grass":
@@ -104,9 +123,9 @@ static func make_material(title: String) -> Material:
 		"Green paint":
 			return weathered(Color(0.17, 0.33, 0.23), {"peel": 0.3, "under_color": Color(0.5, 0.5, 0.48), "bleach": 0.55, "streaks": 0.3, "dust": 0.2})
 		"Leaves":
-			return weathered(Color(0.36, 0.42, 0.26), {"bleach": 0.2, "roughness_base": 1.0, "dust": 0.0})
+			return foliage(Color(0.33, 0.4, 0.22), {"dry": 0.08, "crown_center": Vector3(0.2, 3.1, 0.1), "crown_size": Vector3(2.6, 1.1, 2.6)})
 		"Needles":
-			return weathered(Color(0.22, 0.33, 0.25), {"bleach": 0.15, "roughness_base": 1.0, "dust": 0.0})
+			return foliage(Color(0.2, 0.3, 0.21), {"kind": 1, "dry": 0.06, "dry_color": Color(0.42, 0.36, 0.22), "crown_center": Vector3(0, 3.4, 0), "crown_size": Vector3(1.7, 2.6, 1.7), "sway": 0.03})
 		"Paper":
 			return weathered(Color(0.76, 0.71, 0.6), {"bleach": 0.3, "dust": 0.0})
 		"Shutter":
